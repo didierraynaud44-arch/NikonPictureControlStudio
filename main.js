@@ -1,5 +1,6 @@
 
 const ExifReader = require("exifreader");
+const { readPictureControl } = require("./engine/pictureControl");
 const fs = require("fs");
 const { 
     app,
@@ -43,7 +44,7 @@ mainWindow = new BrowserWindow({
 	
 mainWindow.loadFile("renderer/index.html");
 
-mainWindow.webContents.openDevTools();
+
     // Décommenter pendant le développement
     mainWindow.webContents.openDevTools();
 
@@ -115,6 +116,10 @@ const info = await readNEF(filePath);
 const preview = await getPreview(filePath);
 
 info.preview = preview;
+
+const pictureControl = await readPictureControl(filePath);
+
+info.pictureControl = pictureControl;
 
 return info;
 });

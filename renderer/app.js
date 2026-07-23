@@ -14,8 +14,8 @@ button.addEventListener("click", async () => {
     const info = await window.electronAPI.openNEF();
 
 
-    console.log("Retour NEF :", info);
 
+console.log("Retour NEF :", JSON.stringify(info, null, 2));
 
     if (info) {
 
