@@ -9,7 +9,7 @@ const {
     dialog
 } = require("electron");
 const path = require('path');
-
+const { readNEF } = require("./engine/nefReader");
 let mainWindow = null;
 
 /**
@@ -75,6 +75,7 @@ Menu.setApplicationMenu(null);
 
     console.log("MENU INSTALLE :", Menu.getApplicationMenu() !== null);
 }
+
 ipcMain.handle("open-nef", async () => {
 
     const result = await dialog.showOpenDialog({
@@ -103,38 +104,16 @@ ipcMain.handle("open-nef", async () => {
 
     }
 
-const filePath = result.filePaths[0];
 
-const buffer = fs.readFileSync(filePath);
+    const filePath = result.filePaths[0];
 
-const tags = ExifReader.load(buffer, {
-    expanded: true
-});
+    const info = await readNEF(filePath);
 
-
-return {
-
-    path: filePath,
-
-    fileName: path.basename(filePath),
-
-    make: tags.exif?.Make?.description || "",
-
-    model: tags.exif?.Model?.description || "",
-
-    lens: tags.exif?.LensModel?.description || "",
-
-    iso: tags.exif?.ISOSpeedRatings?.description || "",
-
-    aperture: tags.exif?.FNumber?.description || "",
-
-    shutter: tags.exif?.ExposureTime?.description || "",
-
-    focal: tags.exif?.FocalLength?.description || ""
-
-};
+    return info;
 
 });
+
+
 /**
  * Au démarrage d'Electron
  */
