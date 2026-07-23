@@ -1,0 +1,22 @@
+{
+  "name": "nikon-picture-control-studio",
+  "version": "0.1.0",
+  "description": "Éditeur Nikon Picture Control",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "author": "Didier Raynaud",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "dependencies": {
+    "electron-store": "^10",
+    "exifreader": "^4",
+    "nikon-flexible-color-picture-control": "^1",
+    "sharp": "^0.34"
+  }
+}
