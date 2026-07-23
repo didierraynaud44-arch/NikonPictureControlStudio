@@ -15,15 +15,57 @@
 
 <h1>Nikon Picture Control Studio</h1>
 
-<button id="openNef">
-    📂 Ouvrir un NEF
-</button>
 
-<div id="status">
-    Aucun fichier chargé
+<div class="toolbar">
+
+    <button id="openNef">
+        📂 Ouvrir un NEF
+    </button>
+
 </div>
 
-<img id="previewImage" style="max-width:900px; margin-top:20px;">
+
+<div class="workspace">
+
+
+    <div class="photo-panel">
+
+        <h2>Aperçu</h2>
+
+        <img id="previewImage">
+
+    </div>
+
+
+
+    <div class="info-panel">
+
+        <h2>Informations NEF</h2>
+
+        <div id="status">
+            Aucun fichier chargé
+        </div>
+
+    </div>
+
+
+</div>
+
+
+
+<div class="picture-control-panel">
+
+    <h2>Picture Control Nikon</h2>
+
+    <button>Standard</button>
+    <button>Neutre</button>
+    <button>Vivid</button>
+    <button>Monochrome</button>
+    <button>Portrait</button>
+    <button>Paysage</button>
+
+</div>
+
 
 
 <script src="app.js"></script>
