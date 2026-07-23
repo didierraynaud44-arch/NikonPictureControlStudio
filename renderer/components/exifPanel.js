@@ -2,8 +2,6 @@ function updateExif(info) {
 
     document.getElementById("status").innerHTML = `
 
-        <h2>Informations NEF</h2>
-
         <p><b>Fichier :</b> ${info.fileName}</p>
 
         <p><b>Appareil :</b> ${info.make} ${info.model}</p>

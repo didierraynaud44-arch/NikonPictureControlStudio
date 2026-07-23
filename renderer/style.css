@@ -155,3 +155,62 @@ button:hover {
     margin-right: 10px;
 
 }
+/* ===========================================================
+   Picture Control Editor
+   =========================================================== */
+
+.pc-row {
+
+    margin-top: 18px;
+
+}
+
+.pc-label {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    margin-bottom: 6px;
+
+    font-weight: bold;
+
+}
+
+.pc-value {
+
+    width: 40px;
+
+    text-align: right;
+
+    color: #8ec5ff;
+
+}
+
+.pc-slider {
+
+    width: 100%;
+
+    cursor: pointer;
+
+}
+
+.pc-select {
+
+    width: 100%;
+
+    padding: 8px;
+
+    background: #3a3a3a;
+
+    color: white;
+
+    border: 1px solid #666;
+
+    border-radius: 5px;
+
+    font-size: 14px;
+
+}
