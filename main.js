@@ -12,6 +12,7 @@ const path = require('path');
 const { readNEF } = require("./engine/nefReader");
 let mainWindow = null;
 
+const { getPreview } = require("./engine/nefPreview");
 /**
  * Création de la fenêtre principale
  */
@@ -39,7 +40,10 @@ mainWindow = new BrowserWindow({
 
 });
     mainWindow.loadFile("renderer/index.html");
+	
+mainWindow.loadFile("renderer/index.html");
 
+mainWindow.webContents.openDevTools();
     // Décommenter pendant le développement
     mainWindow.webContents.openDevTools();
 
@@ -104,13 +108,15 @@ ipcMain.handle("open-nef", async () => {
 
     }
 
+const filePath = result.filePaths[0];
 
-    const filePath = result.filePaths[0];
+const info = await readNEF(filePath);
 
-    const info = await readNEF(filePath);
+const preview = await getPreview(filePath);
 
-    return info;
+info.preview = preview;
 
+return info;
 });
 
 
