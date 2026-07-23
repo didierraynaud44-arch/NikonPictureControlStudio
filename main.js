@@ -1,4 +1,10 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { 
+    app,
+    BrowserWindow,
+    Menu,
+    ipcMain,
+    dialog
+} = require("electron");
 const path = require('path');
 
 let mainWindow = null;
@@ -66,7 +72,38 @@ Menu.setApplicationMenu(null);
 
     console.log("MENU INSTALLE :", Menu.getApplicationMenu() !== null);
 }
+ipcMain.handle("open-nef", async () => {
 
+    const result = await dialog.showOpenDialog({
+
+        title: "Choisir un fichier Nikon NEF",
+
+        properties: [
+            "openFile"
+        ],
+
+        filters: [
+            {
+                name: "Images Nikon RAW",
+                extensions: [
+                    "nef"
+                ]
+            }
+        ]
+
+    });
+
+
+    if (result.canceled) {
+
+        return null;
+
+    }
+
+
+    return result.filePaths[0];
+
+});
 /**
  * Au démarrage d'Electron
  */
