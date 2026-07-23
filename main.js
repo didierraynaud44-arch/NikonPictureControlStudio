@@ -1,3 +1,6 @@
+
+const ExifReader = require("exifreader");
+const fs = require("fs");
 const { 
     app,
     BrowserWindow,
@@ -100,8 +103,36 @@ ipcMain.handle("open-nef", async () => {
 
     }
 
+const filePath = result.filePaths[0];
 
-    return result.filePaths[0];
+const buffer = fs.readFileSync(filePath);
+
+const tags = ExifReader.load(buffer, {
+    expanded: true
+});
+
+
+return {
+
+    path: filePath,
+
+    fileName: path.basename(filePath),
+
+    make: tags.exif?.Make?.description || "",
+
+    model: tags.exif?.Model?.description || "",
+
+    lens: tags.exif?.LensModel?.description || "",
+
+    iso: tags.exif?.ISOSpeedRatings?.description || "",
+
+    aperture: tags.exif?.FNumber?.description || "",
+
+    shutter: tags.exif?.ExposureTime?.description || "",
+
+    focal: tags.exif?.FocalLength?.description || ""
+
+};
 
 });
 /**

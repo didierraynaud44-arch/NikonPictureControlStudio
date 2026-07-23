@@ -7,15 +7,30 @@ const button = document.getElementById("openNef");
 button.addEventListener("click", async () => {
 
 
-    const file = await window.electronAPI.openNEF();
+    const info = await window.electronAPI.openNEF();
 
 
-    if (file) {
+    if (info) {
 
-        document.getElementById("status").innerText =
-            "Fichier sélectionné :\n" + file;
+        document.getElementById("status").innerHTML = `
 
-        console.log(file);
+        <h2>Informations NEF</h2>
+
+        <p><b>Fichier :</b> ${info.fileName}</p>
+
+        <p><b>Appareil :</b> ${info.make} ${info.model}</p>
+
+        <p><b>Objectif :</b> ${info.lens}</p>
+
+        <p><b>ISO :</b> ${info.iso}</p>
+
+<p><b>Ouverture :</b> ${info.aperture}</p>
+
+        <p><b>Vitesse :</b> ${info.shutter}</p>
+
+        <p><b>Focale :</b> ${info.focal}</p>
+
+        `;
 
     }
 
