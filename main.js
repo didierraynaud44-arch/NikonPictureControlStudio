@@ -1,23 +1,74 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 
-function createWindow() {
+let mainWindow = null;
 
-    const win = new BrowserWindow({
+/**
+ * Création de la fenêtre principale
+ */
+function createMainWindow() {
 
-        width: 1700,
-        height: 1000,
+    mainWindow = new BrowserWindow({
+
+        width: 1600,
+        height: 950,
+
+        minWidth: 1200,
+        minHeight: 800,
+
+        title: "Nikon Picture Control Studio",
+
+        backgroundColor: "#202124",
+
+        autoHideMenuBar: false,
 
         webPreferences: {
 
-            preload: path.join(__dirname, 'preload.js')
+            preload: path.join(__dirname, "preload.js"),
+
+            contextIsolation: true,
+
+            nodeIntegration: false
 
         }
 
     });
 
-    win.loadFile('renderer/index.html');
+    mainWindow.loadFile("renderer/index.html");
+
+    // Décommenter pendant le développement
+    // mainWindow.webContents.openDevTools();
 
 }
 
-app.whenReady().then(createWindow);
+
+/**
+ * Au démarrage d'Electron
+ */
+app.whenReady().then(() => {
+
+    createMainWindow();
+
+});
+
+
+/**
+ * Fermeture
+ */
+app.on("window-all-closed", () => {
+
+    if (process.platform !== "darwin")
+        app.quit();
+
+});
+
+
+/**
+ * macOS
+ */
+app.on("activate", () => {
+
+    if (BrowserWindow.getAllWindows().length === 0)
+        createMainWindow();
+
+});
