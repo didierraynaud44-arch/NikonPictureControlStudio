@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 
 let mainWindow = null;
@@ -7,47 +7,77 @@ let mainWindow = null;
  * Création de la fenêtre principale
  */
 function createMainWindow() {
+mainWindow = new BrowserWindow({
 
-    mainWindow = new BrowserWindow({
+    width: 1600,
+    height: 950,
 
-        width: 1600,
-        height: 950,
+    minWidth: 1200,
+    minHeight: 800,
 
-        minWidth: 1200,
-        minHeight: 800,
+    title: "Nikon Picture Control Studio",
 
-        title: "Nikon Picture Control Studio",
+    backgroundColor: "#202124",
 
-        backgroundColor: "#202124",
+    frame: true,
+    autoHideMenuBar: false,
 
-        autoHideMenuBar: false,
+    webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false
+    }
 
-        webPreferences: {
-
-            preload: path.join(__dirname, "preload.js"),
-
-            contextIsolation: true,
-
-            nodeIntegration: false
-
-        }
-
-    });
-
+});
     mainWindow.loadFile("renderer/index.html");
 
     // Décommenter pendant le développement
-    // mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools();
 
 }
+function createAppMenu() {
 
+    const menuTemplate = [
+        {
+            label: "Fichier",
+            submenu: [
+                {
+                    label: "Test menu",
+                    click: () => {
+                        console.log("MENU OK");
+                    }
+                },
+                {
+                    type: "separator"
+                },
+                {
+                    label: "Quitter",
+                    click: () => {
+                        app.quit();
+                    }
+                }
+            ]
+        }
+    ];
+
+    const menu = Menu.buildFromTemplate(menuTemplate);
+
+Menu.setApplicationMenu(null);
+
+    console.log("MENU INSTALLE :", Menu.getApplicationMenu() !== null);
+}
 
 /**
  * Au démarrage d'Electron
  */
 app.whenReady().then(() => {
 
+    createAppMenu();
+
     createMainWindow();
+
+    mainWindow.show();
+    mainWindow.focus();
 
 });
 
