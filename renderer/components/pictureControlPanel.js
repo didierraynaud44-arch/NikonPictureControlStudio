@@ -1,103 +1,108 @@
+
+let originalPictureControl = null;
+
+
+/*=========================================================
+    Construction du panneau
+=========================================================*/
+
 function updatePictureControl(info) {
 
-    const pc = document.getElementById("pictureControlStatus");
+    const panel = document.getElementById("pictureControlStatus");
 
-    if (!pc) {
-        console.error("Zone Picture Control introuvable");
+    if (!panel)
         return;
-    }
-
 
     if (!info.pictureControl) {
 
-        pc.innerHTML = "Aucun Picture Control détecté.";
+        panel.innerHTML = "Aucun Picture Control détecté.";
 
         return;
+
     }
 
+    originalPictureControl = structuredClone(info.pictureControl);
 
-    const data = info.pictureControl;
-console.log("Picture Control :", data);
+    const pc = info.pictureControl;
 
-    pc.innerHTML = `
+    panel.innerHTML = `
 
         <h2>Picture Control Nikon</h2>
-
 
         <div class="pc-row">
 
             <div class="pc-label">
+
                 <span>Nom</span>
+
             </div>
 
-            <select class="pc-select" id="pc-name">
+            <select id="pc-name" class="pc-select">
 
-                <option ${data.name === "Neutral" ? "selected" : ""}>
-                    Neutral
-                </option>
+                <option ${pc.name==="Standard"?"selected":""}>Standard</option>
 
-                <option ${data.name === "Standard" ? "selected" : ""}>
-                    Standard
-                </option>
+                <option ${pc.name==="Neutral"?"selected":""}>Neutral</option>
 
-                <option ${data.name === "Vivid" ? "selected" : ""}>
-                    Vivid
-                </option>
+                <option ${pc.name==="Vivid"?"selected":""}>Vivid</option>
 
-                <option ${data.name === "Monochrome" ? "selected" : ""}>
-                    Monochrome
-                </option>
+                <option ${pc.name==="Monochrome"?"selected":""}>Monochrome</option>
 
             </select>
 
         </div>
 
+        ${createSlider("Netteté","sharpning",pc.sharpning,-3,9)}
 
-      ${createSlider("Netteté", "sharpness", 0, -3, 9)}
+        ${createSlider("Netteté moyenne","midRangeSharpning",pc.midRangeSharpning,-5,5)}
 
-${createSlider("Contraste", "contrast", 0, -3, 3)}
+        ${createSlider("Clarté","clarity",pc.clarity,-5,5)}
 
-${createSlider("Luminosité", "brightness", 0, -1, 1)}
+        ${createSlider("Contraste","contrast",pc.contrast,-3,3)}
 
-${createSlider("Saturation", "saturation", 0, -3, 3)}
+        ${createSlider("Hautes lumières","highlights",pc.highlights,-5,5)}
 
-${createSlider("Teinte", "hue", 0, -3, 3)}
+        ${createSlider("Ombres","shadows",pc.shadows,-5,5)}
 
+        ${createSlider("Saturation","saturation",pc.saturation,-3,3)}
 
         <br>
 
         <button id="resetPC">
+
             Réinitialiser
+
         </button>
 
     `;
 
-
-    activateSliders();
+    activateSliders(pc);
 
 }
 
 
-function createSlider(label, id, value, min, max) {
+/*=========================================================
+    Création d'un curseur
+=========================================================*/
 
+function createSlider(label,id,value,min,max){
 
     return `
 
     <div class="pc-row">
 
-
         <div class="pc-label">
 
             <span>${label}</span>
 
-            <span 
-            class="pc-value" 
-            id="${id}-value">
+            <span
+                class="pc-value"
+                id="${id}-value">
+
                 ${value}
+
             </span>
 
         </div>
-
 
         <input
 
@@ -124,31 +129,45 @@ function createSlider(label, id, value, min, max) {
 }
 
 
-function activateSliders() {
+/*=========================================================
+    Activation des événements
+=========================================================*/
 
+function activateSliders(pc){
 
-    const sliders = document.querySelectorAll(".pc-slider");
+    document.querySelectorAll(".pc-slider").forEach(slider=>{
 
+        slider.addEventListener("input",()=>{
 
-    sliders.forEach(slider => {
-
-
-        slider.addEventListener("input", () => {
-
+            const value=Number(slider.value);
 
             document.getElementById(
-                slider.id + "-value"
-            ).innerHTML = slider.value;
+                slider.id+"-value"
+            ).textContent=value;
 
+            pc[slider.id]=value;
+
+            console.log(
+                slider.id,
+                "=",
+                value
+            );
 
         });
 
-
     });
 
+    document.getElementById("resetPC").addEventListener("click",()=>{
+
+        updatePictureControl({
+
+            pictureControl: structuredClone(originalPictureControl)
+
+        });
+
+    });
 
 }
 
 
-
-window.updatePictureControl = updatePictureControl;
+window.updatePictureControl=updatePictureControl;

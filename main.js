@@ -1,85 +1,127 @@
 
-const ExifReader = require("exifreader");
-const { readPictureControl } = require("./engine/pictureControl");
-const fs = require("fs");
-const { 
+const pictureControlEngine = require("./services/pictureControlEngine");
+const {
     app,
     BrowserWindow,
     Menu,
     ipcMain,
     dialog
 } = require("electron");
-const path = require('path');
+
+const path = require("path");
+
 const { readNEF } = require("./engine/nefReader");
+const { getPreview } = require("./engine/nefPreview");
+const { readPictureControl } = require("./engine/pictureControl");
+
+const { loadNP3 } = require("./services/np3Manager");
+
 let mainWindow = null;
 
-const { getPreview } = require("./engine/nefPreview");
-/**
- * Création de la fenêtre principale
- */
+
+/* =======================================================
+   Fenêtre principale
+======================================================= */
+
 function createMainWindow() {
-mainWindow = new BrowserWindow({
 
-    width: 1600,
-    height: 950,
+    mainWindow = new BrowserWindow({
 
-    minWidth: 1200,
-    minHeight: 800,
+        width: 1600,
+        height: 950,
 
-    title: "Nikon Picture Control Studio",
+        minWidth: 1200,
+        minHeight: 800,
 
-    backgroundColor: "#202124",
+        title: "Nikon Picture Control Studio",
 
-    frame: true,
-    autoHideMenuBar: false,
+        backgroundColor: "#202124",
 
-    webPreferences: {
-        preload: path.join(__dirname, "preload.js"),
-        contextIsolation: true,
-        nodeIntegration: false
-    }
+        webPreferences: {
 
-});
+            preload: path.join(__dirname, "preload.js"),
+
+            contextIsolation: true,
+
+            nodeIntegration: false
+
+        }
+
+    });
+
     mainWindow.loadFile("renderer/index.html");
-	
-mainWindow.loadFile("renderer/index.html");
 
-
-    // Décommenter pendant le développement
     mainWindow.webContents.openDevTools();
 
 }
+
+
+/* =======================================================
+   Menu
+======================================================= */
+
 function createAppMenu() {
 
-    const menuTemplate = [
+    const menu = Menu.buildFromTemplate([
+
         {
+
             label: "Fichier",
+
             submenu: [
+
                 {
-                    label: "Test menu",
+
+                    label: "Ouvrir un NEF",
+
                     click: () => {
-                        console.log("MENU OK");
+
+                        mainWindow.webContents.send("menu-open-nef");
+
                     }
+
                 },
+
                 {
+
+                    label: "Charger un Picture Control (.NP3)",
+
+                    click: () => {
+
+                        mainWindow.webContents.send("menu-open-np3");
+
+                    }
+
+                },
+
+                {
+
                     type: "separator"
+
                 },
+
                 {
+
                     label: "Quitter",
-                    click: () => {
-                        app.quit();
-                    }
+
+                    click: () => app.quit()
+
                 }
+
             ]
+
         }
-    ];
 
-    const menu = Menu.buildFromTemplate(menuTemplate);
+    ]);
 
-Menu.setApplicationMenu(null);
+    Menu.setApplicationMenu(menu);
 
-    console.log("MENU INSTALLE :", Menu.getApplicationMenu() !== null);
 }
+
+
+/* =======================================================
+   Ouvrir un NEF
+======================================================= */
 
 ipcMain.handle("open-nef", async () => {
 
@@ -87,76 +129,128 @@ ipcMain.handle("open-nef", async () => {
 
         title: "Choisir un fichier Nikon NEF",
 
-        properties: [
-            "openFile"
-        ],
+        properties: ["openFile"],
+
+        filters: [
+
+            {
+
+                name: "Nikon RAW",
+
+                extensions: ["nef"]
+
+            }
+
+        ]
+
+    });
+
+    if (result.canceled)
+        return null;
+
+    const filePath = result.filePaths[0];
+
+    const info = await readNEF(filePath);
+
+    info.preview = await getPreview(filePath);
+
+ const pictureControl = await readPictureControl(filePath);
+
+pictureControlEngine.load(pictureControl);
+
+info.pictureControl = pictureControlEngine.get();
+
+return info;
+
+});
+
+
+/* =======================================================
+   Charger un NP3
+======================================================= */
+
+ipcMain.handle("loadNP3", async () => {
+
+    const result = await dialog.showOpenDialog({
+
+        title: "Charger un Picture Control",
+
+        properties: ["openFile"],
 
         filters: [
             {
-                name: "Images Nikon RAW",
-                extensions: [
-                    "nef"
-                ]
+                name: "Picture Control Nikon",
+                extensions: ["np3"]
             }
         ]
 
     });
 
-
-    if (result.canceled) {
-
+    if (result.canceled)
         return null;
 
-    }
+    const pc = await loadNP3(result.filePaths[0]);
 
-const filePath = result.filePaths[0];
+    pictureControlEngine.load(pc);
 
-const info = await readNEF(filePath);
+    return pictureControlEngine.get();
 
-const preview = await getPreview(filePath);
-
-info.preview = preview;
-
-const pictureControl = await readPictureControl(filePath);
-
-info.pictureControl = pictureControl;
-
-return info;
 });
 
+/* =======================================================
+   Electron
+======================================================= */
 
-/**
- * Au démarrage d'Electron
- */
 app.whenReady().then(() => {
-
-    createAppMenu();
 
     createMainWindow();
 
-    mainWindow.show();
-    mainWindow.focus();
+    createAppMenu();
 
 });
 
 
-/**
- * Fermeture
- */
 app.on("window-all-closed", () => {
 
     if (process.platform !== "darwin")
+
         app.quit();
 
 });
 
 
-/**
- * macOS
- */
 app.on("activate", () => {
 
     if (BrowserWindow.getAllWindows().length === 0)
+
         createMainWindow();
+
+});
+
+/*=========================================================
+    Picture Control Engine
+=========================================================*/
+
+ipcMain.handle("pc-get", () => {
+
+    return pictureControlEngine.get();
+
+});
+
+
+ipcMain.handle("pc-update", (event, property, value) => {
+
+    pictureControlEngine.update(property, value);
+
+    return pictureControlEngine.get();
+
+});
+
+
+ipcMain.handle("pc-reset", () => {
+
+    pictureControlEngine.reset();
+
+    return pictureControlEngine.get();
 
 });

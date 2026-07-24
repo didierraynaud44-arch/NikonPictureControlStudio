@@ -1,26 +1,48 @@
 console.log("Nikon Picture Control Studio");
 
-const button = document.getElementById("openNef");
+//==============================
+// Bouton Ouvrir NEF
+//==============================
 
-console.log("Bouton trouvé :", button);
+const button = document.getElementById("openNef");
 
 button.addEventListener("click", async () => {
 
-    console.log("Bouton NEF cliqué");
+    console.log("Bouton NEF");
 
     const info = await window.electronAPI.openNEF();
 
-    console.log("Retour NEF :", JSON.stringify(info, null, 2));
-
-    if (!info) {
+    if (!info)
         return;
-    }
 
-    // Mise à jour des différents panneaux
     updateExif(info);
 
     updatePreview(info);
 
     updatePictureControl(info);
+
+});
+
+
+//==============================
+// Bouton Import NP3
+//==============================
+
+const np3Button = document.getElementById("openNP3");
+
+np3Button.addEventListener("click", async () => {
+
+    console.log("Import NP3");
+
+    const pc = await window.electronAPI.loadNP3();
+
+    if (!pc)
+        return;
+
+    console.log(pc);
+
+    updatePictureControl({
+        pictureControl: pc
+    });
 
 });
