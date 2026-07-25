@@ -40,25 +40,28 @@ function getOriginal() {
 function update(property, value) {
 
     if (!currentPictureControl)
-        return;
+        return null;
 
     currentPictureControl[property] = value;
 
-}
+    return currentPictureControl;
 
+}
 
 /**
  * Remise à zéro
  */
+
 function reset() {
 
     if (!originalPictureControl)
-        return;
+        return null;
 
     currentPictureControl = structuredClone(originalPictureControl);
 
-}
+    return currentPictureControl;
 
+}
 
 /**
  * Vérifie si un Picture Control est chargé

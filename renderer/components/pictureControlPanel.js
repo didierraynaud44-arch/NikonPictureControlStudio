@@ -1,6 +1,4 @@
-
 let originalPictureControl = null;
-
 
 /*=========================================================
     Construction du panneau
@@ -15,7 +13,7 @@ function updatePictureControl(info) {
 
     if (!info.pictureControl) {
 
-        panel.innerHTML = "Aucun Picture Control détecté.";
+        panel.innerHTML = "Aucun Picture Control chargé.";
 
         return;
 
@@ -28,28 +26,6 @@ function updatePictureControl(info) {
     panel.innerHTML = `
 
         <h2>Picture Control Nikon</h2>
-
-        <div class="pc-row">
-
-            <div class="pc-label">
-
-                <span>Nom</span>
-
-            </div>
-
-            <select id="pc-name" class="pc-select">
-
-                <option ${pc.name==="Standard"?"selected":""}>Standard</option>
-
-                <option ${pc.name==="Neutral"?"selected":""}>Neutral</option>
-
-                <option ${pc.name==="Vivid"?"selected":""}>Vivid</option>
-
-                <option ${pc.name==="Monochrome"?"selected":""}>Monochrome</option>
-
-            </select>
-
-        </div>
 
         ${createSlider("Netteté","sharpning",pc.sharpning,-3,9)}
 
@@ -65,23 +41,21 @@ function updatePictureControl(info) {
 
         ${createSlider("Saturation","saturation",pc.saturation,-3,3)}
 
-        <br>
+        <br><br>
 
         <button id="resetPC">
-
             Réinitialiser
-
         </button>
 
     `;
 
-    activateSliders(pc);
+    activateSliders();
 
 }
 
 
 /*=========================================================
-    Création d'un curseur
+    Curseur
 =========================================================*/
 
 function createSlider(label,id,value,min,max){
@@ -94,9 +68,7 @@ function createSlider(label,id,value,min,max){
 
             <span>${label}</span>
 
-            <span
-                class="pc-value"
-                id="${id}-value">
+            <span class="pc-value" id="${id}-value">
 
                 ${value}
 
@@ -130,28 +102,29 @@ function createSlider(label,id,value,min,max){
 
 
 /*=========================================================
-    Activation des événements
+    Evènements
 =========================================================*/
 
-function activateSliders(pc){
+function activateSliders(){
 
     document.querySelectorAll(".pc-slider").forEach(slider=>{
 
-        slider.addEventListener("input",()=>{
+        slider.addEventListener("input", async ()=>{
 
-            const value=Number(slider.value);
+            const value = Number(slider.value);
 
             document.getElementById(
                 slider.id+"-value"
-            ).textContent=value;
+            ).textContent = value;
 
-            pc[slider.id]=value;
-
-            console.log(
+            const pc = await window.electronAPI.updatePC(
                 slider.id,
-                "=",
                 value
             );
+
+            window.imageProcessor.setPictureControl(pc);
+
+            console.log(pc);
 
         });
 
@@ -169,5 +142,4 @@ function activateSliders(pc){
 
 }
 
-
-window.updatePictureControl=updatePictureControl;
+window.updatePictureControl = updatePictureControl;

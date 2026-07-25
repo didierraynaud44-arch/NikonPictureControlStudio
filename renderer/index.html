@@ -30,15 +30,13 @@
 
 <div class="workspace">
 
-
     <div class="photo-panel">
 
         <h2>Aperçu</h2>
 
-        <img id="previewImage">
+        <canvas id="previewCanvas"></canvas>
 
     </div>
-
 
 
     <div class="info-panel">
@@ -46,24 +44,33 @@
         <h2>Informations NEF</h2>
 
         <div id="status">
+
             Aucun fichier chargé
+
         </div>
 
     </div>
 
-
 </div>
-
 
 
 <div class="picture-control-panel">
 
-
     <div id="pictureControlStatus">
+
         Aucun Picture Control chargé
+
     </div>
 
 </div>
+
+
+<script src="core/ImageBuffer.js"></script>
+<script src="core/DisplayCanvas.js"></script>
+
+<script src="filters/Contrast.js"></script>
+
+<script src="core/ImageProcessor.js"></script>
 
 <script src="components/exifPanel.js"></script>
 <script src="components/previewPanel.js"></script>

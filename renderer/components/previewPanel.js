@@ -1,18 +1,9 @@
-function updatePreview(info) {
+async function updatePreview(info) {
 
-    const image = document.getElementById("previewImage");
+    if (!info.preview)
+        return;
 
-    if (info.preview) {
-
-        image.src = info.preview;
-
-    } else {
-
-        image.removeAttribute("src");
-
-        image.alt = "Aucun aperçu";
-
-    }
+    await window.imageProcessor.load(info.preview);
 
 }
 
