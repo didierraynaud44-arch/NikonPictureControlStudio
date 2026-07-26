@@ -7,6 +7,20 @@ class ImageProcessor {
 
         this.pictureControl = null;
 
+        this.pipeline = new RenderPipeline();
+
+        // Liste des filtres
+
+this.pipeline.add(new ContrastFilter());
+this.pipeline.add(new HighlightsFilter());
+this.pipeline.add(new ShadowsFilter());
+this.pipeline.add(new SaturationFilter());
+this.pipeline.add(new ClarityFilter());
+this.pipeline.add(new SharpenFilter());
+this.pipeline.add(new MidRangeSharpenFilter());
+this.pipeline.add(new ToneCurveFilter());
+this.pipeline.add(new ColorBlenderFilter());
+this.pipeline.add(new ColorGradingFilter());
     }
 
     async load(src) {
@@ -32,27 +46,24 @@ class ImageProcessor {
 
     }
 
+    render() {
 
-render() {
+        if (this.buffer.getWidth() === 0)
+            return;
 
-    console.log("Render appelé");
+        let imageData = this.buffer.getImageData();
 
-    let imageData = this.buffer.getImageData();
+        imageData = this.pipeline.process(
 
-    if (this.pictureControl) {
-
-        console.log("Contraste :", this.pictureControl.contrast);
-
-        imageData = ContrastFilter.apply(
             imageData,
-            this.pictureControl.contrast * 30
+            this.pictureControl
+
         );
+
+        this.display.draw(imageData);
 
     }
 
-    this.display.draw(imageData);
-
-}
 }
 
 window.imageProcessor = new ImageProcessor("previewCanvas");
