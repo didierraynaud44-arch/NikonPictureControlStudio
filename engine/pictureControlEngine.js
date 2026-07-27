@@ -1,34 +1,35 @@
-let currentPC = null;
+const ToneCurve = require("./ToneCurve");
 
-function setPC(pc) {
+class PictureControlEngine {
 
-    currentPC = structuredClone(pc);
+    static build(pictureControl) {
 
-    return currentPC;
+        return {
+
+            toneCurve: ToneCurve.build(pictureControl),
+
+            contrast: pictureControl.contrast,
+
+            highlights: pictureControl.highlights,
+
+            shadows: pictureControl.shadows,
+
+            saturation: pictureControl.saturation,
+
+            clarity: pictureControl.clarity,
+
+            sharpen: pictureControl.sharpness,
+
+            midRangeSharpen: pictureControl.midRangeSharpen,
+
+            colorBlender: pictureControl.colorBlender,
+
+            colorGrading: pictureControl.colorGrading
+
+        };
+
+    }
 
 }
 
-function getPC() {
-
-    return currentPC;
-
-}
-
-function updatePC(property, value) {
-
-    if (!currentPC)
-        return null;
-
-    currentPC[property] = value;
-
-    return currentPC;
-
-}
-
-module.exports = {
-
-    setPC,
-    getPC,
-    updatePC
-
-};
+module.exports = PictureControlEngine;

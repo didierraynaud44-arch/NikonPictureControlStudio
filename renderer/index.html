@@ -1,93 +1,73 @@
 <!DOCTYPE html>
 <html lang="fr">
-
 <head>
-
-<meta charset="UTF-8">
-
-<title>Nikon Picture Control Studio</title>
-
-<link rel="stylesheet" href="style.css">
-
+    <meta charset="UTF-8">
+    <title>Nikon Picture Control Studio</title>
+    <link rel="stylesheet" href="style.css">
 </head>
-
 <body>
 
-<h1>Nikon Picture Control Studio</h1>
-
-<div class="toolbar">
-
-    <button id="openNef">
-        📂 Ouvrir un NEF
-    </button>
-
-    <button id="openNP3">
-        📥 Importer un NP3
-    </button>
-
-</div>
-
-
-<div class="workspace">
-
-    <div class="photo-panel">
-
-        <h2>Aperçu</h2>
-
-        <canvas id="previewCanvas"></canvas>
-
-    </div>
-
-
-    <div class="info-panel">
-
-        <h2>Informations NEF</h2>
-
-        <div id="status">
-
-            Aucun fichier chargé
-
+    <!-- 1. En-tête haut -->
+    <header class="app-header">
+        <h1>Nikon Picture Control Studio</h1>
+        <div class="header-buttons">
+            <button id="openNef">📂 Ouvrir un NEF</button>
+            <button id="openNP3">🎛️ Importer un NP3</button>
         </div>
+    </header>
 
-    </div>
+    <!-- 2. Zone principale (2 colonnes) -->
+    <main class="app-main">
+        
+        <!-- Zone de gauche : Image Canvas -->
+        <section class="preview-panel">
+            <h2>Aperçu</h2>
+            <div class="canvas-container">
+                <canvas id="previewCanvas"></canvas>
+            </div>
+        </section>
 
-</div>
+        <!-- Zone de droite : EXIF + Curseurs -->
+        <aside class="sidebar-panel">
+            
+            <!-- EXIF -->
+            <div id="exifInfo" class="card-panel">
+                <h3>Informations NEF</h3>
+                <!-- Généré par JS -->
+            </div>
 
+            <!-- Curseurs -->
+            <div id="pictureControlStatus" class="card-panel">
+                <!-- Généré par pictureControlPanel.js -->
+            </div>
 
-<div class="picture-control-panel">
+        </aside>
 
-    <div id="pictureControlStatus">
+    </main>
 
-        Aucun Picture Control chargé
+    <!-- 1. Moteur & Classe de Base dans core/ -->
+    <script src="core/ImageBuffer.js"></script>
+    <script src="core/DisplayCanvas.js"></script>
+    <script src="core/RenderPipeline.js"></script>
+    <script src="core/BaseFilter.js"></script>
 
-    </div>
+    <!-- 2. Filtres spécifiques dans filters/ -->
+    <script src="filters/ContrastFilter.js"></script>
+    <script src="filters/HighlightsFilter.js"></script>
+    <script src="filters/ShadowsFilter.js"></script>
+    <script src="filters/SaturationFilter.js"></script>
+    <script src="filters/SharpenFilter.js"></script>
+    <script src="filters/MidRangeSharpenFilter.js"></script>
+    <script src="filters/ClarityFilter.js"></script> <!-- 👈 AJOUTÉ ICI -->
+    
+    <!-- 3. Filtres additionnels -->
+    <script src="filters/ToneCurveFilter.js"></script>
+    <script src="filters/ColorBlenderFilter.js"></script>
+	<script src="filters/ColorGradingFilter.js"></script> <!-- 👈 À vérifier dans ton HTML -->
 
-</div>
-
-
-<script src="core/ImageBuffer.js"></script>
-<script src="core/DisplayCanvas.js"></script>
-
-<script src="core/RenderPipeline.js"></script>
-<script src="core/BaseFilter.js"></script>
-<script src="filters/ContrastFilter.js"></script>
-<script src="filters/HighlightsFilter.js"></script>
-<script src="filters/ShadowsFilter.js"></script>
-<script src="filters/SaturationFilter.js"></script>
-<script src="filters/ClarityFilter.js"></script>
-<script src="filters/SharpenFilter.js"></script>
-<script src="filters/MidRangeSharpenFilter.js"></script>
-<script src="filters/ToneCurveFilter.js"></script>
-<script src="filters/ColorBlenderFilter.js"></script>
-<script src="filters/ColorGradingFilter.js"></script>
+    <!-- 4. Processeur et application -->
+    <script src="core/ImageProcessor.js"></script>
+    <script src="components/pictureControlPanel.js"></script>
+    <script src="app.js"></script>
 </body>
-<script src="core/ImageProcessor.js"></script>
-
-<script src="components/exifPanel.js"></script>
-<script src="components/previewPanel.js"></script>
-<script src="components/pictureControlPanel.js"></script>
-<script src="app.js"></script>
-
-
-
 </html>

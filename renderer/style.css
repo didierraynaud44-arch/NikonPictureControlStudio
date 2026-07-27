@@ -1,220 +1,120 @@
-body {
-
+/* --- Réinitialisation de base --- */
+* {
+    box-sizing: border-box;
     margin: 0;
     padding: 0;
-
-    background: #202124;
-    color: white;
-
-    font-family: Arial, sans-serif;
-
 }
 
-
-/* Titre */
-
-h1 {
-
-    margin: 20px;
-    text-align: center;
-
+html, body {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden; /* Pas de scrollbar globale */
+    background-color: #1a1a1a;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-
-
-/* Barre outils */
-
-.toolbar {
-
+/* --- Header --- */
+.app-header {
     height: 60px;
-
-    background: #303134;
-
+    background-color: #111;
     display: flex;
     align-items: center;
-
-    padding-left: 20px;
-
+    justify-content: space-between;
+    padding: 0 20px;
+    border-bottom: 1px solid #333;
 }
 
-
-
-/* Boutons */
-
-button {
-
-    padding: 10px 18px;
-
-    font-size: 14px;
-
+.header-buttons button {
+    background-color: #333;
+    color: #fff;
+    border: 1px solid #555;
+    padding: 8px 14px;
+    border-radius: 4px;
     cursor: pointer;
-
-    background: #444;
-
-    color: white;
-
-    border: 1px solid #666;
-
-    border-radius: 5px;
-
+    margin-left: 8px;
 }
 
-
-button:hover {
-
-    background: #666;
-
+.header-buttons button:hover {
+    background-color: #444;
 }
 
-
-
-/* Zone principale */
-
-.workspace {
-
+/* --- Disposition principale (Flexbox 2 colonnes) --- */
+.app-main {
     display: flex;
-
-    gap: 20px;
-
-    padding: 20px;
-
+    height: calc(100vh - 60px); /* Toute la hauteur restante sous le header */
+    width: 100%;
 }
 
-
-
-/* Panneau image */
-
-.photo-panel {
-
-    flex: 2;
-
-    background: #2b2b2b;
-
-    border-radius: 8px;
-
+/* --- Colonne Gauche : Aperçu --- */
+.preview-panel {
+    flex: 1; /* Prend tout l'espace disponible */
+    display: flex;
+    flex-direction: column;
     padding: 15px;
+    background-color: #141414;
+    overflow: hidden;
+}
 
+.preview-panel h2 {
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+    color: #aaa;
+}
+
+.canvas-container {
+    flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
-
+    background-color: #0d0d0d;
+    border-radius: 6px;
+    border: 1px solid #2a2a2a;
     overflow: hidden;
-
 }
 
-.photo-panel canvas {
-
+/* Le Canvas s'adapte sans JAMAIS déborder ni masquer du texte */
+#previewCanvas {
     max-width: 100%;
-    max-height: 600px;
-
-    border: 1px solid #444;
-
-    background: #111;
-
+    max-height: 100%;
+    object-fit: contain;
 }
 
-
-
-/* Panneau informations */
-
-.info-panel {
-
-    flex: 1;
-
-    background: #2b2b2b;
-
-    border-radius: 8px;
-
+/* --- Colonne Droite : Sidebar --- */
+.sidebar-panel {
+    width: 360px; /* Largeur fixe pour les réglages */
+    height: 100%;
+    background-color: #222;
+    border-left: 1px solid #333;
     padding: 15px;
-
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    overflow-y: auto; /* Scroll uniquement dans le panneau de droite si besoin */
 }
 
-
-
-#status {
-
-    line-height: 1.8;
-
+/* Cartes (EXIF et Curseurs) */
+.card-panel {
+    background-color: #2a2a2a;
+    border-radius: 6px;
+    padding: 15px;
+    border: 1px solid #3a3a3a;
 }
 
-
-
-/* Zone Picture Control */
-
-.picture-control-panel {
-
-    margin: 20px;
-
-    padding: 20px;
-
-    background: #2b2b2b;
-
-    border-radius: 8px;
-
-}
-
-
-.picture-control-panel button {
-
-    margin-right: 10px;
-
-}
-/* ===========================================================
-   Picture Control Editor
-   =========================================================== */
-
+/* Curseurs */
 .pc-row {
-
-    margin-top: 18px;
-
+    margin-bottom: 12px;
 }
 
 .pc-label {
-
     display: flex;
-
     justify-content: space-between;
-
-    align-items: center;
-
-    margin-bottom: 6px;
-
-    font-weight: bold;
-
-}
-
-.pc-value {
-
-    width: 40px;
-
-    text-align: right;
-
-    color: #8ec5ff;
-
+    font-size: 0.9rem;
+    margin-bottom: 4px;
 }
 
 .pc-slider {
-
     width: 100%;
-
+    accent-color: #00adb5;
     cursor: pointer;
-
-}
-
-.pc-select {
-
-    width: 100%;
-
-    padding: 8px;
-
-    background: #3a3a3a;
-
-    color: white;
-
-    border: 1px solid #666;
-
-    border-radius: 5px;
-
-    font-size: 14px;
-
 }

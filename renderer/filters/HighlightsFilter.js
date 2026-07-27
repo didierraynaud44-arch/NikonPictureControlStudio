@@ -1,47 +1,53 @@
-class HighlightsFilter {
+class HighlightsFilter extends BaseFilter {
 
     apply(imageData, pictureControl) {
 
         if (!pictureControl)
             return imageData;
 
-        const value = pictureControl.highlights;
+        const highlights = Number(pictureControl.highlights);
 
-        if (value === 0)
+        if (this.isNeutral(highlights))
             return imageData;
 
+        // Normalisation (amplitude douce basée sur l'échelle -5 à +5)
+        const amount = highlights / 5.0;
+
         const data = imageData.data;
+        const len = data.length;
 
-        const strength = value * 8;
+        // 1. PRÉ-CALCUL ULTRA-RAPIDE (256 itérations seulement au lieu de millions)
+        const lut = new Uint8Array(256);
 
-        for (let i = 0; i < data.length; i += 4) {
+        for (let i = 0; i < 256; i++) {
+            const norm = i / 255;
 
-            const luminance =
-                0.299 * data[i] +
-                0.587 * data[i + 1] +
-                0.114 * data[i + 2];
+            // Masque progressif des hautes lumières (entre ~128 et 255)
+            const highlightWeight = Math.max(0, (norm - 0.5) / 0.5);
+            const smoothWeight = highlightWeight * highlightWeight * (3 - 2 * highlightWeight);
 
-            if (luminance > 170) {
-
-                const weight = (luminance - 170) / 85;
-
-                data[i] = clamp(data[i] + strength * weight);
-                data[i + 1] = clamp(data[i + 1] + strength * weight);
-                data[i + 2] = clamp(data[i + 2] + strength * weight);
-
+            let newNorm = norm;
+            if (amount < 0) {
+                // Diminuer les hautes lumières
+                newNorm = norm + (amount * 0.25 * smoothWeight * norm);
+            } else {
+                // Rehausser les hautes lumières
+                newNorm = norm + (amount * 0.20 * smoothWeight * (1 - norm));
             }
 
+            lut[i] = this.clamp(newNorm * 255);
+        }
+
+        // 2. APPLICATION ÉCLAIR SUR LES PIXELS (Accès mémoire direct)
+        for (let i = 0; i < len; i += 4) {
+            data[i]     = lut[data[i]];     // R
+            data[i + 1] = lut[data[i + 1]]; // G
+            data[i + 2] = lut[data[i + 2]]; // B
         }
 
         return imageData;
 
     }
-
-}
-
-function clamp(v) {
-
-    return Math.max(0, Math.min(255, v));
 
 }
 
