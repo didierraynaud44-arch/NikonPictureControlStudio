@@ -1,38 +1,44 @@
-class ContrastFilter {
+class ContrastFilter extends BaseFilter {
 
     apply(imageData, pictureControl) {
 
         if (!pictureControl)
             return imageData;
 
-        const value = pictureControl.contrast * 30;
+        const contrast = Number(pictureControl.contrast);
 
-        if (value === 0)
+        if (this.isNeutral(contrast))
             return imageData;
 
-        const data = imageData.data;
+        const value = contrast * 30;
 
         const factor =
             (259 * (value + 255)) /
             (255 * (259 - value));
 
+        const output = this.clone(imageData);
+
+        const data = output.data;
+
         for (let i = 0; i < data.length; i += 4) {
 
-            data[i] = clamp(factor * (data[i] - 128) + 128);
-            data[i + 1] = clamp(factor * (data[i + 1] - 128) + 128);
-            data[i + 2] = clamp(factor * (data[i + 2] - 128) + 128);
+            data[i] = this.clamp(
+                factor * (data[i] - 128) + 128
+            );
+
+            data[i + 1] = this.clamp(
+                factor * (data[i + 1] - 128) + 128
+            );
+
+            data[i + 2] = this.clamp(
+                factor * (data[i + 2] - 128) + 128
+            );
 
         }
 
-        return imageData;
+        return output;
 
     }
-
-}
-
-function clamp(v) {
-
-    return Math.max(0, Math.min(255, v));
 
 }
 
