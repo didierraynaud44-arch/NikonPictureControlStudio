@@ -1,10 +1,23 @@
+/*=========================================================
+    Nikon Picture Control Studio - Controller (app.js)
+=========================================================*/
+
 function initButtons() {
     const btnNef = document.getElementById("openNef");
     const btnNP3 = document.getElementById("openNP3");
+    const btnSaveNP3 = document.getElementById("saveNP3");
+    const btnExportJpg = document.getElementById("exportJpg");
 
-    console.log("Initialisation des boutons...", { btnNef, btnNP3 });
+    console.log("🚀 Initialisation des boutons...", { 
+        btnNef: !!btnNef, 
+        btnNP3: !!btnNP3, 
+        btnSaveNP3: !!btnSaveNP3, 
+        btnExportJpg: !!btnExportJpg 
+    });
 
-    // 1. Charger un fichier NEF
+    /*---------------------------------------------------------
+        1. Charger un fichier NEF
+    ---------------------------------------------------------*/
     if (btnNef) {
         btnNef.onclick = async () => {
             console.log("📂 Clic Ouvrir NEF");
@@ -18,19 +31,16 @@ function initButtons() {
                         window.updateExif(fileInfo);
                     }
 
-                    // 2. Traitement intelligent du format d'image (Base64 ou Fichier)
+                    // 2. Traitement du format d'image (Base64 ou Chemin local)
                     let rawSrc = fileInfo.previewPath || fileInfo.preview || fileInfo.imageData || fileInfo.image || fileInfo.path;
                     let imageSrc = "";
 
                     if (rawSrc) {
                         if (rawSrc.startsWith("data:")) {
-                            // Déjà une data-URL prête
                             imageSrc = rawSrc;
                         } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.trim().substring(0, 100))) {
-                            // C'est du Base64 brut (comme dans ta console)
                             imageSrc = `data:image/jpeg;base64,${rawSrc.trim()}`;
                         } else {
-                            // C'est un chemin de fichier local sur le disque
                             const formattedPath = rawSrc.replace(/\\/g, "/");
                             imageSrc = formattedPath.startsWith("/") ? `file://${formattedPath}` : `file:///${formattedPath}`;
                         }
@@ -46,10 +56,13 @@ function initButtons() {
                         contrast: 0,
                         highlights: 0,
                         shadows: 0,
-                        saturation: 0
+                        saturation: 0,
+                        toneCurve: 0,
+                        hue: 0,
+                        colorGrading: 0
                     };
 
-                    // 4. Chargement séquentiel dans le Canvas
+                    // 4. Chargement dans le Canvas & application des filtres
                     if (imageSrc && window.imageProcessor) {
                         await window.imageProcessor.load(imageSrc);
                         window.imageProcessor.setPictureControl(pcData);
@@ -61,12 +74,14 @@ function initButtons() {
                     }
                 }
             } catch (err) {
-                console.error("Erreur ouverture NEF :", err);
+                console.error("❌ Erreur ouverture NEF :", err);
             }
         };
     }
 
-    // 2. Charger un fichier NP3
+    /*---------------------------------------------------------
+        2. Importer un fichier NP3
+    ---------------------------------------------------------*/
     if (btnNP3) {
         btnNP3.onclick = async () => {
             console.log("🎛️ Clic Importer NP3");
@@ -86,13 +101,72 @@ function initButtons() {
                     }
                 }
             } catch (err) {
-                console.error("Erreur import NP3 :", err);
+                console.error("❌ Erreur import NP3 :", err);
+            }
+        };
+    }
+
+    /*---------------------------------------------------------
+        3. Sauvegarder le fichier NP3 modifié
+    ---------------------------------------------------------*/
+    if (btnSaveNP3) {
+        btnSaveNP3.onclick = async () => {
+            console.log("💾 Clic Sauvegarder NP3");
+            try {
+                if (!window.imageProcessor || !window.imageProcessor.pictureControl) {
+                    console.warn("⚠️ Aucun Picture Control à sauvegarder.");
+                    return;
+                }
+
+                const currentSettings = window.imageProcessor.pictureControl;
+                
+                if (window.electronAPI && window.electronAPI.saveNP3File) {
+                    const saved = await window.electronAPI.saveNP3File(currentSettings);
+                    if (saved) {
+                        console.log("✅ Fichier NP3 enregistré avec succès !");
+                    }
+                } else {
+                    console.error("❌ Méthode saveNP3File introuvable dans electronAPI.");
+                }
+            } catch (err) {
+                console.error("❌ Erreur sauvegarde NP3 :", err);
+            }
+        };
+    }
+
+    /*---------------------------------------------------------
+        4. Exporter en JPG Haute Résolution
+    ---------------------------------------------------------*/
+    if (btnExportJpg) {
+        btnExportJpg.onclick = async () => {
+            console.log("📸 Clic Exporter JPG HD");
+            try {
+                if (!window.imageProcessor) {
+                    console.warn("⚠️ Moteur de rendu indisponible.");
+                    return;
+                }
+
+                // Génère le rendu sur le buffer pleine résolution (originalRawBuffer)
+                const base64Data = await window.imageProcessor.exportJPEG(0.95);
+                
+                if (base64Data && window.electronAPI && window.electronAPI.saveJPEGFile) {
+                    const saved = await window.electronAPI.saveJPEGFile(base64Data);
+                    if (saved) {
+                        console.log("✅ Photo JPEG exportée avec succès !");
+                    }
+                } else {
+                    console.error("❌ Impossible de sauvegarder le JPEG (DataURL vide ou API manquante).");
+                }
+            } catch (err) {
+                console.error("❌ Erreur exportation JPG :", err);
             }
         };
     }
 }
 
-// Initialisation sécurisée
+/*=========================================================
+    Initialisation au chargement de la page
+=========================================================*/
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initButtons);
 } else {

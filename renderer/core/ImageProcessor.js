@@ -148,7 +148,33 @@ class ImageProcessor {
         const ctx = canvas.getContext("2d");
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+    }async exportJPEG(quality = 0.92) {
+    if (!this.originalRawBuffer) {
+        console.error("Aucune image originale disponible pour l'exportation.");
+        return null;
     }
+
+    // 1. Calcul du pipeline sur le buffer pleine définition
+    let fullResImageData = new ImageData(
+        new Uint8ClampedArray(this.originalRawBuffer.data),
+        this.originalRawBuffer.width,
+        this.originalRawBuffer.height
+    );
+
+    if (this.pictureControl && this.pipeline) {
+        fullResImageData = this.pipeline.process(fullResImageData, this.pictureControl);
+    }
+
+    // 2. Rendu sur un canvas temporaire hors-écran à taille réelle
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = fullResImageData.width;
+    exportCanvas.height = fullResImageData.height;
+    const ctx = exportCanvas.getContext("2d");
+    ctx.putImageData(fullResImageData, 0, 0);
+
+    // 3. Conversion en DataURL JPEG
+    return exportCanvas.toDataURL("image/jpeg", quality);
+}
 }
 
 window.imageProcessor = new ImageProcessor("previewCanvas");
