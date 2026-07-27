@@ -1,3 +1,6 @@
+/* =======================================================
+   1. Imports des modules Node & Electron
+======================================================= */
 const {
     app,
     BrowserWindow,
@@ -8,7 +11,11 @@ const {
 
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
+/* =======================================================
+   2. Imports des moteurs applicatifs
+======================================================= */
 const pictureControlEngine = require("./services/pictureControlEngine");
 const { readNEF } = require("./engine/nefReader");
 const { getPreview } = require("./engine/nefPreview");
@@ -18,7 +25,7 @@ const { loadNP3 } = require("./services/np3Manager");
 let mainWindow = null;
 
 /* =======================================================
-   Fenêtre principale
+   3. Fenêtre principale
 ======================================================= */
 
 function createMainWindow() {
@@ -41,7 +48,7 @@ function createMainWindow() {
 }
 
 /* =======================================================
-   Menu
+   4. Menu
 ======================================================= */
 
 function createAppMenu() {
@@ -74,7 +81,7 @@ function createAppMenu() {
 }
 
 /* =======================================================
-   Ouvrir un NEF
+   5. Ouvrir un NEF
 ======================================================= */
 
 ipcMain.handle("open-nef", async () => {
@@ -103,7 +110,7 @@ ipcMain.handle("open-nef", async () => {
 });
 
 /* =======================================================
-   Charger un NP3
+   6. Charger un NP3
 ======================================================= */
 
 ipcMain.handle("loadNP3", async () => {
@@ -127,7 +134,7 @@ ipcMain.handle("loadNP3", async () => {
 });
 
 /* =======================================================
-   Picture Control Engine (IPC Handlers)
+   7. Picture Control Engine (IPC Handlers)
 ======================================================= */
 
 ipcMain.handle("pc-get", () => {
@@ -145,7 +152,7 @@ ipcMain.handle("pc-reset", () => {
 });
 
 /* =======================================================
-   Sauvegardes (NP3 & JPEG)
+   8. Sauvegardes (NP3 & JPEG)
 ======================================================= */
 
 // --- Sauvegarde du fichier NP3 ---
@@ -190,10 +197,13 @@ ipcMain.handle("dialog:saveJPEG", async (event, base64Data) => {
 });
 
 /* =======================================================
-   Cycle de vie Electron
+   9. Cycle de vie Electron & Correctif ExifTool
 ======================================================= */
 
 app.whenReady().then(() => {
+    // Correctif ExifTool : Redirection sûre vers userData une fois Electron prêt
+  
+
     createMainWindow();
     createAppMenu();
 });

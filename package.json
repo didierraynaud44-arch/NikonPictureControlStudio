@@ -1,6 +1,6 @@
 {
   "name": "nikon-picture-control-studio",
-  "version": "0.1.0",
+  "version": "0.1.8",
   "description": "Éditeur Nikon Picture Control",
   "main": "main.js",
   "scripts": {
@@ -9,9 +9,46 @@
   },
   "author": "Didier Raynaud",
   "license": "MIT",
+"build": {
+    "appId": "com.didierraynaud.nikonpcstudio",
+    "productName": "Nikon Picture Control Studio",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": ["**/*"]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/nikon-flexible-color-picture-control/**/*",
+      "**/node_modules/sharp/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nikon PC Studio"
+    }
+  },
   "devDependencies": {
     "electron": "^37.0.0",
-    "electron-builder": "^26.0.0"
+    "electron-builder": "^26.15.3"
   },
   "dependencies": {
     "electron-store": "^10",
