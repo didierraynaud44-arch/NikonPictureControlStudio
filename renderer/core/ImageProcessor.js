@@ -9,7 +9,9 @@ class ImageProcessor {
 
         this.pictureControl = null;
         this.pipeline = new RenderPipeline();
-
+// 1. 🎯 MONOCHROME EN PREMIER
+// Si le profil est "Monochrome", il convertit les pixels en N&B selon le filtre optique
+this.pipeline.add(new MonochromeFilter());
         // 🎯 Activation du pipeline de filtres (aligné avec les sliders de l'IHM)
         this.pipeline.add(new SharpenFilter());
         this.pipeline.add(new MidRangeSharpenFilter());
