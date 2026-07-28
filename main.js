@@ -14,18 +14,20 @@ const fs = require("fs");
 const os = require("os");
 
 /* =======================================================
-   2. Imports des moteurs applicatifs
+   2. Imports des moteurs applicatifs & services
 ======================================================= */
 const pictureControlEngine = require("./services/pictureControlEngine");
 const { readNEF } = require("./engine/nefReader");
 const { getPreview } = require("./engine/nefPreview");
 const { readPictureControl } = require("./engine/pictureControl");
-const { loadNP3 } = require("./services/np3Manager");
+
+// Importation de loadNP3 ET saveNP3 depuis le manager
+const { loadNP3, saveNP3 } = require("./services/np3Manager");
 
 let mainWindow = null;
 
 /* =======================================================
-   3. Fenêtre principale
+   3. Création de la fenêtre principale
 ======================================================= */
 
 function createMainWindow() {
@@ -48,7 +50,7 @@ function createMainWindow() {
 }
 
 /* =======================================================
-   4. Menu
+   4. Menu supérieur de l'application
 ======================================================= */
 
 function createAppMenu() {
@@ -81,9 +83,10 @@ function createAppMenu() {
 }
 
 /* =======================================================
-   5. Ouvrir un NEF
+   5. Handlers IPC : Ouverture des fichiers (NEF & NP3)
 ======================================================= */
 
+// --- Ouverture d'un fichier NEF ---
 ipcMain.handle("open-nef", async () => {
     const result = await dialog.showOpenDialog({
         title: "Choisir un fichier Nikon NEF",
@@ -96,12 +99,15 @@ ipcMain.handle("open-nef", async () => {
         ]
     });
 
-    if (result.canceled) return null;
+    if (result.canceled || !result.filePaths.length) return null;
 
     const filePath = result.filePaths[0];
+
+    // Lecture des métadonnées EXIF et de la prévisualisation JPEG
     const info = await readNEF(filePath);
     info.preview = await getPreview(filePath);
 
+    // Lecture du Picture Control embarqué dans le fichier NEF
     const pictureControl = await readPictureControl(filePath);
     pictureControlEngine.load(pictureControl);
     info.pictureControl = pictureControlEngine.get();
@@ -109,10 +115,7 @@ ipcMain.handle("open-nef", async () => {
     return info;
 });
 
-/* =======================================================
-   6. Charger un NP3
-======================================================= */
-
+// --- Chargement d'un fichier binaire NP3 ---
 ipcMain.handle("loadNP3", async () => {
     const result = await dialog.showOpenDialog({
         title: "Charger un Picture Control",
@@ -125,7 +128,7 @@ ipcMain.handle("loadNP3", async () => {
         ]
     });
 
-    if (result.canceled) return null;
+    if (result.canceled || !result.filePaths.length) return null;
 
     const pc = await loadNP3(result.filePaths[0]);
     pictureControlEngine.load(pc);
@@ -134,7 +137,7 @@ ipcMain.handle("loadNP3", async () => {
 });
 
 /* =======================================================
-   7. Picture Control Engine (IPC Handlers)
+   6. Handlers IPC : Moteur Picture Control Engine
 ======================================================= */
 
 ipcMain.handle("pc-get", () => {
@@ -152,29 +155,46 @@ ipcMain.handle("pc-reset", () => {
 });
 
 /* =======================================================
-   8. Sauvegardes (NP3 & JPEG)
+   7. Handlers IPC : Exportation & Sauvegarde (NP3 & JPEG)
 ======================================================= */
 
-// --- Sauvegarde du fichier NP3 ---
+// --- Sauvegarde du fichier NP3 binaire ---
 ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
+    console.log("🚀 Lancement de l'enregistrement NP3...");
+
     const { filePath, canceled } = await dialog.showSaveDialog({
         title: "Enregistrer le Picture Control",
-        defaultPath: "CustomPictureControl.np3",
-        filters: [{ name: "Nikon Picture Control", extensions: ["np3", "json"] }]
+        defaultPath: "CustomPictureControl.NP3",
+        filters: [{ name: "Nikon Picture Control", extensions: ["NP3", "np3"] }]
     });
 
-    if (canceled || !filePath) return false;
+    if (canceled || !filePath) {
+        console.log("🛑 Sauvegarde annulée.");
+        return false;
+    }
 
     try {
-        fs.writeFileSync(filePath, JSON.stringify(pcData, null, 2), "utf-8");
+        console.log("📝 Données à encoder :", pcData);
+
+        // Encodage binaire via la fonction saveNP3 de np3Manager
+        const buffer = await saveNP3(pcData); 
+
+        if (!buffer || buffer.length === 0) {
+            throw new Error("L'encodage NP3 a produit un buffer vide.");
+        }
+
+        // Écriture du fichier binaire sur le disque
+        fs.writeFileSync(filePath, buffer);
+        console.log("✅ Fichier NP3 binaire sauvegardé avec succès sous :", filePath);
+
         return true;
     } catch (err) {
-        console.error("Erreur écriture NP3 :", err);
+        console.error("❌ Erreur lors de l'enregistrement du NP3 :", err);
         return false;
     }
 });
 
-// --- Exportation du fichier JPG HD ---
+// --- Exportation du rendu au format Image JPEG HD ---
 ipcMain.handle("dialog:saveJPEG", async (event, base64Data) => {
     const { filePath, canceled } = await dialog.showSaveDialog({
         title: "Exporter la photo en JPEG",
@@ -189,21 +209,20 @@ ipcMain.handle("dialog:saveJPEG", async (event, base64Data) => {
         const imageBuffer = Buffer.from(base64Image, "base64");
 
         fs.writeFileSync(filePath, imageBuffer);
+        console.log("✅ Image JPEG exportée avec succès sous :", filePath);
+
         return true;
     } catch (err) {
-        console.error("Erreur écriture JPEG :", err);
+        console.error("❌ Erreur écriture JPEG :", err);
         return false;
     }
 });
 
 /* =======================================================
-   9. Cycle de vie Electron & Correctif ExifTool
+   8. Cycle de vie de l'application Electron
 ======================================================= */
 
 app.whenReady().then(() => {
-    // Correctif ExifTool : Redirection sûre vers userData une fois Electron prêt
-  
-
     createMainWindow();
     createAppMenu();
 });
