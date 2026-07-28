@@ -1,28 +1,42 @@
-class RenderPipeline {
+/*=========================================================
+    Nikon Picture Control Studio - Render Pipeline
+=========================================================*/
 
+class RenderPipeline {
     constructor() {
         this.filters = [];
     }
 
     add(filter) {
-        this.filters.push(filter);
+        if (filter) {
+            this.filters.push(filter);
+        }
     }
 
-    process(imageData, pictureControl) {
-        if (!imageData) return null;
+    process(imageData, settings) {
+        let currentData = imageData;
 
-        // 1. On crée une COPIE NEUVE des pixels originaux pour ne jamais polluer l'image source
-        const clonedPixels = new Uint8ClampedArray(imageData.data);
-        let result = new ImageData(clonedPixels, imageData.width, imageData.height);
-
-        // 2. On fait passer la copie dans chaque filtre
         for (const filter of this.filters) {
-            result = filter.apply(result, pictureControl);
+            if (!filter) continue;
+
+            try {
+                // 🎯 Vérification robuste de la méthode du filtre
+                if (typeof filter.process === "function") {
+                    currentData = filter.process(currentData, settings);
+                } else if (typeof filter.apply === "function") {
+                    currentData = filter.apply(currentData, settings);
+                } else {
+                    console.warn("⚠️ Filtre ignoré (méthode process/apply introuvable) :", filter);
+                }
+            } catch (err) {
+                console.error(`❌ Erreur dans le filtre ${filter.constructor?.name || 'inconnu'} :`, err);
+            }
         }
 
-        return result;
+        return currentData;
     }
-
 }
 
-window.RenderPipeline = RenderPipeline;
+if (typeof window !== "undefined") {
+    window.RenderPipeline = RenderPipeline;
+}

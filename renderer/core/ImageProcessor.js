@@ -1,5 +1,5 @@
 /*=========================================================
-    Nikon Picture Control Studio - Image Processor (avec Zoom)
+    Nikon Picture Control Studio - Image Processor (complet)
 =========================================================*/
 
 class ImageProcessor {
@@ -25,42 +25,56 @@ class ImageProcessor {
         this.pictureControl = null;
         this.pipeline = new RenderPipeline();
 
-        // 1. MONOCHROME EN PREMIER
-        this.pipeline.add(new MonochromeFilter());
+        // ---------------------------------------------------------
+        // 1. PIPELINE PICTURE CONTROL NIKON (Officiel)
+        // ---------------------------------------------------------
+        // En premier : Monochrome pour basculer en N&B selon le filtre optique
+        if (typeof MonochromeFilter !== "undefined") this.pipeline.add(new MonochromeFilter());
 
-        // 2. Réglages de détails et tonalités
-        this.pipeline.add(new SharpenFilter());
-        this.pipeline.add(new MidRangeSharpenFilter());
-        this.pipeline.add(new ClarityFilter());
-        this.pipeline.add(new ContrastFilter());
-        this.pipeline.add(new HighlightsFilter());
-        this.pipeline.add(new ShadowsFilter());
-        this.pipeline.add(new SaturationFilter());
+        // Réglages natifs Nikon
+        if (typeof SharpenFilter !== "undefined") this.pipeline.add(new SharpenFilter());
+        if (typeof MidRangeSharpenFilter !== "undefined") this.pipeline.add(new MidRangeSharpenFilter());
+        if (typeof ClarityFilter !== "undefined") this.pipeline.add(new ClarityFilter());
+        if (typeof ContrastFilter !== "undefined") this.pipeline.add(new ContrastFilter());
+        if (typeof BrightnessFilter !== "undefined") this.pipeline.add(new BrightnessFilter());
+        if (typeof SaturationFilter !== "undefined") this.pipeline.add(new SaturationFilter());
 
-        // 3. Filtres avancés
-        this.pipeline.add(new ToneCurveFilter());
-        this.pipeline.add(new ColorBlenderFilter());
-        this.pipeline.add(new ColorGradingFilter());
+        // ---------------------------------------------------------
+        // 2. TRAITEMENT DE L'IMAGE (Avancé)
+        // ---------------------------------------------------------
+        if (typeof HighlightsFilter !== "undefined") this.pipeline.add(new HighlightsFilter());
+        if (typeof ShadowsFilter !== "undefined") this.pipeline.add(new ShadowsFilter());
+        
+        // Nouveaux modules de traitement
+        if (typeof DehazeFilter !== "undefined") this.pipeline.add(new DehazeFilter());
+        if (typeof VibranceFilter !== "undefined") this.pipeline.add(new VibranceFilter());
+        if (typeof SCurveFilter !== "undefined") this.pipeline.add(new SCurveFilter());
+        if (typeof VignetteFilter !== "undefined") this.pipeline.add(new VignetteFilter());
+        if (typeof DenoiseFilter !== "undefined") this.pipeline.add(new DenoiseFilter());
 
-        // Initialisation des événements de la souris sur le Canvas
+        // Virages et Étalonnage couleur
+        if (typeof ToneCurveFilter !== "undefined") this.pipeline.add(new ToneCurveFilter());
+        if (typeof ColorBlenderFilter !== "undefined") this.pipeline.add(new ColorBlenderFilter());
+        if (typeof ColorGradingFilter !== "undefined") this.pipeline.add(new ColorGradingFilter());
+
+        // Initialisation des contrôles interactifs Canvas
         this.initZoomAndPanEvents();
     }
 
     /**
-     * Écouteurs d'événements pour la molette et le glisser-déposer
+     * Écouteurs d'événements pour le Zoom et le Déplacement (Pan)
      */
     initZoomAndPanEvents() {
         const canvas = this.display?.canvas;
         if (!canvas) return;
 
-        // 1. Zoom avec la molette
+        // 1. Zoom à la molette
         canvas.addEventListener("wheel", (e) => {
             e.preventDefault();
 
             const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
             const newZoom = Math.min(Math.max(this.zoom * zoomFactor, this.minZoom), this.maxZoom);
 
-            // Ajustement du centrage sur le curseur
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
@@ -72,9 +86,9 @@ class ImageProcessor {
             this.render();
         }, { passive: false });
 
-        // 2. Déplacement à la souris (Pan)
+        // 2. Glisser-déplacer (Pan)
         canvas.addEventListener("mousedown", (e) => {
-            if (e.button !== 0) return; // Clic gauche uniquement
+            if (e.button !== 0) return;
             this.isDragging = true;
             this.dragStartX = e.clientX - this.panX;
             this.dragStartY = e.clientY - this.panY;
@@ -95,7 +109,7 @@ class ImageProcessor {
             }
         });
 
-        // 3. Double-clic pour réinitialiser le zoom
+        // 3. Double-clic pour réinitialiser
         canvas.addEventListener("dblclick", () => {
             this.resetZoom();
         });
@@ -111,7 +125,7 @@ class ImageProcessor {
     }
 
     /**
-     * Crée un canvas pivoté selon la valeur d'orientation EXIF
+     * Redressement EXIF et pivot du Canvas
      */
     createRotatedCanvas(img, orientation = 1, targetWidth = null) {
         const canvas = document.createElement("canvas");
@@ -157,7 +171,7 @@ class ImageProcessor {
     }
 
     /**
-     * Charge l'image et réinitialise le zoom
+     * Chargement de la source image
      */
     load(imageSrc, orientation = 1) {
         return new Promise((resolve, reject) => {
@@ -168,7 +182,6 @@ class ImageProcessor {
                 this.loadedImage = img;
                 this.currentOrientation = Number(orientation) || 1;
 
-                // Reset de la position
                 this.zoom = 1;
                 this.panX = 0;
                 this.panY = 0;
@@ -178,7 +191,7 @@ class ImageProcessor {
                 const fullCtx = fullCanvas.getContext("2d");
                 this.originalRawBuffer = fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height);
 
-                // Buffer preview (1600px max)
+                // Buffer de prévisualisation (1600px max)
                 const previewCanvas = this.createRotatedCanvas(img, this.currentOrientation, 1600);
                 const previewCtx = previewCanvas.getContext("2d");
                 this.previewBuffer = previewCtx.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
@@ -188,7 +201,6 @@ class ImageProcessor {
                     this.display.canvas.height = previewCanvas.height;
                 }
 
-                // Attache les événements de zoom
                 this.initZoomAndPanEvents();
 
                 console.log(`✅ Image chargée (${fullCanvas.width}x${fullCanvas.height}) | Orientation: ${this.currentOrientation}`);
@@ -205,6 +217,9 @@ class ImageProcessor {
         });
     }
 
+    /**
+     * Nettoyage et parsing des paramètres du Picture Control
+     */
     cleanPictureControl(pcData) {
         if (!pcData) return {};
         
@@ -216,13 +231,23 @@ class ImageProcessor {
             return isNaN(parsed) ? 0 : parsed;
         };
 
+        // --- Réglages Nikon Officiels ---
         clean.sharpening = parseValue(clean.sharpening ?? clean.sharpness ?? clean.sharpning);
         clean.midRangeSharpening = parseValue(clean.midRangeSharpening ?? clean.midRangeSharpning);
         clean.clarity = parseValue(clean.clarity);
         clean.contrast = parseValue(clean.contrast);
+        clean.brightness = parseValue(clean.brightness ?? clean.Brightness);
+        clean.saturation = parseValue(clean.saturation);
+        clean.hue = parseValue(clean.hue);
+
+        // --- Traitement de l'image (Avancé) ---
         clean.highlights = parseValue(clean.highlights);
         clean.shadows = parseValue(clean.shadows);
-        clean.saturation = parseValue(clean.saturation);
+        clean.dehaze = parseValue(clean.dehaze);
+        clean.vibrance = parseValue(clean.vibrance);
+        clean.sCurve = parseValue(clean.sCurve);
+        clean.vignette = parseValue(clean.vignette);
+        clean.denoise = parseValue(clean.denoise);
 
         return clean;
     }
@@ -234,19 +259,23 @@ class ImageProcessor {
         this.render();
     }
 
+    /**
+     * Rendu et exécution du pipeline
+     */
     render() {
         const sourceBuffer = this.previewBuffer || this.originalRawBuffer;
         if (!sourceBuffer || !this.display || !this.display.canvas) return;
 
         const canvas = this.display.canvas;
 
-        // 1. Copie et traitement des pixels via le pipeline
+        // 1. Copie des pixels source
         let currentImageData = new ImageData(
             new Uint8ClampedArray(sourceBuffer.data),
             sourceBuffer.width,
             sourceBuffer.height
         );
 
+        // 2. Traitement par la chaîne de filtres
         if (this.pictureControl && this.pipeline && typeof this.pipeline.process === "function") {
             try {
                 const result = this.pipeline.process(currentImageData, this.pictureControl);
@@ -258,14 +287,14 @@ class ImageProcessor {
             }
         }
 
-        // 2. Dessin dans un canvas temporaire
+        // 3. Dessin temporaire
         const tempCanvas = document.createElement("canvas");
         tempCanvas.width = currentImageData.width;
         tempCanvas.height = currentImageData.height;
         const tempCtx = tempCanvas.getContext("2d");
         tempCtx.putImageData(currentImageData, 0, 0);
 
-        // 3. Application de la transformation (Zoom + Pan) sur le Canvas final
+        // 4. Rendu final avec Zoom & Pan
         const ctx = canvas.getContext("2d");
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -273,11 +302,13 @@ class ImageProcessor {
         ctx.translate(this.panX, this.panY);
         ctx.scale(this.zoom, this.zoom);
 
-        // Dessine l'image avec transformation
         ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
         ctx.restore();
     }
 
+    /**
+     * Exportation JPEG pleine résolution
+     */
     async exportJPEG(quality = 0.92) {
         if (!this.originalRawBuffer) {
             console.error("Aucune image originale disponible pour l'exportation.");
