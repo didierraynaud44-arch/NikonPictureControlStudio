@@ -14,7 +14,8 @@ function initButtons() {
         btnSaveNP3: !!btnSaveNP3, 
         btnExportJpg: !!btnExportJpg 
     });
-/*---------------------------------------------------------
+
+    /*---------------------------------------------------------
         1. Charger un fichier NEF
     ---------------------------------------------------------*/
     if (btnNef) {
@@ -75,9 +76,10 @@ function initButtons() {
                         colorGrading: 0
                     };
 
-                    // 4. Chargement dans le Canvas & application des filtres
+                    // 4. Chargement dans le Canvas & application des filtres (AVEC ROTATION EXIF)
                     if (imageSrc && window.imageProcessor) {
-                        await window.imageProcessor.load(imageSrc);
+                        // 🎯 Transmettre fileInfo.orientation pour redresser les portraits
+                        await window.imageProcessor.load(imageSrc, fileInfo.orientation || 1);
                         window.imageProcessor.setPictureControl(pcData);
                     }
 
@@ -91,6 +93,7 @@ function initButtons() {
             }
         };
     }
+
     /*---------------------------------------------------------
         2. Importer un fichier NP3
     ---------------------------------------------------------*/

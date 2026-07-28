@@ -3,7 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const { app } = require("electron");
 
-// 1. Détection dynamique du chemin d'ExifTool (identique à nefPreview.js)
+// 1. Détection dynamique du chemin d'ExifTool
 const isPackaged = app ? app.isPackaged : process.mainModule?.filename.includes("app.asar");
 
 const exiftool = isPackaged
@@ -86,6 +86,9 @@ function readNEF(filePath) {
                         artist: data.Artist || data["By-line"] || data.Copyright || "Non renseigné",
                         comment: data.UserComment || data.Description || "Aucun",
 
+                        // 🔄 Tag d'orientation EXIF (1 = Paysage, 6 = Portrait 90°, 8 = Portrait 270°, 3 = 180°)
+                        orientation: Number(data.Orientation) || 1,
+
                         // 📸 Compteur de déclenchements Nikon
                         shutterCount: data.ShutterCount !== undefined ? Number(data.ShutterCount) : "N/C",
 
@@ -120,6 +123,7 @@ function getFallbackData(filePath) {
         lens: "Inconnu",
         artist: "Non renseigné",
         comment: "Aucun",
+        orientation: 1, // Fallback paysage standard
         shutterCount: "N/C",
         iso: "N/C",
         aperture: "N/C",
