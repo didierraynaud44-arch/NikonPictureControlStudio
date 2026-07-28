@@ -14,8 +14,7 @@ function initButtons() {
         btnSaveNP3: !!btnSaveNP3, 
         btnExportJpg: !!btnExportJpg 
     });
-
-    /*---------------------------------------------------------
+/*---------------------------------------------------------
         1. Charger un fichier NEF
     ---------------------------------------------------------*/
     if (btnNef) {
@@ -27,8 +26,22 @@ function initButtons() {
 
                 if (fileInfo) {
                     // 1. Mettre à jour les infos EXIF dans l'IHM
-                    if (window.updateExif) {
+                    if (typeof window.updateExif === "function") {
                         window.updateExif(fileInfo);
+                    } else {
+                        // FALLBACK DIRECT : Si window.updateExif n'existe pas
+                        const cameraEl = document.getElementById("exifCamera") || document.getElementById("camera-info");
+                        const lensEl   = document.getElementById("exifLens")   || document.getElementById("lens-info");
+                        const paramsEl = document.getElementById("exifParams") || document.getElementById("settings-info");
+
+                        if (cameraEl) cameraEl.textContent = `${fileInfo.make || ''} ${fileInfo.model || ''}`.trim();
+                        if (lensEl)   lensEl.textContent   = fileInfo.lens || "Objectif non renseigné";
+                        if (paramsEl) {
+                            const details = [fileInfo.focal, fileInfo.aperture, fileInfo.shutter, fileInfo.iso ? `ISO ${fileInfo.iso}` : ""]
+                                .filter(Boolean)
+                                .join(" | ");
+                            paramsEl.textContent = details;
+                        }
                     }
 
                     // 2. Traitement du format d'image (Base64 ou Chemin local)
@@ -70,7 +83,7 @@ function initButtons() {
 
                     // 5. Mise à jour des sliders dans le panneau latéral
                     if (window.updatePictureControl) {
-                        window.updatePictureControl({ pictureControl: pcData });
+                        window.updatePictureControl({ pictureControl: pcData, isNewFile: true });
                     }
                 }
             } catch (err) {
@@ -78,7 +91,6 @@ function initButtons() {
             }
         };
     }
-
     /*---------------------------------------------------------
         2. Importer un fichier NP3
     ---------------------------------------------------------*/
