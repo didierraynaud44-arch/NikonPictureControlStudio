@@ -2,6 +2,8 @@
     Nikon Picture Control Studio - Controller (app.js)
 =========================================================*/
 
+let currentNefFileName = "image-editee";
+
 function initButtons() {
     const btnNef = document.getElementById("openNef");
     const btnNP3 = document.getElementById("openNP3");
@@ -26,6 +28,11 @@ function initButtons() {
                 console.log("Données NEF reçues :", fileInfo);
 
                 if (fileInfo) {
+                    // Mémorise le nom du fichier sans son extension (.NEF)
+                    if (fileInfo.fileName) {
+                        currentNefFileName = fileInfo.fileName.replace(/\.[^/.]+$/, "");
+                    }
+
                     // 1. Mettre à jour les infos EXIF dans l'IHM
                     if (typeof window.updateExif === "function") {
                         window.updateExif(fileInfo);
@@ -161,30 +168,48 @@ function initButtons() {
     }
 
     /*---------------------------------------------------------
-        4. Exporter en JPG Haute Résolution
+        4. Exporter l'Image (JPG, PNG, TIFF, WebP)
+    ---------------------------------------------------------*/
+/*---------------------------------------------------------
+        4. Exporter l'Image (JPG, PNG, TIFF, WebP)
     ---------------------------------------------------------*/
     if (btnExportJpg) {
         btnExportJpg.onclick = async () => {
-            console.log("📸 Clic Exporter JPG HD");
+            console.log("📸 Clic Exporter Image HD");
             try {
                 if (!window.imageProcessor) {
                     console.warn("⚠️ Moteur de rendu indisponible.");
                     return;
                 }
 
-                // Génère le rendu sur le buffer pleine résolution (originalRawBuffer)
-                const base64Data = await window.imageProcessor.exportJPEG(0.95);
-                
-                if (base64Data && window.electronAPI && window.electronAPI.saveJPEGFile) {
-                    const saved = await window.electronAPI.saveJPEGFile(base64Data);
-                    if (saved) {
-                        console.log("✅ Photo JPEG exportée avec succès !");
+                // Récupération du rendu en qualité maximale par défaut (0.95)
+                let base64Data = null;
+                if (typeof window.imageProcessor.exportImage === "function") {
+                    base64Data = await window.imageProcessor.exportImage("image/jpeg", 0.95);
+                } else if (typeof window.imageProcessor.exportJPEG === "function") {
+                    base64Data = await window.imageProcessor.exportJPEG(0.95);
+                }
+
+                if (base64Data && window.electronAPI) {
+                    const saveMethod = window.electronAPI.saveImageFile || window.electronAPI.saveJPEGFile;
+                    
+                    if (typeof saveMethod === "function") {
+                        const saved = await saveMethod({
+                            defaultName: currentNefFileName, // Ex: "_DSC8146"
+                            base64Data: base64Data
+                        });
+
+                        if (saved) {
+                            console.log(`✅ Image ${currentNefFileName} exportée avec succès !`);
+                        }
+                    } else {
+                        console.error("❌ Méthode de sauvegarde IPC introuvable dans electronAPI.");
                     }
                 } else {
-                    console.error("❌ Impossible de sauvegarder le JPEG (DataURL vide ou API manquante).");
+                    console.error("❌ Impossible de générer le rendu base64 de l'image.");
                 }
             } catch (err) {
-                console.error("❌ Erreur exportation JPG :", err);
+                console.error("❌ Erreur exportation Image :", err);
             }
         };
     }

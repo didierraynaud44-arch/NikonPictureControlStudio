@@ -194,26 +194,45 @@ ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
     }
 });
 
-// --- Exportation du rendu au format Image JPEG HD ---
-ipcMain.handle("dialog:saveJPEG", async (event, base64Data) => {
-    const { filePath, canceled } = await dialog.showSaveDialog({
-        title: "Exporter la photo en JPEG",
-        defaultPath: "Export.jpg",
-        filters: [{ name: "Image JPEG", extensions: ["jpg", "jpeg"] }]
+// --- Exportation du rendu au format Image HD ---
+ipcMain.handle("dialog:saveJPEG", async (event, data) => {
+    const win = BrowserWindow.getFocusedWindow();
+
+    // Support flexible : Objet { defaultName, base64Data } ou String Base64 directe
+    let defaultName = "export";
+    let base64Data = "";
+
+    if (typeof data === "object" && data !== null) {
+        defaultName = data.defaultName || "export";
+        base64Data = data.base64Data || "";
+    } else if (typeof data === "string") {
+        base64Data = data;
+    }
+
+    const { filePath, canceled } = await dialog.showSaveDialog(win, {
+        title: "Exporter la photo",
+        defaultPath: `${defaultName}.jpg`, // 🎯 Utilise automatiquement le nom du fichier d'origine
+        filters: [
+            { name: "Image JPEG (*.jpg)", extensions: ["jpg", "jpeg"] },
+            { name: "Image PNG (*.png)", extensions: ["png"] },
+            { name: "Image WebP (*.webp)", extensions: ["webp"] },
+            { name: "Image TIFF (*.tif)", extensions: ["tif", "tiff"] }
+        ]
     });
 
     if (canceled || !filePath) return false;
 
     try {
-        const base64Image = base64Data.replace(/^data:image\/jpeg;base64,/, "");
-        const imageBuffer = Buffer.from(base64Image, "base64");
+        // Décodage propre du Base64 (compatible tous formats MIME)
+        const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, "");
+        const imageBuffer = Buffer.from(cleanBase64, "base64");
 
         fs.writeFileSync(filePath, imageBuffer);
-        console.log("✅ Image JPEG exportée avec succès sous :", filePath);
+        console.log("✅ Photo exportée avec succès sous :", filePath);
 
         return true;
     } catch (err) {
-        console.error("❌ Erreur écriture JPEG :", err);
+        console.error("❌ Erreur écriture image :", err);
         return false;
     }
 });

@@ -323,7 +323,12 @@ class ImageProcessor {
     /**
      * Exportation JPEG pleine résolution
      */
-    async exportJPEG(quality = 0.92) {
+/**
+     * Exportation multi-formats pleine résolution
+     * @param {string} format - 'image/jpeg', 'image/png', 'image/webp'
+     * @param {number} quality - Qualité de 0.1 à 1.0 (pour JPEG/WEBP)
+     */
+    async exportImage(format = "image/jpeg", quality = 0.95) {
         if (!this.originalRawBuffer) {
             console.error("Aucune image originale disponible pour l'exportation.");
             return null;
@@ -345,7 +350,15 @@ class ImageProcessor {
         const ctx = exportCanvas.getContext("2d");
         ctx.putImageData(fullResImageData, 0, 0);
 
-        return exportCanvas.toDataURL("image/jpeg", quality);
+        // Pour le TIFF/PNG, canvas.toDataURL gère nativement le PNG. 
+        // Pour les formats non supportés nativement par le browser canvas (ex: TIFF), 
+        // le fallback est image/png converti ou transmis sous forme de canvas d'exportation.
+        if (format === "image/tiff") {
+            // PNG haute qualité servant de base au buffer principal
+            return exportCanvas.toDataURL("image/png");
+        }
+
+        return exportCanvas.toDataURL(format, quality);
     }
 }
 

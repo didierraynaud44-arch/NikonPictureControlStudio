@@ -12,7 +12,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     // 3. Sauvegardes et Exports
     saveNP3File: (data) => ipcRenderer.invoke("dialog:saveNP3", data),
-    saveJPEGFile: (base64Data) => ipcRenderer.invoke("dialog:saveJPEG", base64Data),
+    
+    // 🎯 MISE À JOUR : On accepte l'objet complet { defaultName, base64Data } ou juste le base64
+    saveJPEGFile: (data) => ipcRenderer.invoke("dialog:saveJPEG", data),
+    saveImageFile: (data) => ipcRenderer.invoke("dialog:saveJPEG", data),
 
     // 4. Écouteurs de menu (Facultatif)
     onMenuOpenNEF: (callback) => ipcRenderer.on("menu-open-nef", callback),
