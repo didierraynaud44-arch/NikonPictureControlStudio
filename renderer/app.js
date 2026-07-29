@@ -5,15 +5,17 @@
 let currentNefFileName = "image-editee";
 
 function initButtons() {
-    const btnNef = document.getElementById("openNef");
-    const btnNP3 = document.getElementById("openNP3");
-    const btnSaveNP3 = document.getElementById("saveNP3");
+    const btnNef       = document.getElementById("openNef");
+    const btnNP3       = document.getElementById("openNP3");
+    const btnSaveNP3   = document.getElementById("saveNP3");
+    const btnExportNCP = document.getElementById("exportNCP"); // 🎯 Bouton export Z6 II (.NCP)
     const btnExportJpg = document.getElementById("exportJpg");
 
     console.log("🚀 Initialisation des boutons...", { 
         btnNef: !!btnNef, 
         btnNP3: !!btnNP3, 
-        btnSaveNP3: !!btnSaveNP3, 
+        btnSaveNP3: !!btnSaveNP3,
+        btnExportNCP: !!btnExportNCP,
         btnExportJpg: !!btnExportJpg 
     });
 
@@ -113,14 +115,14 @@ function initButtons() {
     }
 
     /*---------------------------------------------------------
-        2. Importer un fichier NP3
+        2. Importer un fichier NP3 / NCP
     ---------------------------------------------------------*/
     if (btnNP3) {
         btnNP3.onclick = async () => {
-            console.log("🎛️ Clic Importer NP3");
+            console.log("🎛️ Clic Importer NP3 / NCP");
             try {
                 const response = await window.electronAPI.loadNP3();
-                console.log("Données NP3 reçues :", response);
+                console.log("Données NP3/NCP reçues :", response);
 
                 if (response) {
                     const pc = response.pictureControl || response.pc || response;
@@ -134,13 +136,13 @@ function initButtons() {
                     }
                 }
             } catch (err) {
-                console.error("❌ Erreur import NP3 :", err);
+                console.error("❌ Erreur import NP3/NCP :", err);
             }
         };
     }
 
     /*---------------------------------------------------------
-        3. Sauvegarder le fichier NP3 modifié
+        3. Sauvegarder le fichier NP3 (Z50 II / Z8 / Z9)
     ---------------------------------------------------------*/
     if (btnSaveNP3) {
         btnSaveNP3.onclick = async () => {
@@ -168,9 +170,34 @@ function initButtons() {
     }
 
     /*---------------------------------------------------------
-        4. Exporter l'Image (JPG, PNG, TIFF, WebP)
+        3bis. Exporter pour Nikon Z6 II (.NCP)
     ---------------------------------------------------------*/
-/*---------------------------------------------------------
+    if (btnExportNCP) {
+        btnExportNCP.onclick = async () => {
+            console.log("💾 Clic Exporter NCP pour Z6 II");
+            try {
+                if (!window.imageProcessor || !window.imageProcessor.pictureControl) {
+                    console.warn("⚠️ Aucun Picture Control à exporter pour Z6 II.");
+                    return;
+                }
+
+                const currentSettings = window.imageProcessor.pictureControl;
+
+                if (window.electronAPI && typeof window.electronAPI.exportNCP === "function") {
+                    const result = await window.electronAPI.exportNCP(currentSettings);
+                    if (result && result.success) {
+                        console.log("✅ Fichier NCP (Z6 II) exporté avec succès ! Path :", result.path);
+                    }
+                } else {
+                    console.error("❌ Méthode exportNCP introuvable dans electronAPI.");
+                }
+            } catch (err) {
+                console.error("❌ Erreur export NCP :", err);
+            }
+        };
+    }
+
+    /*---------------------------------------------------------
         4. Exporter l'Image (JPG, PNG, TIFF, WebP)
     ---------------------------------------------------------*/
     if (btnExportJpg) {
@@ -182,7 +209,6 @@ function initButtons() {
                     return;
                 }
 
-                // Récupération du rendu en qualité maximale par défaut (0.95)
                 let base64Data = null;
                 if (typeof window.imageProcessor.exportImage === "function") {
                     base64Data = await window.imageProcessor.exportImage("image/jpeg", 0.95);
@@ -195,7 +221,7 @@ function initButtons() {
                     
                     if (typeof saveMethod === "function") {
                         const saved = await saveMethod({
-                            defaultName: currentNefFileName, // Ex: "_DSC8146"
+                            defaultName: currentNefFileName,
                             base64Data: base64Data
                         });
 

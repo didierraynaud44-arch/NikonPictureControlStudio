@@ -21,8 +21,8 @@ const { readNEF } = require("./engine/nefReader");
 const { getPreview } = require("./engine/nefPreview");
 const { readPictureControl } = require("./engine/pictureControl");
 
-// Importation de loadNP3 ET saveNP3 depuis le manager
-const { loadNP3, saveNP3 } = require("./services/np3Manager");
+// 🎯 FIX ICI : Ajout de saveNCP dans l'import
+const { loadNP3, saveNP3, saveNCP } = require("./services/np3Manager");
 
 let mainWindow = null;
 
@@ -115,7 +115,7 @@ ipcMain.handle("open-nef", async () => {
     return info;
 });
 
-// --- Chargement d'un fichier binaire NP3 ---
+// --- Chargement d'un fichier binaire NP3 / NCP ---
 ipcMain.handle("loadNP3", async () => {
     const result = await dialog.showOpenDialog({
         title: "Charger un Picture Control",
@@ -123,17 +123,24 @@ ipcMain.handle("loadNP3", async () => {
         filters: [
             {
                 name: "Picture Control Nikon",
-                extensions: ["np3"]
+                extensions: ["np3", "ncp", "NP3", "NCP"]
             }
         ]
     });
 
     if (result.canceled || !result.filePaths.length) return null;
 
-    const pc = await loadNP3(result.filePaths[0]);
-    pictureControlEngine.load(pc);
+    try {
+        // 🎯 Utilisation explicite du manager pour éviter le conflit de nom
+        const np3Manager = require("./services/np3Manager");
+        const pc = await np3Manager.loadNP3(result.filePaths[0]);
 
-    return pictureControlEngine.get();
+        pictureControlEngine.load(pc);
+        return pictureControlEngine.get();
+    } catch (err) {
+        console.error("❌ Erreur chargement NP3/NCP :", err);
+        throw err;
+    }
 });
 
 /* =======================================================
@@ -198,7 +205,6 @@ ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
 ipcMain.handle("dialog:saveJPEG", async (event, data) => {
     const win = BrowserWindow.getFocusedWindow();
 
-    // Support flexible : Objet { defaultName, base64Data } ou String Base64 directe
     let defaultName = "export";
     let base64Data = "";
 
@@ -211,7 +217,7 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
 
     const { filePath, canceled } = await dialog.showSaveDialog(win, {
         title: "Exporter la photo",
-        defaultPath: `${defaultName}.jpg`, // 🎯 Utilise automatiquement le nom du fichier d'origine
+        defaultPath: `${defaultName}.jpg`,
         filters: [
             { name: "Image JPEG (*.jpg)", extensions: ["jpg", "jpeg"] },
             { name: "Image PNG (*.png)", extensions: ["png"] },
@@ -223,7 +229,6 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
     if (canceled || !filePath) return false;
 
     try {
-        // Décodage propre du Base64 (compatible tous formats MIME)
         const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, "");
         const imageBuffer = Buffer.from(cleanBase64, "base64");
 
@@ -234,6 +239,30 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
     } catch (err) {
         console.error("❌ Erreur écriture image :", err);
         return false;
+    }
+});
+
+// --- Exportation du fichier NCP (Nikon Z6 II) ---
+ipcMain.handle("export-ncp", async (event, pcData) => {
+    try {
+        const { filePath, canceled } = await dialog.showSaveDialog({
+            title: "Exporter pour Nikon Z6 II (.NCP)",
+            defaultPath: "NC_Z6II01.NCP",
+            filters: [{ name: "Nikon Picture Control 2.0", extensions: ["NCP", "ncp"] }]
+        });
+
+        if (canceled || !filePath) return { success: false };
+
+        // 🎯 saveNCP est maintenant bien disponible via l'import
+        const buffer = await saveNCP(pcData);
+        
+        fs.writeFileSync(filePath, buffer);
+        console.log("✅ Fichier NCP (Z6 II) sauvegardé sous :", filePath);
+
+        return { success: true, path: filePath };
+    } catch (err) {
+        console.error("❌ Erreur d'export NCP :", err);
+        throw err;
     }
 });
 

@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     // 3. Sauvegardes et Exports
     saveNP3File: (data) => ipcRenderer.invoke("dialog:saveNP3", data),
+	exportNCP: (pcData) => ipcRenderer.invoke("export-ncp", pcData),
     
     // 🎯 MISE À JOUR : On accepte l'objet complet { defaultName, base64Data } ou juste le base64
     saveJPEGFile: (data) => ipcRenderer.invoke("dialog:saveJPEG", data),
