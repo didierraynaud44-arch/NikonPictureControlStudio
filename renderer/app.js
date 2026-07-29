@@ -76,16 +76,27 @@ function initButtons() {
                         colorGrading: 0
                     };
 
-                    // 4. Chargement dans le Canvas & application des filtres (AVEC ROTATION EXIF)
+                    // 4. Chargement dans le Canvas & transmission des données Objectif/EXIF
                     if (imageSrc && window.imageProcessor) {
-                        // 🎯 Transmettre fileInfo.orientation pour redresser les portraits
-                        await window.imageProcessor.load(imageSrc, fileInfo.orientation || 1);
+                        await window.imageProcessor.load(
+                            imageSrc, 
+                            fileInfo.orientation || 1,
+                            {
+                                lens: fileInfo.lens,
+                                focalLength: fileInfo.rawFocalLength || fileInfo.focal,
+                                aperture: fileInfo.rawAperture || fileInfo.aperture
+                            }
+                        );
                         window.imageProcessor.setPictureControl(pcData);
                     }
 
-                    // 5. Mise à jour des sliders dans le panneau latéral
+                    // 5. Mise à jour du panneau latéral avec l'objectif et le Picture Control
                     if (window.updatePictureControl) {
-                        window.updatePictureControl({ pictureControl: pcData, isNewFile: true });
+                        window.updatePictureControl({ 
+                            pictureControl: pcData, 
+                            lens: fileInfo.lens || "Objectif non renseigné",
+                            isNewFile: true 
+                        });
                     }
                 }
             } catch (err) {

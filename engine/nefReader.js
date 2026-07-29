@@ -76,27 +76,34 @@ function readNEF(filePath) {
                         5: "Créatif", 6: "Action", 7: "Portrait", 8: "Paysage"
                     };
 
+                    // 🎯 Extraction du Nom de l'objectif (Lisible)
+                    const lensName = data.LensModel || data.Lens || data.LensSpec || data.LensID || "Non renseigné";
+
                     resolve({
                         path: filePath,
                         fileName: path.basename(filePath),
 
                         make: data.Make || "Nikon",
                         model: data.Model || "Boîtier Nikon",
-                        lens: data.LensModel || data.Lens || data.LensID || "Non renseigné",
+                        lens: lensName,
                         artist: data.Artist || data["By-line"] || data.Copyright || "Non renseigné",
                         comment: data.UserComment || data.Description || "Aucun",
 
-                        // 🔄 Tag d'orientation EXIF (1 = Paysage, 6 = Portrait 90°, 8 = Portrait 270°, 3 = 180°)
+                        // 🔄 Tag d'orientation EXIF
                         orientation: Number(data.Orientation) || 1,
 
                         // 📸 Compteur de déclenchements Nikon
                         shutterCount: data.ShutterCount !== undefined ? Number(data.ShutterCount) : "N/C",
 
-                        // ⚙️ Réglages
+                        // ⚙️ Réglages d'exposition
                         iso: data.ISO ? data.ISO : "N/C",
                         aperture: data.FNumber ? `f/${data.FNumber}` : "N/C",
                         shutter: shutterStr,
                         focal: data.FocalLength ? `${data.FocalLength}mm` : "N/C",
+
+                        // 📏 Données brutes pour le moteur de correction optique
+                        rawFocalLength: Number(data.FocalLength) || 0,
+                        rawAperture: Number(data.FNumber) || 0,
 
                         exposureProgram: programs[data.ExposureProgram] || "Inconnu",
                         exposureCompensation: expCompStr,
@@ -120,15 +127,17 @@ function getFallbackData(filePath) {
         fileName: path.basename(filePath),
         make: "Inconnu",
         model: "Inconnu",
-        lens: "Inconnu",
+        lens: "Non renseigné",
         artist: "Non renseigné",
         comment: "Aucun",
-        orientation: 1, // Fallback paysage standard
+        orientation: 1,
         shutterCount: "N/C",
         iso: "N/C",
         aperture: "N/C",
         shutter: "N/C",
         focal: "N/C",
+        rawFocalLength: 0,
+        rawAperture: 0,
         exposureProgram: "Inconnu",
         exposureCompensation: "0 EV",
         meteringMode: "Inconnu",

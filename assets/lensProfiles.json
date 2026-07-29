@@ -1,0 +1,36 @@
+{
+  "NIKKOR Z 24-70mm f/4 S": {
+    "distortion": {
+      "24": -0.045,
+      "35": -0.012,
+      "50": 0.008,
+      "70": 0.018
+    },
+    "vignette": 0.25
+  },
+  "NIKKOR Z 50mm f/1.8 S": {
+    "distortion": {
+      "50": 0.005
+    },
+    "vignette": 0.15
+  },
+  "AF-S NIKKOR 24-70mm f/2.8G ED": {
+    "distortion": {
+      "24": -0.038,
+      "35": -0.008,
+      "50": 0.012,
+      "70": 0.022
+    },
+    "vignette": 0.30
+  },
+  "AF-S NIKKOR 50mm f/1.4G": {
+    "distortion": {
+      "50": -0.015
+    },
+    "vignette": 0.20
+  },
+  "DEFAULT_BARREL": {
+    "distortion": -0.025,
+    "vignette": 0.15
+  }
+}

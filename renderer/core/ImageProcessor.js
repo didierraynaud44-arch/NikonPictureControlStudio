@@ -10,6 +10,7 @@ class ImageProcessor {
         this.previewBuffer = null;
         this.loadedImage = null;
         this.currentOrientation = 1;
+        this.currentLensInfo = null; // 📷 Stockage des métadonnées optiques
         this.display = new DisplayCanvas(canvasId);
 
         // 🔍 Gestion du Zoom & Pan
@@ -40,15 +41,17 @@ class ImageProcessor {
         if (typeof SaturationFilter !== "undefined") this.pipeline.add(new SaturationFilter());
 
         // ---------------------------------------------------------
-        // 2. TRAITEMENT DE L'IMAGE (Avancé)
+        // 2. TRAITEMENT DE L'IMAGE & CORRECTIONS OPTIQUES
         // ---------------------------------------------------------
         if (typeof HighlightsFilter !== "undefined") this.pipeline.add(new HighlightsFilter());
         if (typeof ShadowsFilter !== "undefined") this.pipeline.add(new ShadowsFilter());
-        
-        // Nouveaux modules de traitement
         if (typeof DehazeFilter !== "undefined") this.pipeline.add(new DehazeFilter());
         if (typeof VibranceFilter !== "undefined") this.pipeline.add(new VibranceFilter());
         if (typeof SCurveFilter !== "undefined") this.pipeline.add(new SCurveFilter());
+
+        // 🎯 Correction optique de l'objectif (Géométrie)
+        if (typeof LensCorrectionFilter !== "undefined") this.pipeline.add(new LensCorrectionFilter());
+
         if (typeof VignetteFilter !== "undefined") this.pipeline.add(new VignetteFilter());
         if (typeof DenoiseFilter !== "undefined") this.pipeline.add(new DenoiseFilter());
 
@@ -171,9 +174,9 @@ class ImageProcessor {
     }
 
     /**
-     * Chargement de la source image
+     * Chargement de la source image + transmission des métadonnées EXIF/Objectif
      */
-    load(imageSrc, orientation = 1) {
+    load(imageSrc, orientation = 1, metadata = {}) {
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.crossOrigin = "Anonymous";
@@ -181,6 +184,13 @@ class ImageProcessor {
             img.onload = () => {
                 this.loadedImage = img;
                 this.currentOrientation = Number(orientation) || 1;
+
+                // Conservation des métadonnées de l'objectif
+                this.currentLensInfo = {
+                    model: metadata.lens || "Generic",
+                    focalLength: metadata.focalLength || 0,
+                    aperture: metadata.aperture || 0
+                };
 
                 this.zoom = 1;
                 this.panX = 0;
@@ -203,7 +213,7 @@ class ImageProcessor {
 
                 this.initZoomAndPanEvents();
 
-                console.log(`✅ Image chargée (${fullCanvas.width}x${fullCanvas.height}) | Orientation: ${this.currentOrientation}`);
+                console.log(`✅ Image chargée (${fullCanvas.width}x${fullCanvas.height}) | Orientation: ${this.currentOrientation} | Objectif: ${this.currentLensInfo.model}`);
                 this.render();
                 resolve(this.originalRawBuffer);
             };
@@ -240,7 +250,7 @@ class ImageProcessor {
         clean.saturation = parseValue(clean.saturation);
         clean.hue = parseValue(clean.hue);
 
-        // --- Traitement de l'image (Avancé) ---
+        // --- Traitement de l'image & Corrections ---
         clean.highlights = parseValue(clean.highlights);
         clean.shadows = parseValue(clean.shadows);
         clean.dehaze = parseValue(clean.dehaze);
@@ -248,6 +258,10 @@ class ImageProcessor {
         clean.sCurve = parseValue(clean.sCurve);
         clean.vignette = parseValue(clean.vignette);
         clean.denoise = parseValue(clean.denoise);
+
+        // Options optiques
+        clean.lensCorrection = Boolean(clean.lensCorrection);
+        clean.lensInfo = this.currentLensInfo || clean.lensInfo || {};
 
         return clean;
     }
