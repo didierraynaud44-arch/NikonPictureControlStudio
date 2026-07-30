@@ -21,7 +21,10 @@ const { readNEF } = require("./engine/nefReader");
 const { getPreview } = require("./engine/nefPreview");
 const { readPictureControl } = require("./engine/pictureControl");
 
-// 🎯 FIX ICI : Ajout de saveNCP dans l'import
+// Import du décodeur RAW multi-marques (LibRaw)
+const { decodeRAWImage, SUPPORTED_EXTENSIONS } = require("./services/rawDecoder");
+
+// Import du manager NP3 / NCP
 const { loadNP3, saveNP3, saveNCP } = require("./services/np3Manager");
 
 let mainWindow = null;
@@ -59,7 +62,7 @@ function createAppMenu() {
             label: "Fichier",
             submenu: [
                 {
-                    label: "Ouvrir un NEF",
+                    label: "Ouvrir une image / RAW",
                     click: () => {
                         if (mainWindow) mainWindow.webContents.send("menu-open-nef");
                     }
@@ -83,18 +86,32 @@ function createAppMenu() {
 }
 
 /* =======================================================
-   5. Handlers IPC : Ouverture des fichiers (NEF & NP3)
+   5. Handlers IPC : Ouverture des fichiers (NEF, RAW & NP3)
 ======================================================= */
 
-// --- Ouverture d'un fichier NEF ---
+// Liste complète des extensions acceptées dans la boîte de dialogue
+const ALL_IMAGE_EXTENSIONS = [
+    "nef", "cr2", "cr3", "raf", "arw", "rw2", "dng", "pef", "orf",
+    "jpg", "jpeg", "png", "webp", "tif", "tiff"
+];
+
+// --- Ouverture d'un fichier Image ou RAW ---
 ipcMain.handle("open-nef", async () => {
     const result = await dialog.showOpenDialog({
-        title: "Choisir un fichier Nikon NEF",
+        title: "Choisir un fichier Image ou RAW",
         properties: ["openFile"],
         filters: [
             {
-                name: "Nikon RAW",
-                extensions: ["nef"]
+                name: "Tous les fichiers RAW & Images",
+                extensions: ALL_IMAGE_EXTENSIONS
+            },
+            {
+                name: "Fichiers RAW (Nikon, Canon, Fuji, Sony, Panasonic)",
+                extensions: ["nef", "cr2", "cr3", "raf", "arw", "rw2", "dng", "pef", "orf"]
+            },
+            {
+                name: "Images Standard",
+                extensions: ["jpg", "jpeg", "png", "webp", "tif", "tiff"]
             }
         ]
     });
@@ -102,17 +119,67 @@ ipcMain.handle("open-nef", async () => {
     if (result.canceled || !result.filePaths.length) return null;
 
     const filePath = result.filePaths[0];
+    const ext = path.extname(filePath).toLowerCase();
 
-    // Lecture des métadonnées EXIF et de la prévisualisation JPEG
-    const info = await readNEF(filePath);
-    info.preview = await getPreview(filePath);
+    try {
+        // CAS 1 : Fichier NEF Nikon (Logique d'origine conservée pour les métadonnées et PC)
+        if (ext === ".nef") {
+            const info = await readNEF(filePath);
+            info.preview = await getPreview(filePath);
 
-    // Lecture du Picture Control embarqué dans le fichier NEF
-    const pictureControl = await readPictureControl(filePath);
-    pictureControlEngine.load(pictureControl);
-    info.pictureControl = pictureControlEngine.get();
+            try {
+                const pictureControl = await readPictureControl(filePath);
+                pictureControlEngine.load(pictureControl);
+                info.pictureControl = pictureControlEngine.get();
+            } catch (pcErr) {
+                console.warn("⚠️ Impossible de lire le Picture Control embarqué du NEF :", pcErr.message);
+            }
 
-    return info;
+            return info;
+        }
+
+        // CAS 2 : Autre format RAW (Canon, Fuji, Sony, Panasonic...)
+        if (SUPPORTED_EXTENSIONS.includes(ext)) {
+            console.log(`📷 Décodage du fichier RAW multi-marques (${ext}) :`, filePath);
+            const previewDataUrl = await decodeRAWImage(filePath);
+
+            return {
+                filePath: filePath,
+                fileName: path.basename(filePath),
+                preview: previewDataUrl,
+                isRaw: true,
+                pictureControl: pictureControlEngine.get()
+            };
+        }
+
+        // CAS 3 : Image Standard (JPG, PNG, TIFF...)
+        return {
+            filePath: filePath,
+            fileName: path.basename(filePath),
+            preview: filePath,
+            isStandardImage: true,
+            pictureControl: pictureControlEngine.get()
+        };
+
+    } catch (err) {
+        console.error("❌ Erreur lors de l'ouverture du fichier :", err);
+        throw err;
+    }
+});
+
+// --- Handler IPC dédié au décodage direct d'un RAW ---
+ipcMain.handle("decode-raw", async (event, filePath) => {
+    try {
+        const ext = path.extname(filePath).toLowerCase();
+        if (SUPPORTED_EXTENSIONS.includes(ext)) {
+            const imageDataUrl = await decodeRAWImage(filePath);
+            return { success: true, data: imageDataUrl };
+        }
+        return { success: true, isStandardImage: true, path: filePath };
+    } catch (error) {
+        console.error("❌ Erreur handler decode-raw :", error);
+        return { success: false, error: error.message };
+    }
 });
 
 // --- Chargement d'un fichier binaire NP3 / NCP ---
@@ -131,7 +198,6 @@ ipcMain.handle("loadNP3", async () => {
     if (result.canceled || !result.filePaths.length) return null;
 
     try {
-        // 🎯 Utilisation explicite du manager pour éviter le conflit de nom
         const np3Manager = require("./services/np3Manager");
         const pc = await np3Manager.loadNP3(result.filePaths[0]);
 
@@ -183,14 +249,12 @@ ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
     try {
         console.log("📝 Données à encoder :", pcData);
 
-        // Encodage binaire via la fonction saveNP3 de np3Manager
         const buffer = await saveNP3(pcData); 
 
         if (!buffer || buffer.length === 0) {
             throw new Error("L'encodage NP3 a produit un buffer vide.");
         }
 
-        // Écriture du fichier binaire sur le disque
         fs.writeFileSync(filePath, buffer);
         console.log("✅ Fichier NP3 binaire sauvegardé avec succès sous :", filePath);
 
@@ -253,7 +317,6 @@ ipcMain.handle("export-ncp", async (event, pcData) => {
 
         if (canceled || !filePath) return { success: false };
 
-        // 🎯 saveNCP est maintenant bien disponible via l'import
         const buffer = await saveNCP(pcData);
         
         fs.writeFileSync(filePath, buffer);
@@ -285,4 +348,12 @@ app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
         createMainWindow();
     }
+});
+app.on('will-quit', async () => {
+    const { shutdownExiftool } = require('./services/rawDecoder');
+    await shutdownExiftool();
+});
+app.on('will-quit', async () => {
+    const { shutdownExiftool } = require('./services/rawDecoder');
+    await shutdownExiftool();
 });

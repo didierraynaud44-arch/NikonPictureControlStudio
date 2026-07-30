@@ -1,0 +1,189 @@
+const path = require('path');
+const fs = require('fs');
+const exifr = require('exifr');
+const sharp = require('sharp');
+
+const SUPPORTED_EXTENSIONS = ['.nef', '.cr2', '.cr3', '.raf', '.arw', '.rw2', '.dng', '.pef', '.orf'];
+
+/**
+ * Reconstruit et convertit un buffer JPEG en Data URL propre pour le Canvas Electron
+ */
+async function toStandardJpegDataUrl(buffer) {
+    const cleanBuffer = await sharp(buffer)
+        .rotate() // Applique l'orientation EXIF automatique
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+    return `data:image/jpeg;base64,${cleanBuffer.toString('base64')}`;
+}
+
+/**
+ * Extrait spécifiquement le JPEG embarqué d'un fichier Fujifilm (.RAF)
+ * via la table d'en-tête binaire native Fuji
+ */
+function extractFujiPreview(fileBuffer) {
+    // Vérification de la signature Fujifilm ("FUJIFILMCCD-RAW")
+    const headerStr = fileBuffer.subarray(0, 15).toString('ascii');
+    if (!headerStr.startsWith('FUJIFILM')) {
+        return null;
+    }
+
+    try {
+        // En-tête RAF officiel Fuji :
+        // Offset 0x5C (92) : Position binaire du JPEG Preview (UInt32 Big-Endian)
+        // Offset 0x60 (96) : Taille en octets du JPEG Preview (UInt32 Big-Endian)
+        if (fileBuffer.length > 100) {
+            const jpegOffset = fileBuffer.readUInt32BE(0x5C);
+            const jpegLength = fileBuffer.readUInt32BE(0x60);
+
+            if (jpegOffset > 0 && jpegLength > 10000 && (jpegOffset + jpegLength) <= fileBuffer.length) {
+                const jpegBuffer = fileBuffer.subarray(jpegOffset, jpegOffset + jpegLength);
+                
+                // Valide qu'il s'agit bien d'un JPEG (commence par 0xFFD8)
+                if (jpegBuffer[0] === 0xFF && jpegBuffer[1] === 0xD8) {
+                    console.log(`🎯 En-tête RAF lu : Offset=${jpegOffset}, Taille=${(jpegLength / 1024).toFixed(1)} Ko`);
+                    return jpegBuffer;
+                }
+            }
+        }
+    } catch (errHeader) {
+        console.warn(`⚠️ Lecture d'en-tête RAF échouée, bascule sur scan...`, errHeader.message);
+    }
+
+    // --- Fallback Scan pour versions RAF anciennes / non-standards ---
+    let largestJpeg = null;
+    let maxSize = 0;
+    let pos = 0;
+
+    const soiMarker = Buffer.from([0xFF, 0xD8]);
+
+    while (pos < fileBuffer.length - 2) {
+        const soi = fileBuffer.indexOf(soiMarker, pos);
+        if (soi === -1) break;
+
+        // Sur Fuji, si EOI n'est pas détecté de manière contiguë, on prend le segment jusqu'au prochain SOI ou la fin
+        let nextSoi = fileBuffer.indexOf(soiMarker, soi + 2);
+        let endPos = nextSoi !== -1 ? nextSoi : fileBuffer.length;
+        
+        const chunk = fileBuffer.subarray(soi, endPos);
+        if (chunk.length > 20000 && chunk.length > maxSize) {
+            maxSize = chunk.length;
+            largestJpeg = chunk;
+        }
+
+        pos = soi + 2;
+    }
+
+    return largestJpeg;
+}
+
+/**
+ * Extrait la prévisualisation JPEG intégrée dans le RAW multi-marques
+ */
+async function decodeRAWImage(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    
+    if (!SUPPORTED_EXTENSIONS.includes(ext)) {
+        throw new Error(`Extension non prise en charge : ${ext}`);
+    }
+
+    if (!fs.existsSync(filePath)) {
+        throw new Error(`Fichier introuvable : ${filePath}`);
+    }
+
+    const fileBuffer = await fs.promises.readFile(filePath);
+
+    // --- CAS SPÉCIAL 1 : FUJIFILM (.RAF) ---
+    if (ext === '.raf') {
+        try {
+            const fujiJpeg = extractFujiPreview(fileBuffer);
+            if (fujiJpeg) {
+                console.log(`✅ RAW Fuji (.raf) extrait via Header Native (${(fujiJpeg.length / 1024).toFixed(1)} Ko)`);
+                return await toStandardJpegDataUrl(fujiJpeg);
+            }
+        } catch (errFuji) {
+            console.warn(`⚠️ Échec décodage spécifique Fuji :`, errFuji.message);
+        }
+    }
+
+    // --- ESSAI 1 : exifr.extract (Nikon .nef, Sony .arw, Canon récents, DNG) ---
+    try {
+        const extractedBuffer = await exifr.extract(fileBuffer);
+        if (extractedBuffer && extractedBuffer.length > 20000) {
+            console.log(`✅ RAW (${ext}) extrait via exifr.extract (${(extractedBuffer.length / 1024).toFixed(1)} Ko)`);
+            return await toStandardJpegDataUrl(extractedBuffer);
+        }
+    } catch (errExtract) {
+        console.warn(`⚠️ exifr.extract a échoué sur ${ext} :`, errExtract.message);
+    }
+
+    // --- ESSAI 2 : Inspection des balises IFD / Offsets (Canon CR2 / Panasonic RW2 / Pentax) ---
+    try {
+        const output = await exifr.parse(fileBuffer, {
+            tiff: true,
+            ifd1: true,
+            exif: true,
+            preview: true,
+            thumbnail: false
+        });
+
+        const candidates = [
+            output?.PreviewImage,
+            output?.JpgFromRaw,
+            output?.JPEGInterchangeFormat
+        ];
+
+        for (const cand of candidates) {
+            let bufferToTest = null;
+            if (Buffer.isBuffer(cand) || cand instanceof Uint8Array) {
+                bufferToTest = Buffer.from(cand);
+            } else if (typeof cand === 'number' && cand > 0) {
+                const length = output?.JPEGInterchangeFormatLength || (fileBuffer.length - cand);
+                bufferToTest = fileBuffer.subarray(cand, cand + length);
+            }
+
+            if (bufferToTest && bufferToTest.length > 20000) {
+                console.log(`✅ RAW (${ext}) extrait via IFD Candidate (${(bufferToTest.length / 1024).toFixed(1)} Ko)`);
+                return await toStandardJpegDataUrl(bufferToTest);
+            }
+        }
+    } catch (errIfd) {
+        console.warn(`⚠️ Extraction IFD a échoué :`, errIfd.message);
+    }
+
+    // --- ESSAI 3 : Scan binaire universel de secours ---
+    try {
+        let largestJpeg = null;
+        let maxSize = 0;
+        let pos = 0;
+
+        const soiMarker = Buffer.from([0xFF, 0xD8]);
+
+        while (pos < fileBuffer.length - 2) {
+            const soi = fileBuffer.indexOf(soiMarker, pos);
+            if (soi === -1) break;
+
+            const chunk = fileBuffer.subarray(soi);
+            if (chunk.length > 20000 && chunk.length > maxSize) {
+                maxSize = chunk.length;
+                largestJpeg = chunk;
+            }
+
+            pos = soi + 2;
+        }
+
+        if (largestJpeg) {
+            console.log(`✅ RAW (${ext}) extrait via scan binaire universel (${(maxSize / 1024).toFixed(1)} Ko)`);
+            return await toStandardJpegDataUrl(largestJpeg);
+        }
+    } catch (errScan) {
+        console.error(`❌ Échec du scan binaire :`, errScan.message);
+    }
+
+    throw new Error(`Impossible de trouver une prévisualisation dans ${path.basename(filePath)}`);
+}
+
+module.exports = {
+    decodeRAWImage,
+    SUPPORTED_EXTENSIONS
+};

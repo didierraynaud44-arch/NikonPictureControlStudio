@@ -1,0 +1,1 @@
+node diagnose.js "/chemin/vers/6041774112.arw"
