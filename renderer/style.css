@@ -268,3 +268,45 @@ canvas {
 ::-webkit-scrollbar-thumb:hover {
     background: #4e5058;
 }
+/* Correctif forcé pour la bibliothèque NP3 (Colonne Gauche) */
+#view-profiles .np3-library-panel {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 260px !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+    background-color: #2b2d31 !important;
+    border-right: 1px solid #1e1f22 !important;
+    padding: 12px !important;
+    z-index: 10 !important;
+}
+/* Alignement du conteneur central */
+#view-profiles .preview-panel {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 100%;
+}
+
+/* Redimensionnement et habillage de la barre EXIF sous le panneau gauche */
+.exif-bar {
+    width: 100%;
+    min-height: 32px;
+    height: auto;
+    padding: 6px 12px;
+    background-color: #1e1f22;
+    border-top: 1px solid #2b2d31;
+    display: flex;
+    flex-wrap: wrap; /* Permet le passage à la ligne si l'écran est étroit */
+    align-items: center;
+    justify-content: center;
+    gap: 8px 14px;
+    font-size: 11px;
+    color: #dbdee1;
+    box-sizing: border-box;
+}
+
+/* Lisibilité des blocs d'information EXIF */
+.exif-bar span {
+    white-space: nowrap;
+}

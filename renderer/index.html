@@ -7,35 +7,39 @@
 </head>
 <body>
 
-    <!-- 1. En-tête principal -->
-    <header class="app-header">
-        <h1>Nikon Picture Control Studio</h1>
-        
-        <!-- Page 1 : Actions Studio -->
-        <div id="header-studio-actions" class="header-buttons">
-            <button id="openNef">📂 Ouvrir une image / RAW</button>
-            <button id="btnOpenProfilesPage" class="btn-action">🎛️ Gestionnaire de Profils Nikon</button>
-            <button id="exportJpg" class="btn-action btn-success">📸 Exporter JPG</button>
-        </div>
+    <!-- En-tête -->
+<header class="app-header">
+    <h1>Nikon Picture Control Studio</h1>
+    
+    <!-- Actions Vue 1 (Studio) - Visible par défaut -->
+    <div id="header-studio-actions" class="header-buttons">
+        <button id="openNef">📂 Ouvrir une image / RAW</button>
+        <button id="btnOpenProfilesPage" class="btn-action">🎛️ Gestionnaire de Profils Nikon</button>
+        <button id="exportJpg" class="btn-action btn-success">📸 Exporter JPG</button>
+    </div>
 
-        <!-- Page 2 : Actions Gestionnaire -->
-        <div id="header-profile-actions" class="header-buttons" style="display: none;">
-            <button id="openNP3" class="btn-primary">📂 Importer un NP3</button>
-            <button id="saveNP3" class="btn-action">💾 Enregistrer NP3 Z50 II</button>
-            <button id="exportNCP" class="btn-action">💾 Exporter pour Z6 II (.NCP)</button>
-            <button id="btnReturnToStudio" class="btn-secondary">⬅️ Retour au Studio</button>
-        </div>
-    </header>
-
-    <!-- 2. VUE 1 : Studio (Canvas + Barre EXIF + Panneau Réglages à droite) -->
+    <!-- Actions Vue 2 (Gestionnaire) - Masqué par défaut -->
+    <div id="header-profile-actions" class="header-buttons" style="display: none;">
+        <button id="openNP3" class="btn-primary">📂 Importer un NP3</button>
+        <button id="saveNP3" class="btn-action">💾 Enregistrer NP3 Z50 II</button>
+        <button id="exportNCP" class="btn-action">💾 Exporter pour Z6 II (.NCP)</button>
+        <button id="btnReturnToStudio" class="btn-secondary">⬅️ Retour au Studio</button>
+    </div>
+</header>
+    <!-- VUE 1 : Studio (3 Colonnes) -->
     <main id="view-studio" class="app-main view-active">
         
-        <!-- Zone Centrale : Image et EXIF -->
+        <!-- Colonne Gauche : Bibliothèque NP3 -->
+        <aside class="sidebar-panel np3-library-panel">
+            <h3>Bibliothèque NP3</h3>
+            <div id="np3ListContainer" class="np3-list"></div>
+        </aside>
+
+        <!-- Colonne Centre : Canvas & EXIF -->
         <section class="preview-panel">
             <div class="canvas-container">
                 <canvas id="previewCanvas"></canvas>
             </div>
-            <!-- Barre d'informations EXIF -->
             <div id="exifInfo" class="exif-bar">
                 <span id="exifCamera">-</span> | 
                 <span id="exifLens">-</span> | 
@@ -43,46 +47,29 @@
             </div>
         </section>
 
-        <!-- Zone Droite : Panneau de réglages et de traitement -->
+        <!-- Colonne Droite : Réglages Picture Control -->
         <aside class="sidebar-panel">
-            <div id="pictureControlStatus" class="card-panel">
-                <!-- Généré dynamiquement par pictureControlPanel.js -->
-            </div>
+            <div id="pictureControlStatus" class="card-panel"></div>
         </aside>
 
     </main>
 
-    <!-- 3. VUE 2 : Gestionnaire de Profils (Bibliothèque NP3 + Canvas + Réglages) -->
+    <!-- VUE 2 : Gestionnaire de Profils -->
     <main id="view-profiles" class="app-main view-hidden" style="display: none;">
-        
-        <!-- Colonne 1 : Bibliothèque NP3 -->
-        <aside class="sidebar-panel np3-library-panel">
-            <h3>Bibliothèque NP3</h3>
-            <div id="np3ListContainer" class="np3-list"></div>
-        </aside>
-
-        <!-- Colonne 2 : Canvas d'aperçu du profil -->
-        <section class="preview-panel">
+        <section class="preview-panel full-width">
             <div class="canvas-container">
                 <canvas id="profilePreviewCanvas"></canvas>
             </div>
         </section>
-
-        <!-- Colonne 3 : Panneau de réglages du profil -->
-        <aside class="sidebar-panel">
-            <div id="pictureControlStatusProfile" class="card-panel">
-                <!-- Conteneur secondaire si besoin -->
-            </div>
-        </aside>
-
     </main>
 
-    <!-- Scripts -->
+    <!-- Core Scripts -->
     <script src="core/ImageBuffer.js"></script>
     <script src="core/DisplayCanvas.js"></script>
     <script src="core/RenderPipeline.js"></script>
     <script src="core/BaseFilter.js"></script>
 
+    <!-- Filtres -->
     <script src="filters/ContrastFilter.js"></script>
     <script src="filters/BrightnessFilter.js"></script>
     <script src="filters/HighlightsFilter.js"></script>
@@ -100,8 +87,8 @@
     <script src="filters/SCurveFilter.js"></script>
     <script src="filters/VignetteFilter.js"></script>
     <script src="filters/DenoiseFilter.js"></script>
-    <script src="filters/LensCorrectionFilter.js"></script>
 
+    <!-- UI & Moteur -->
     <script src="components/ToneCurveWidget.js"></script>
     <script src="core/ImageProcessor.js"></script>
     <script src="components/exifPanel.js"></script>

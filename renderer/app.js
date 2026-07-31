@@ -19,11 +19,14 @@ try {
  */
 function renderNp3Library() {
     const container = document.getElementById("np3ListContainer");
-    if (!container) return;
+    if (!container) {
+        console.warn("⚠️ Conteneur #np3ListContainer non trouvé");
+        return;
+    }
 
     container.innerHTML = "";
 
-    if (np3Library.length === 0) {
+    if (!np3Library || np3Library.length === 0) {
         container.innerHTML = `<p style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">Aucun profil importé</p>`;
         return;
     }
@@ -32,7 +35,7 @@ function renderNp3Library() {
         const div = document.createElement("div");
         div.className = "np3-item";
         div.innerHTML = `
-            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">📄 ${item.name}</span>
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px;">📄 ${item.name}</span>
             <button class="btn-remove-np3" data-index="${index}" title="Supprimer">✕</button>
         `;
 
@@ -84,11 +87,20 @@ function initButtons() {
     const headerStudio    = document.getElementById("header-studio-actions");
     const headerProfiles  = document.getElementById("header-profile-actions");
 
-    // S'assurer que le menu Studio est bien visible par défaut au lancement
+    // S'assurer de la visibilité par défaut de la Vue 1 (Studio)
     if (headerStudio) headerStudio.style.display = "flex";
     if (headerProfiles) headerProfiles.style.display = "none";
     if (viewStudio) viewStudio.style.display = "flex";
     if (viewProfiles) viewProfiles.style.display = "none";
+
+    // Instancier le processeur Studio par défaut s'il n'existe pas encore
+    if (!window.imageProcessor && typeof ImageProcessor !== "undefined") {
+        const studioCanvas = document.getElementById("previewCanvas");
+        if (studioCanvas) {
+            window.imageProcessor = new ImageProcessor("previewCanvas");
+        }
+    }
+
     /*---------------------------------------------------------
         1. Navigation entre Studio et Gestionnaire
     ---------------------------------------------------------*/
@@ -100,7 +112,15 @@ function initButtons() {
             if (viewProfiles) viewProfiles.style.display = "flex";
             if (headerProfiles) headerProfiles.style.display = "flex";
 
-            // 1. Initialiser le Canvas de la vue Gestionnaire si nécessaire
+            // 1. Déplacer dynamiquement le panneau de réglages dans la Vue 2 si nécessaire
+            const settingsContainerVue1 = document.querySelector("#view-studio #pictureControlStatus");
+            const settingsContainerVue2 = document.querySelector("#view-profiles #pictureControlStatus");
+            
+            if (settingsContainerVue1 && settingsContainerVue2 && settingsContainerVue1.children.length > 0) {
+                settingsContainerVue2.appendChild(settingsContainerVue1.firstElementChild);
+            }
+
+            // 2. Initialiser le Canvas de la vue Gestionnaire si nécessaire
             if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
                 const profileCanvas = document.getElementById("profilePreviewCanvas");
                 if (profileCanvas) {
@@ -108,7 +128,7 @@ function initButtons() {
                 }
             }
 
-            // 2. Synchroniser l'image chargée du Studio vers la Vue Gestionnaire
+            // 3. Synchroniser l'image du Studio vers le Gestionnaire
             if (profileImageProcessor && window.imageProcessor?.loadedImage) {
                 await profileImageProcessor.load(
                     window.imageProcessor.loadedImage.src,
@@ -120,7 +140,7 @@ function initButtons() {
                 }
             }
 
-            // 3. Forcer le rendu de la liste NP3
+            // 4. Forcer le rendu de la bibliothèque NP3
             renderNp3Library();
         };
     }
@@ -133,7 +153,15 @@ function initButtons() {
             if (viewStudio) viewStudio.style.display = "flex";
             if (headerStudio) headerStudio.style.display = "flex";
 
-            // Reporter le Picture Control ajusté vers l'instance principale
+            // Déplacer le panneau de réglages de retour vers la Vue 1
+            const settingsContainerVue1 = document.querySelector("#view-studio #pictureControlStatus");
+            const settingsContainerVue2 = document.querySelector("#view-profiles #pictureControlStatus");
+            
+            if (settingsContainerVue1 && settingsContainerVue2 && settingsContainerVue2.children.length > 0) {
+                settingsContainerVue1.appendChild(settingsContainerVue2.firstElementChild);
+            }
+
+            // Reporter les réglages vers l'instance principale
             if (profileImageProcessor && window.imageProcessor) {
                 window.imageProcessor.setPictureControl(profileImageProcessor.pictureControl);
             }
@@ -280,10 +308,11 @@ function initButtons() {
         };
     }
 
+    // Afficher la bibliothèque au chargement initial
     renderNp3Library();
 }
 
-// Initialisation au chargement
+// Lancement au chargement du DOM
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initButtons);
 } else {
