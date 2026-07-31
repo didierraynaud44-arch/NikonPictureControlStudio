@@ -3,58 +3,96 @@
 =========================================================*/
 
 let currentNefFileName = "image-editee";
+let profileImageProcessor = null; // Processeur dédié au Canvas de la page profils
 
 function initButtons() {
-    const btnNef       = document.getElementById("openNef");
-    const btnNP3       = document.getElementById("openNP3");
-    const btnSaveNP3   = document.getElementById("saveNP3");
-    const btnExportNCP = document.getElementById("exportNCP"); // 🎯 Bouton export Z6 II (.NCP)
-    const btnExportJpg = document.getElementById("exportJpg");
+    // Boutons
+    const btnNef           = document.getElementById("openNef");
+    const btnExportJpg     = document.getElementById("exportJpg");
+    const btnOpenProfiles  = document.getElementById("btnOpenProfilesPage");
+    const btnReturnStudio  = document.getElementById("btnReturnToStudio");
+    const btnNP3           = document.getElementById("openNP3");
+    const btnSaveNP3       = document.getElementById("saveNP3");
+    const btnExportNCP     = document.getElementById("exportNCP");
 
-    console.log("🚀 Initialisation des boutons...", { 
-        btnNef: !!btnNef, 
-        btnNP3: !!btnNP3, 
-        btnSaveNP3: !!btnSaveNP3,
-        btnExportNCP: !!btnExportNCP,
-        btnExportJpg: !!btnExportJpg 
-    });
+    // Vues et En-têtes
+    const viewStudio       = document.getElementById("view-studio");
+    const viewProfiles     = document.getElementById("view-profiles");
+    const headerStudio     = document.getElementById("header-studio-actions");
+    const headerProfiles   = document.getElementById("header-profile-actions");
 
     /*---------------------------------------------------------
-        1. Charger un fichier NEF
+        Navigation et synchronisation du rendu d'image
+    ---------------------------------------------------------*/
+/*---------------------------------------------------------
+        Navigation et synchronisation du rendu d'image
+    ---------------------------------------------------------*/
+    if (btnOpenProfiles) {
+        btnOpenProfiles.onclick = async () => {
+            if (viewStudio) viewStudio.style.display = "none";
+            if (headerStudio) headerStudio.style.display = "none";
+
+            if (viewProfiles) viewProfiles.style.display = "flex";
+            if (headerProfiles) headerProfiles.style.display = "flex";
+
+            // Initialise le processeur du 2ème Canvas si nécessaire
+            if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
+                profileImageProcessor = new ImageProcessor("profilePreviewCanvas");
+            }
+
+            // Charge l'image actuelle dans le 2ème Canvas
+            if (window.imageProcessor && window.imageProcessor.loadedImage) {
+                await profileImageProcessor.load(
+                    window.imageProcessor.loadedImage.src,
+                    window.imageProcessor.currentOrientation
+                );
+
+                if (window.imageProcessor.pictureControl) {
+                    profileImageProcessor.setPictureControl(window.imageProcessor.pictureControl);
+                }
+            }
+
+            // 🎯 ASTUCE : On redirige la référence globale vers le processeur de la page 2
+            window.activeProcessorBackup = window.imageProcessor;
+            window.imageProcessor = profileImageProcessor;
+        };
+    }
+
+    if (btnReturnStudio) {
+        btnReturnStudio.onclick = () => {
+            if (viewProfiles) viewProfiles.style.display = "none";
+            if (headerProfiles) headerProfiles.style.display = "none";
+
+            if (viewStudio) viewStudio.style.display = "flex";
+            if (headerStudio) headerStudio.style.display = "flex";
+
+            // Synchronise les réglages avec le Studio principal
+            if (profileImageProcessor && window.activeProcessorBackup) {
+                window.activeProcessorBackup.setPictureControl(profileImageProcessor.pictureControl);
+            }
+
+            // 🎯 Restauration du processeur principal pour la page 1
+            if (window.activeProcessorBackup) {
+                window.imageProcessor = window.activeProcessorBackup;
+            }
+        };
+    }
+    /*---------------------------------------------------------
+        1. Charger une image RAW / Standard
     ---------------------------------------------------------*/
     if (btnNef) {
         btnNef.onclick = async () => {
-            console.log("📂 Clic Ouvrir NEF");
             try {
                 const fileInfo = await window.electronAPI.openNEF();
-                console.log("Données NEF reçues :", fileInfo);
-
                 if (fileInfo) {
-                    // Mémorise le nom du fichier sans son extension (.NEF)
                     if (fileInfo.fileName) {
                         currentNefFileName = fileInfo.fileName.replace(/\.[^/.]+$/, "");
                     }
 
-                    // 1. Mettre à jour les infos EXIF dans l'IHM
                     if (typeof window.updateExif === "function") {
                         window.updateExif(fileInfo);
-                    } else {
-                        // FALLBACK DIRECT : Si window.updateExif n'existe pas
-                        const cameraEl = document.getElementById("exifCamera") || document.getElementById("camera-info");
-                        const lensEl   = document.getElementById("exifLens")   || document.getElementById("lens-info");
-                        const paramsEl = document.getElementById("exifParams") || document.getElementById("settings-info");
-
-                        if (cameraEl) cameraEl.textContent = `${fileInfo.make || ''} ${fileInfo.model || ''}`.trim();
-                        if (lensEl)   lensEl.textContent   = fileInfo.lens || "Objectif non renseigné";
-                        if (paramsEl) {
-                            const details = [fileInfo.focal, fileInfo.aperture, fileInfo.shutter, fileInfo.iso ? `ISO ${fileInfo.iso}` : ""]
-                                .filter(Boolean)
-                                .join(" | ");
-                            paramsEl.textContent = details;
-                        }
                     }
 
-                    // 2. Traitement du format d'image (Base64 ou Chemin local)
                     let rawSrc = fileInfo.previewPath || fileInfo.preview || fileInfo.imageData || fileInfo.image || fileInfo.path;
                     let imageSrc = "";
 
@@ -69,9 +107,6 @@ function initButtons() {
                         }
                     }
 
-                    console.log("🔗 Source transmise au Canvas :", imageSrc.substring(0, 60) + "...");
-
-                    // 3. Extraction du Picture Control
                     const pcData = fileInfo.pictureControl || fileInfo.pc || {
                         sharpening: 3.25,
                         midRangeSharpening: 1.0,
@@ -80,12 +115,9 @@ function initButtons() {
                         highlights: 0,
                         shadows: 0,
                         saturation: 0,
-                        toneCurve: 0,
-                        hue: 0,
-                        colorGrading: 0
+                        hue: 0
                     };
 
-                    // 4. Chargement dans le Canvas & transmission des données Objectif/EXIF
                     if (imageSrc && window.imageProcessor) {
                         await window.imageProcessor.load(
                             imageSrc, 
@@ -99,7 +131,6 @@ function initButtons() {
                         window.imageProcessor.setPictureControl(pcData);
                     }
 
-                    // 5. Mise à jour du panneau latéral avec l'objectif et le Picture Control
                     if (window.updatePictureControl) {
                         window.updatePictureControl({ 
                             pictureControl: pcData, 
@@ -115,54 +146,36 @@ function initButtons() {
     }
 
     /*---------------------------------------------------------
-        2. Importer un fichier NP3 / NCP
+        2. Importer un NP3 (Applique aux deux processeurs)
     ---------------------------------------------------------*/
     if (btnNP3) {
         btnNP3.onclick = async () => {
-            console.log("🎛️ Clic Importer NP3 / NCP");
             try {
                 const response = await window.electronAPI.loadNP3();
-                console.log("Données NP3/NCP reçues :", response);
-
                 if (response) {
                     const pc = response.pictureControl || response.pc || response;
 
-                    if (window.imageProcessor) {
-                        window.imageProcessor.setPictureControl(pc);
-                    }
+                    if (window.imageProcessor) window.imageProcessor.setPictureControl(pc);
+                    if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
 
-                    if (window.updatePictureControl) {
-                        window.updatePictureControl({ pictureControl: pc });
-                    }
+                    if (window.updatePictureControl) window.updatePictureControl({ pictureControl: pc });
                 }
             } catch (err) {
-                console.error("❌ Erreur import NP3/NCP :", err);
+                console.error("❌ Erreur import NP3 :", err);
             }
         };
     }
 
     /*---------------------------------------------------------
-        3. Sauvegarder le fichier NP3 (Z50 II / Z8 / Z9)
+        3. Enregistrer NP3
     ---------------------------------------------------------*/
     if (btnSaveNP3) {
         btnSaveNP3.onclick = async () => {
-            console.log("💾 Clic Sauvegarder NP3");
             try {
-                if (!window.imageProcessor || !window.imageProcessor.pictureControl) {
-                    console.warn("⚠️ Aucun Picture Control à sauvegarder.");
-                    return;
-                }
+                const activePC = profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
+                if (!activePC) return;
 
-                const currentSettings = window.imageProcessor.pictureControl;
-                
-                if (window.electronAPI && window.electronAPI.saveNP3File) {
-                    const saved = await window.electronAPI.saveNP3File(currentSettings);
-                    if (saved) {
-                        console.log("✅ Fichier NP3 enregistré avec succès !");
-                    }
-                } else {
-                    console.error("❌ Méthode saveNP3File introuvable dans electronAPI.");
-                }
+                await window.electronAPI.saveNP3File(activePC);
             } catch (err) {
                 console.error("❌ Erreur sauvegarde NP3 :", err);
             }
@@ -170,27 +183,15 @@ function initButtons() {
     }
 
     /*---------------------------------------------------------
-        3bis. Exporter pour Nikon Z6 II (.NCP)
+        4. Exporter NCP (Z6 II)
     ---------------------------------------------------------*/
     if (btnExportNCP) {
         btnExportNCP.onclick = async () => {
-            console.log("💾 Clic Exporter NCP pour Z6 II");
             try {
-                if (!window.imageProcessor || !window.imageProcessor.pictureControl) {
-                    console.warn("⚠️ Aucun Picture Control à exporter pour Z6 II.");
-                    return;
-                }
+                const activePC = profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
+                if (!activePC) return;
 
-                const currentSettings = window.imageProcessor.pictureControl;
-
-                if (window.electronAPI && typeof window.electronAPI.exportNCP === "function") {
-                    const result = await window.electronAPI.exportNCP(currentSettings);
-                    if (result && result.success) {
-                        console.log("✅ Fichier NCP (Z6 II) exporté avec succès ! Path :", result.path);
-                    }
-                } else {
-                    console.error("❌ Méthode exportNCP introuvable dans electronAPI.");
-                }
+                await window.electronAPI.exportNCP(activePC);
             } catch (err) {
                 console.error("❌ Erreur export NCP :", err);
             }
@@ -198,41 +199,20 @@ function initButtons() {
     }
 
     /*---------------------------------------------------------
-        4. Exporter l'Image (JPG, PNG, TIFF, WebP)
+        5. Exporter l'image HD (JPG)
     ---------------------------------------------------------*/
     if (btnExportJpg) {
         btnExportJpg.onclick = async () => {
-            console.log("📸 Clic Exporter Image HD");
             try {
-                if (!window.imageProcessor) {
-                    console.warn("⚠️ Moteur de rendu indisponible.");
-                    return;
-                }
+                const activeProcessor = window.imageProcessor || profileImageProcessor;
+                if (!activeProcessor) return;
 
-                let base64Data = null;
-                if (typeof window.imageProcessor.exportImage === "function") {
-                    base64Data = await window.imageProcessor.exportImage("image/jpeg", 0.95);
-                } else if (typeof window.imageProcessor.exportJPEG === "function") {
-                    base64Data = await window.imageProcessor.exportJPEG(0.95);
-                }
-
+                const base64Data = await activeProcessor.exportImage("image/jpeg", 0.95);
                 if (base64Data && window.electronAPI) {
-                    const saveMethod = window.electronAPI.saveImageFile || window.electronAPI.saveJPEGFile;
-                    
-                    if (typeof saveMethod === "function") {
-                        const saved = await saveMethod({
-                            defaultName: currentNefFileName,
-                            base64Data: base64Data
-                        });
-
-                        if (saved) {
-                            console.log(`✅ Image ${currentNefFileName} exportée avec succès !`);
-                        }
-                    } else {
-                        console.error("❌ Méthode de sauvegarde IPC introuvable dans electronAPI.");
-                    }
-                } else {
-                    console.error("❌ Impossible de générer le rendu base64 de l'image.");
+                    await window.electronAPI.saveImageFile({
+                        defaultName: currentNefFileName,
+                        base64Data: base64Data
+                    });
                 }
             } catch (err) {
                 console.error("❌ Erreur exportation Image :", err);
@@ -241,9 +221,6 @@ function initButtons() {
     }
 }
 
-/*=========================================================
-    Initialisation au chargement de la page
-=========================================================*/
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initButtons);
 } else {

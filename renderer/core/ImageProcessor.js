@@ -250,6 +250,17 @@ class ImageProcessor {
         clean.saturation = parseValue(clean.saturation);
         clean.hue = parseValue(clean.hue);
 
+        // --- Détection & Options Monochrome ---
+        const profileName = (clean.name || "").toLowerCase();
+        const isMonoProfile = profileName.includes("monochrome") || Boolean(clean.isMonochrome || clean.monochrome);
+        clean.isMonochrome = isMonoProfile;
+        clean.monoFilter = clean.monoFilter || "None";
+        clean.monoToning = clean.monoToning || "None";
+
+        if (clean.isMonochrome) {
+            clean.saturation = -100;
+        }
+
         // --- Traitement de l'image & Corrections ---
         clean.highlights = parseValue(clean.highlights);
         clean.shadows = parseValue(clean.shadows);
@@ -271,6 +282,54 @@ class ImageProcessor {
 
         if (!this.originalRawBuffer) return;
         this.render();
+    }
+
+    /**
+     * Mise à jour d'un paramètre individuel depuis les curseurs du panneau
+     */
+    updateFilter(filterType, value) {
+        if (!this.pictureControl) {
+            this.pictureControl = {};
+        }
+
+        switch (filterType) {
+            case "sharpening":
+                this.pictureControl.sharpening = Number(value);
+                break;
+            case "contrast":
+                this.pictureControl.contrast = Number(value);
+                break;
+            case "saturation":
+                this.pictureControl.saturation = Number(value);
+                break;
+            case "hue":
+                this.pictureControl.hue = Number(value);
+                break;
+            case "monochrome":
+                this.pictureControl.isMonochrome = Boolean(value);
+                if (value) {
+                    this.pictureControl.saturation = -100;
+                } else {
+                    this.pictureControl.saturation = 0;
+                    this.pictureControl.monoFilter = "None";
+                    this.pictureControl.monoToning = "None";
+                }
+                break;
+            case "monoFilter":
+                this.pictureControl.monoFilter = value;
+                break;
+            case "monoToning":
+                this.pictureControl.monoToning = value;
+                break;
+            default: {
+                const numericVal = parseFloat(value);
+                this.pictureControl[filterType] = isNaN(numericVal) ? value : numericVal;
+            }
+        }
+
+        if (this.originalRawBuffer) {
+            this.render();
+        }
     }
 
     /**
@@ -321,9 +380,6 @@ class ImageProcessor {
     }
 
     /**
-     * Exportation JPEG pleine résolution
-     */
-/**
      * Exportation multi-formats pleine résolution
      * @param {string} format - 'image/jpeg', 'image/png', 'image/webp'
      * @param {number} quality - Qualité de 0.1 à 1.0 (pour JPEG/WEBP)
@@ -350,11 +406,7 @@ class ImageProcessor {
         const ctx = exportCanvas.getContext("2d");
         ctx.putImageData(fullResImageData, 0, 0);
 
-        // Pour le TIFF/PNG, canvas.toDataURL gère nativement le PNG. 
-        // Pour les formats non supportés nativement par le browser canvas (ex: TIFF), 
-        // le fallback est image/png converti ou transmis sous forme de canvas d'exportation.
         if (format === "image/tiff") {
-            // PNG haute qualité servant de base au buffer principal
             return exportCanvas.toDataURL("image/png");
         }
 
