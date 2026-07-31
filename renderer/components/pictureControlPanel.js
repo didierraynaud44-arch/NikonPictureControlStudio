@@ -1,5 +1,5 @@
 /*=========================================================
-    Nikon Picture Control Studio - Panneau Latéral (Mise à jour)
+    Nikon Picture Control Studio - Panneau Latéral
 =========================================================*/
 
 let originalPictureControl = null;
@@ -27,12 +27,43 @@ function createSlider(label, id, value, min, max, step = 1) {
 function activateEventListeners() {
     let renderTimer = null;
 
-    // 1. Changement de Profil Nikon
+    // 1. Changement de Profil Nikon via le menu déroulant
     const profileSelect = document.getElementById("pcProfileSelect");
     if (profileSelect) {
         profileSelect.addEventListener("change", () => {
             const selectedProfile = profileSelect.value;
             const isMono = selectedProfile === "Monochrome" || selectedProfile === "MC";
+
+            const presetValues = {
+                Standard:  { sharpening: 3, midRangeSharpening: 2, clarity: 1, contrast: 0, saturation: 0, hue: 0 },
+                Neutral:   { sharpening: 2, midRangeSharpening: 1, clarity: 0, contrast: -1, saturation: -1, hue: 0 },
+                Vivid:     { sharpening: 4, midRangeSharpening: 3, clarity: 1.5, contrast: 2, saturation: 2, hue: 0 },
+                Portrait:  { sharpening: 2, midRangeSharpening: 1, clarity: -0.5, contrast: -1, saturation: 0, hue: 0 },
+                Landscape: { sharpening: 5, midRangeSharpening: 3, clarity: 2, contrast: 2, saturation: 2, hue: 0 },
+                Flat:      { sharpening: 2, midRangeSharpening: 1, clarity: 0, contrast: -3, saturation: -2, hue: 0 },
+                Monochrome:{ sharpening: 3, midRangeSharpening: 2, clarity: 1, contrast: 1, saturation: -100, hue: 0 }
+            };
+
+            const vals = presetValues[selectedProfile] || presetValues.Standard;
+
+            const updateSlider = (id, val) => {
+                const el = document.getElementById(id);
+                const txt = document.getElementById(id + "-value");
+                if (el) el.value = val;
+                if (txt) txt.textContent = val;
+            };
+
+            updateSlider("sharpening", vals.sharpening);
+            updateSlider("midRangeSharpening", vals.midRangeSharpening);
+            updateSlider("clarity", vals.clarity);
+            updateSlider("contrast", vals.contrast);
+            updateSlider("saturation", isMono ? -100 : vals.saturation);
+            updateSlider("hue", vals.hue);
+
+            updateSlider("highlights", 0);
+            updateSlider("shadows", 0);
+            updateSlider("dehaze", 0);
+            updateSlider("vibrance", 0);
 
             const monoBlock = document.getElementById("monochromeBlock");
             const satRow = document.getElementById("row-saturation");
@@ -41,6 +72,10 @@ function activateEventListeners() {
             if (monoBlock) monoBlock.style.display = isMono ? "block" : "none";
             if (satRow) satRow.style.display = isMono ? "none" : "flex";
             if (hueRow) hueRow.style.display = isMono ? "none" : "flex";
+
+            if (window.toneCurveWidget) {
+                window.toneCurveWidget.reset();
+            }
 
             triggerEngineUpdate();
         });
@@ -71,7 +106,6 @@ function activateEventListeners() {
                 const resetPC = await window.electronAPI?.pcReset();
                 const finalPC = resetPC || structuredClone(originalPictureControl);
                 
-                // Réinitialiser également le canvas de la courbe
                 if (window.toneCurveWidget) {
                     window.toneCurveWidget.reset();
                 }
@@ -109,29 +143,34 @@ function getLocalControlsState() {
     const filterEl = document.getElementById("filterEffect");
     const toningEl = document.getElementById("toningEffect");
 
-    // Extraction de la Look-Up Table de la Courbe de Tonalité si présente
     const curveLut = window.toneCurveWidget ? window.toneCurveWidget.getLUT() : null;
+
+    const currentSharpness = getVal("sharpening");
+    const currentMidSharpness = getVal("midRangeSharpening");
 
     return {
         name: profileName,
         pictureControlName: profileName,
+        baseProfile: profileName.toUpperCase(),
+        basePictureControl: profileName.toUpperCase(),
         isMonochrome: isMono,
 
-        // --- Picture Control Nikon Officiel ---
-        sharpening: getVal("sharpening"),
-        midRangeSharpening: getVal("midRangeSharpening"),
+        // 🎯 Envoi sous les deux orthographes (sharpening + sharpning) pour compatibilité binaire
+        sharpening: currentSharpness,
+        sharpning: currentSharpness,
+        midRangeSharpening: currentMidSharpness,
+        midRangeSharpning: currentMidSharpness,
+
         clarity: getVal("clarity"),
         contrast: getVal("contrast"),
         brightness: getVal("brightness"),
-        saturation: getVal("saturation"),
+        saturation: isMono ? -100 : getVal("saturation"),
         hue: getVal("hue"),
 
-        // Options N&B
         filterEffect: filterEl ? filterEl.value : "OFF",
         toningEffect: toningEl ? toningEl.value : "B&W",
         toningAmount: getVal("toningAmount"),
 
-        // --- Traitement de l'image (Avancé) ---
         highlights: getVal("highlights"),
         shadows: getVal("shadows"),
         dehaze: getVal("dehaze"),
@@ -140,7 +179,6 @@ function getLocalControlsState() {
         denoise: getVal("denoise"),
         lensCorrection: getBool("lensCorrection"),
 
-        // Courbe de Tonalité (Interactive)
         toneCurveLut: curveLut
     };
 }
@@ -160,17 +198,32 @@ function updatePictureControl(info, isNewPhoto = false) {
     }
 
     const pc = info.pictureControl;
-    const currentName = pc.name || pc.pictureControlName || "Standard";
-    const isMono = pc.isMonochrome === true || currentName === "Monochrome" || currentName === "MC";
+
+    // Normalisation des clés de netteté
+    pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
+    pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
+
+    let currentName = pc.name || pc.pictureControlName || pc.basePictureControl || pc.baseProfile || "Standard";
+    
+    // Correspondance stricte pour le select
+    const upper = currentName.toString().toUpperCase();
+    if (upper.includes("VIVID")) currentName = "Vivid";
+    else if (upper.includes("NEUT")) currentName = "Neutral";
+    else if (upper.includes("PORTRAIT")) currentName = "Portrait";
+    else if (upper.includes("LANDSCAPE") || upper.includes("PAYSAGE")) currentName = "Landscape";
+    else if (upper.includes("FLAT")) currentName = "Flat";
+    else if (upper.includes("MONO") || upper.includes("MC")) currentName = "Monochrome";
+    else currentName = "Standard";
+
+    const isMono = pc.isMonochrome === true || currentName === "Monochrome";
 
     panel.innerHTML = `
         <h2>Picture Control Nikon</h2>
 
-        <!-- Profil -->
         <div class="pc-row" style="margin-bottom: 12px;">
             <label for="pcProfileSelect" style="font-weight: bold;">Profil :</label>
             <select id="pcProfileSelect" class="pc-select" style="background:#222; color:#fff; border:1px solid #555; padding:4px 8px; border-radius:4px;">
-                <option value="Standard" ${!isMono && currentName === 'Standard' ? 'selected' : ''}>Standard</option>
+                <option value="Standard" ${currentName === 'Standard' ? 'selected' : ''}>Standard</option>
                 <option value="Neutral" ${currentName === 'Neutral' ? 'selected' : ''}>Neutre</option>
                 <option value="Vivid" ${currentName === 'Vivid' ? 'selected' : ''}>Saturé (Vivid)</option>
                 <option value="Monochrome" ${isMono ? 'selected' : ''}>Monochrome</option>
@@ -180,7 +233,6 @@ function updatePictureControl(info, isNewPhoto = false) {
             </select>
         </div>
 
-        <!-- Options Monochrome -->
         <div id="monochromeBlock" style="display: ${isMono ? 'block' : 'none'}; background: #2a2a2a; padding: 10px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #444;">
             <h4 style="margin-top:0; color: #e0e0e0;">📷 Options Monochrome</h4>
             
@@ -214,9 +266,8 @@ function updatePictureControl(info, isNewPhoto = false) {
             </div>
         </div>
 
-        <!-- Sliders officiels Nikon -->
-        ${createSlider("Accentuation", "sharpening", pc.sharpening ?? 0, -3, 9, 0.25)}
-        ${createSlider("Accentuation moyenne", "midRangeSharpening", pc.midRangeSharpening ?? 0, -5, 5, 0.25)}
+        ${createSlider("Accentuation", "sharpening", pc.sharpening, -3, 9, 0.25)}
+        ${createSlider("Accentuation moyenne", "midRangeSharpening", pc.midRangeSharpening, -5, 5, 0.25)}
         ${createSlider("Clarté", "clarity", pc.clarity ?? 0, -5, 5, 0.25)}
         ${createSlider("Contraste", "contrast", pc.contrast ?? 0, -3, 3, 0.25)}
         ${createSlider("Luminosité", "brightness", pc.brightness ?? 0, -1.5, 1.5, 0.1)}
@@ -231,7 +282,6 @@ function updatePictureControl(info, isNewPhoto = false) {
         ${createSlider("Correction du voile", "dehaze", pc.dehaze ?? 0, 0, 10, 0.5)}
         ${createSlider("Vibrance", "vibrance", pc.vibrance ?? 0, -5, 5, 0.25)}
         
-        <!-- Module Graphique Courbe de Tonalité -->
         <div style="margin: 12px 0;">
             <label style="font-weight: bold; color: #00aaff; font-size: 13px;">Courbe de tonalité :</label>
             <div id="toneCurveContainer"></div>
@@ -254,7 +304,6 @@ function updatePictureControl(info, isNewPhoto = false) {
     if (satRow) satRow.style.display = isMono ? "none" : "flex";
     if (hueRow) hueRow.style.display = isMono ? "none" : "flex";
 
-    // Instanciation du Widget de la Courbe
     if (window.ToneCurveWidget && document.getElementById("toneCurveContainer")) {
         window.toneCurveWidget = new ToneCurveWidget("toneCurveContainer", () => {
             triggerEngineUpdate();
@@ -262,7 +311,7 @@ function updatePictureControl(info, isNewPhoto = false) {
     }
 
     activateEventListeners();
-    triggerEngineUpdate();
+    // 🎯 Retrait de triggerEngineUpdate() ici pour préserver les réglages importés
 }
 
 window.updatePictureControl = updatePictureControl;

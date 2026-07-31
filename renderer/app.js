@@ -46,12 +46,21 @@ function renderNp3Library() {
             document.querySelectorAll(".np3-item").forEach(el => el.classList.remove("active"));
             div.classList.add("active");
 
+            // Extraction sécurisée des données du profil
+            let pc = item.data?.pictureControl || item.data || {};
+
+            // Correction des clés de netteté binaires
+            pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
+            pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
+
+            console.log("👉 Application du profil importé :", item.name, pc);
+
             const activeProc = profileImageProcessor || window.imageProcessor;
             if (activeProc) {
-                activeProc.setPictureControl(item.data);
+                activeProc.setPictureControl(pc);
             }
             if (typeof window.updatePictureControl === "function") {
-                window.updatePictureControl({ pictureControl: item.data });
+                window.updatePictureControl({ pictureControl: pc });
             }
         };
 
@@ -112,7 +121,7 @@ function initButtons() {
             if (viewProfiles) viewProfiles.style.display = "flex";
             if (headerProfiles) headerProfiles.style.display = "flex";
 
-            // 1. Déplacer dynamiquement le panneau de réglages dans la Vue 2 si nécessaire
+            // Déplacer dynamiquement le panneau de réglages dans la Vue 2 si nécessaire
             const settingsContainerVue1 = document.querySelector("#view-studio #pictureControlStatus");
             const settingsContainerVue2 = document.querySelector("#view-profiles #pictureControlStatus");
             
@@ -120,7 +129,7 @@ function initButtons() {
                 settingsContainerVue2.appendChild(settingsContainerVue1.firstElementChild);
             }
 
-            // 2. Initialiser le Canvas de la vue Gestionnaire si nécessaire
+            // Initialiser le Canvas de la vue Gestionnaire si nécessaire
             if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
                 const profileCanvas = document.getElementById("profilePreviewCanvas");
                 if (profileCanvas) {
@@ -128,7 +137,7 @@ function initButtons() {
                 }
             }
 
-            // 3. Synchroniser l'image du Studio vers le Gestionnaire
+            // Synchroniser l'image du Studio vers le Gestionnaire
             if (profileImageProcessor && window.imageProcessor?.loadedImage) {
                 await profileImageProcessor.load(
                     window.imageProcessor.loadedImage.src,
@@ -140,7 +149,7 @@ function initButtons() {
                 }
             }
 
-            // 4. Forcer le rendu de la bibliothèque NP3
+            // Forcer le rendu de la bibliothèque NP3
             renderNp3Library();
         };
     }
@@ -185,30 +194,25 @@ function initButtons() {
                     window.updateExif(fileInfo);
                 }
 
-                let rawSrc = fileInfo.previewPath || fileInfo.preview || fileInfo.imageData || fileInfo.image || fileInfo.path;
+                // Extraction et formatage du chemin d'accès / DataURL
+                let rawSrc = fileInfo.preview || fileInfo.previewPath || fileInfo.filePath || fileInfo.path || fileInfo.imageData || fileInfo.image;
                 let imageSrc = "";
 
                 if (rawSrc) {
                     if (rawSrc.startsWith("data:")) {
                         imageSrc = rawSrc;
-                    } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.trim().substring(0, 100))) {
-                        imageSrc = `data:image/jpeg;base64,${rawSrc.trim()}`;
+                    } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.toString().trim().substring(0, 100))) {
+                        imageSrc = `data:image/jpeg;base64,${rawSrc.toString().trim()}`;
                     } else {
-                        const formattedPath = rawSrc.replace(/\\/g, "/");
+                        const formattedPath = rawSrc.toString().replace(/\\/g, "/");
                         imageSrc = formattedPath.startsWith("/") ? `file://${formattedPath}` : `file:///${formattedPath}`;
                     }
                 }
 
-                const pcData = fileInfo.pictureControl || fileInfo.pc || {
-                    sharpening: 3.25,
-                    midRangeSharpening: 1.0,
-                    clarity: 1.0,
-                    contrast: 0,
-                    highlights: 0,
-                    shadows: 0,
-                    saturation: 0,
-                    hue: 0
-                };
+                // Normalisation des clés du Picture Control embarqué
+                const pcData = fileInfo.pictureControl || fileInfo.pc || {};
+                pcData.sharpening = pcData.sharpening ?? pcData.sharpning ?? pcData.sharpness ?? 3.25;
+                pcData.midRangeSharpening = pcData.midRangeSharpening ?? pcData.midRangeSharpning ?? 1.0;
 
                 if (imageSrc && window.imageProcessor) {
                     await window.imageProcessor.load(
@@ -244,13 +248,20 @@ function initButtons() {
             try {
                 const response = await window.electronAPI.loadNP3();
                 if (response) {
+                    // Extraction flexible des données du profil
                     const pc = response.pictureControl || response.pc || response;
-                    const name = response.fileName || response.name || `Profil ${np3Library.length + 1}`;
+                    
+                    pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
+                    pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
 
+                    const name = response.fileName || response.name || pc.name || `Profil ${np3Library.length + 1}`;
+
+                    // Stockage propre dans la bibliothèque
                     np3Library.push({ name: name, data: pc });
                     localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
                     renderNp3Library();
 
+                    // Application immédiate du profil chargé
                     if (window.imageProcessor) window.imageProcessor.setPictureControl(pc);
                     if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
                     if (typeof window.updatePictureControl === "function") {
@@ -276,18 +287,27 @@ function initButtons() {
         };
     }
 
-    if (btnExportNCP) {
-        btnExportNCP.onclick = async () => {
-            try {
-                const activePC = profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
-                if (activePC && window.electronAPI) {
-                    await window.electronAPI.exportNCP(activePC);
-                }
-            } catch (err) {
-                console.error("❌ Erreur d'exportation NCP :", err);
+if (btnExportNCP) {
+    btnExportNCP.onclick = async () => {
+        try {
+            // 🎯 Récupération prioritaire du Picture Control actif dans le processeur d'image
+            let activePC = window.imageProcessor?.pictureControl || profileImageProcessor?.pictureControl;
+
+            if (!activePC && typeof window.getCurrentPictureControl === "function") {
+                activePC = window.getCurrentPictureControl();
             }
-        };
-    }
+
+            if (activePC && window.electronAPI) {
+                console.log("💾 [IHM] Exportation du profil actif :", activePC);
+                await window.electronAPI.exportNCP(activePC);
+            } else {
+                console.warn("⚠️ Aucun Picture Control actif à exporter.");
+            }
+        } catch (err) {
+            console.error("❌ Erreur d'exportation NCP :", err);
+        }
+    };
+}
 
     if (btnExportJpg) {
         btnExportJpg.onclick = async () => {
