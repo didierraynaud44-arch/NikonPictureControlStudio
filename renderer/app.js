@@ -3,29 +3,94 @@
 =========================================================*/
 
 let currentNefFileName = "image-editee";
-let profileImageProcessor = null; // Processeur dédié au Canvas de la page profils
+let profileImageProcessor = null;
 
+// Stockage local de la bibliothèque NP3
+let np3Library = [];
+try {
+    np3Library = JSON.parse(localStorage.getItem("nikon_np3_library") || "[]");
+} catch (e) {
+    console.error("❌ Erreur de lecture de la bibliothèque NP3 :", e);
+    np3Library = [];
+}
+
+/**
+ * Rendu dynamique de la liste des NP3 sauvegardés (Colonne gauche)
+ */
+function renderNp3Library() {
+    const container = document.getElementById("np3ListContainer");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    if (np3Library.length === 0) {
+        container.innerHTML = `<p style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">Aucun profil importé</p>`;
+        return;
+    }
+
+    np3Library.forEach((item, index) => {
+        const div = document.createElement("div");
+        div.className = "np3-item";
+        div.innerHTML = `
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">📄 ${item.name}</span>
+            <button class="btn-remove-np3" data-index="${index}" title="Supprimer">✕</button>
+        `;
+
+        // Appliquer le profil au clic sur l'élément
+        div.onclick = (e) => {
+            if (e.target.classList.contains("btn-remove-np3")) return;
+
+            document.querySelectorAll(".np3-item").forEach(el => el.classList.remove("active"));
+            div.classList.add("active");
+
+            const activeProc = profileImageProcessor || window.imageProcessor;
+            if (activeProc) {
+                activeProc.setPictureControl(item.data);
+            }
+            if (typeof window.updatePictureControl === "function") {
+                window.updatePictureControl({ pictureControl: item.data });
+            }
+        };
+
+        // Supprimer un profil de la liste
+        const btnRemove = div.querySelector(".btn-remove-np3");
+        if (btnRemove) {
+            btnRemove.onclick = (e) => {
+                e.stopPropagation();
+                np3Library.splice(index, 1);
+                localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
+                renderNp3Library();
+            };
+        }
+
+        container.appendChild(div);
+    });
+}
+
+/**
+ * Initialisation des boutons et de la logique de navigation
+ */
 function initButtons() {
-    // Boutons
-    const btnNef           = document.getElementById("openNef");
-    const btnExportJpg     = document.getElementById("exportJpg");
-    const btnOpenProfiles  = document.getElementById("btnOpenProfilesPage");
-    const btnReturnStudio  = document.getElementById("btnReturnToStudio");
-    const btnNP3           = document.getElementById("openNP3");
-    const btnSaveNP3       = document.getElementById("saveNP3");
-    const btnExportNCP     = document.getElementById("exportNCP");
+    const btnNef          = document.getElementById("openNef");
+    const btnExportJpg    = document.getElementById("exportJpg");
+    const btnOpenProfiles = document.getElementById("btnOpenProfilesPage");
+    const btnReturnStudio = document.getElementById("btnReturnToStudio");
+    const btnNP3          = document.getElementById("openNP3");
+    const btnSaveNP3      = document.getElementById("saveNP3");
+    const btnExportNCP    = document.getElementById("exportNCP");
 
-    // Vues et En-têtes
-    const viewStudio       = document.getElementById("view-studio");
-    const viewProfiles     = document.getElementById("view-profiles");
-    const headerStudio     = document.getElementById("header-studio-actions");
-    const headerProfiles   = document.getElementById("header-profile-actions");
+    const viewStudio      = document.getElementById("view-studio");
+    const viewProfiles    = document.getElementById("view-profiles");
+    const headerStudio    = document.getElementById("header-studio-actions");
+    const headerProfiles  = document.getElementById("header-profile-actions");
 
+    // S'assurer que le menu Studio est bien visible par défaut au lancement
+    if (headerStudio) headerStudio.style.display = "flex";
+    if (headerProfiles) headerProfiles.style.display = "none";
+    if (viewStudio) viewStudio.style.display = "flex";
+    if (viewProfiles) viewProfiles.style.display = "none";
     /*---------------------------------------------------------
-        Navigation et synchronisation du rendu d'image
-    ---------------------------------------------------------*/
-/*---------------------------------------------------------
-        Navigation et synchronisation du rendu d'image
+        1. Navigation entre Studio et Gestionnaire
     ---------------------------------------------------------*/
     if (btnOpenProfiles) {
         btnOpenProfiles.onclick = async () => {
@@ -35,13 +100,16 @@ function initButtons() {
             if (viewProfiles) viewProfiles.style.display = "flex";
             if (headerProfiles) headerProfiles.style.display = "flex";
 
-            // Initialise le processeur du 2ème Canvas si nécessaire
+            // 1. Initialiser le Canvas de la vue Gestionnaire si nécessaire
             if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
-                profileImageProcessor = new ImageProcessor("profilePreviewCanvas");
+                const profileCanvas = document.getElementById("profilePreviewCanvas");
+                if (profileCanvas) {
+                    profileImageProcessor = new ImageProcessor("profilePreviewCanvas");
+                }
             }
 
-            // Charge l'image actuelle dans le 2ème Canvas
-            if (window.imageProcessor && window.imageProcessor.loadedImage) {
+            // 2. Synchroniser l'image chargée du Studio vers la Vue Gestionnaire
+            if (profileImageProcessor && window.imageProcessor?.loadedImage) {
                 await profileImageProcessor.load(
                     window.imageProcessor.loadedImage.src,
                     window.imageProcessor.currentOrientation
@@ -52,9 +120,8 @@ function initButtons() {
                 }
             }
 
-            // 🎯 ASTUCE : On redirige la référence globale vers le processeur de la page 2
-            window.activeProcessorBackup = window.imageProcessor;
-            window.imageProcessor = profileImageProcessor;
+            // 3. Forcer le rendu de la liste NP3
+            renderNp3Library();
         };
     }
 
@@ -66,87 +133,83 @@ function initButtons() {
             if (viewStudio) viewStudio.style.display = "flex";
             if (headerStudio) headerStudio.style.display = "flex";
 
-            // Synchronise les réglages avec le Studio principal
-            if (profileImageProcessor && window.activeProcessorBackup) {
-                window.activeProcessorBackup.setPictureControl(profileImageProcessor.pictureControl);
-            }
-
-            // 🎯 Restauration du processeur principal pour la page 1
-            if (window.activeProcessorBackup) {
-                window.imageProcessor = window.activeProcessorBackup;
+            // Reporter le Picture Control ajusté vers l'instance principale
+            if (profileImageProcessor && window.imageProcessor) {
+                window.imageProcessor.setPictureControl(profileImageProcessor.pictureControl);
             }
         };
     }
+
     /*---------------------------------------------------------
-        1. Charger une image RAW / Standard
+        2. Chargement des fichiers RAW / NEF
     ---------------------------------------------------------*/
     if (btnNef) {
         btnNef.onclick = async () => {
             try {
                 const fileInfo = await window.electronAPI.openNEF();
-                if (fileInfo) {
-                    if (fileInfo.fileName) {
-                        currentNefFileName = fileInfo.fileName.replace(/\.[^/.]+$/, "");
-                    }
+                if (!fileInfo) return;
 
-                    if (typeof window.updateExif === "function") {
-                        window.updateExif(fileInfo);
-                    }
+                if (fileInfo.fileName) {
+                    currentNefFileName = fileInfo.fileName.replace(/\.[^/.]+$/, "");
+                }
 
-                    let rawSrc = fileInfo.previewPath || fileInfo.preview || fileInfo.imageData || fileInfo.image || fileInfo.path;
-                    let imageSrc = "";
+                if (typeof window.updateExif === "function") {
+                    window.updateExif(fileInfo);
+                }
 
-                    if (rawSrc) {
-                        if (rawSrc.startsWith("data:")) {
-                            imageSrc = rawSrc;
-                        } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.trim().substring(0, 100))) {
-                            imageSrc = `data:image/jpeg;base64,${rawSrc.trim()}`;
-                        } else {
-                            const formattedPath = rawSrc.replace(/\\/g, "/");
-                            imageSrc = formattedPath.startsWith("/") ? `file://${formattedPath}` : `file:///${formattedPath}`;
-                        }
-                    }
+                let rawSrc = fileInfo.previewPath || fileInfo.preview || fileInfo.imageData || fileInfo.image || fileInfo.path;
+                let imageSrc = "";
 
-                    const pcData = fileInfo.pictureControl || fileInfo.pc || {
-                        sharpening: 3.25,
-                        midRangeSharpening: 1.0,
-                        clarity: 1.0,
-                        contrast: 0,
-                        highlights: 0,
-                        shadows: 0,
-                        saturation: 0,
-                        hue: 0
-                    };
-
-                    if (imageSrc && window.imageProcessor) {
-                        await window.imageProcessor.load(
-                            imageSrc, 
-                            fileInfo.orientation || 1,
-                            {
-                                lens: fileInfo.lens,
-                                focalLength: fileInfo.rawFocalLength || fileInfo.focal,
-                                aperture: fileInfo.rawAperture || fileInfo.aperture
-                            }
-                        );
-                        window.imageProcessor.setPictureControl(pcData);
-                    }
-
-                    if (window.updatePictureControl) {
-                        window.updatePictureControl({ 
-                            pictureControl: pcData, 
-                            lens: fileInfo.lens || "Objectif non renseigné",
-                            isNewFile: true 
-                        });
+                if (rawSrc) {
+                    if (rawSrc.startsWith("data:")) {
+                        imageSrc = rawSrc;
+                    } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.trim().substring(0, 100))) {
+                        imageSrc = `data:image/jpeg;base64,${rawSrc.trim()}`;
+                    } else {
+                        const formattedPath = rawSrc.replace(/\\/g, "/");
+                        imageSrc = formattedPath.startsWith("/") ? `file://${formattedPath}` : `file:///${formattedPath}`;
                     }
                 }
+
+                const pcData = fileInfo.pictureControl || fileInfo.pc || {
+                    sharpening: 3.25,
+                    midRangeSharpening: 1.0,
+                    clarity: 1.0,
+                    contrast: 0,
+                    highlights: 0,
+                    shadows: 0,
+                    saturation: 0,
+                    hue: 0
+                };
+
+                if (imageSrc && window.imageProcessor) {
+                    await window.imageProcessor.load(
+                        imageSrc, 
+                        fileInfo.orientation || 1,
+                        {
+                            lens: fileInfo.lens,
+                            focalLength: fileInfo.rawFocalLength || fileInfo.focal,
+                            aperture: fileInfo.rawAperture || fileInfo.aperture
+                        }
+                    );
+                    window.imageProcessor.setPictureControl(pcData);
+                }
+
+                if (typeof window.updatePictureControl === "function") {
+                    window.updatePictureControl({ 
+                        pictureControl: pcData, 
+                        lens: fileInfo.lens || "Objectif non renseigné",
+                        isNewFile: true 
+                    });
+                }
             } catch (err) {
-                console.error("❌ Erreur ouverture NEF :", err);
+                console.error("❌ Erreur d'ouverture NEF :", err);
             }
         };
     }
 
     /*---------------------------------------------------------
-        2. Importer un NP3 (Applique aux deux processeurs)
+        3. Imports NP3 & Exports
     ---------------------------------------------------------*/
     if (btnNP3) {
         btnNP3.onclick = async () => {
@@ -154,53 +217,50 @@ function initButtons() {
                 const response = await window.electronAPI.loadNP3();
                 if (response) {
                     const pc = response.pictureControl || response.pc || response;
+                    const name = response.fileName || response.name || `Profil ${np3Library.length + 1}`;
+
+                    np3Library.push({ name: name, data: pc });
+                    localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
+                    renderNp3Library();
 
                     if (window.imageProcessor) window.imageProcessor.setPictureControl(pc);
                     if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
-
-                    if (window.updatePictureControl) window.updatePictureControl({ pictureControl: pc });
+                    if (typeof window.updatePictureControl === "function") {
+                        window.updatePictureControl({ pictureControl: pc });
+                    }
                 }
             } catch (err) {
-                console.error("❌ Erreur import NP3 :", err);
+                console.error("❌ Erreur d'importation NP3 :", err);
             }
         };
     }
 
-    /*---------------------------------------------------------
-        3. Enregistrer NP3
-    ---------------------------------------------------------*/
     if (btnSaveNP3) {
         btnSaveNP3.onclick = async () => {
             try {
                 const activePC = profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
-                if (!activePC) return;
-
-                await window.electronAPI.saveNP3File(activePC);
+                if (activePC && window.electronAPI) {
+                    await window.electronAPI.saveNP3File(activePC);
+                }
             } catch (err) {
-                console.error("❌ Erreur sauvegarde NP3 :", err);
+                console.error("❌ Erreur d'enregistrement NP3 :", err);
             }
         };
     }
 
-    /*---------------------------------------------------------
-        4. Exporter NCP (Z6 II)
-    ---------------------------------------------------------*/
     if (btnExportNCP) {
         btnExportNCP.onclick = async () => {
             try {
                 const activePC = profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
-                if (!activePC) return;
-
-                await window.electronAPI.exportNCP(activePC);
+                if (activePC && window.electronAPI) {
+                    await window.electronAPI.exportNCP(activePC);
+                }
             } catch (err) {
-                console.error("❌ Erreur export NCP :", err);
+                console.error("❌ Erreur d'exportation NCP :", err);
             }
         };
     }
 
-    /*---------------------------------------------------------
-        5. Exporter l'image HD (JPG)
-    ---------------------------------------------------------*/
     if (btnExportJpg) {
         btnExportJpg.onclick = async () => {
             try {
@@ -215,12 +275,15 @@ function initButtons() {
                     });
                 }
             } catch (err) {
-                console.error("❌ Erreur exportation Image :", err);
+                console.error("❌ Erreur d'exportation JPG :", err);
             }
         };
     }
+
+    renderNp3Library();
 }
 
+// Initialisation au chargement
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initButtons);
 } else {

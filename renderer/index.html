@@ -11,14 +11,14 @@
     <header class="app-header">
         <h1>Nikon Picture Control Studio</h1>
         
-        <!-- Actions Vue 1 (Studio) -->
+        <!-- Page 1 : Actions Studio -->
         <div id="header-studio-actions" class="header-buttons">
             <button id="openNef">📂 Ouvrir une image / RAW</button>
             <button id="btnOpenProfilesPage" class="btn-action">🎛️ Gestionnaire de Profils Nikon</button>
             <button id="exportJpg" class="btn-action btn-success">📸 Exporter JPG</button>
         </div>
 
-        <!-- Actions Vue 2 (Gestionnaire) -->
+        <!-- Page 2 : Actions Gestionnaire -->
         <div id="header-profile-actions" class="header-buttons" style="display: none;">
             <button id="openNP3" class="btn-primary">📂 Importer un NP3</button>
             <button id="saveNP3" class="btn-action">💾 Enregistrer NP3 Z50 II</button>
@@ -27,32 +27,23 @@
         </div>
     </header>
 
-    <!-- 2. VUE 1 : Studio d'affichage (Plein écran) -->
+    <!-- 2. VUE 1 : Studio (Canvas + Barre EXIF + Panneau Réglages à droite) -->
     <main id="view-studio" class="app-main view-active">
-        <section class="preview-panel full-width">
+        
+        <!-- Zone Centrale : Image et EXIF -->
+        <section class="preview-panel">
             <div class="canvas-container">
                 <canvas id="previewCanvas"></canvas>
             </div>
-            <!-- Barre EXIF sous le Canvas principal -->
+            <!-- Barre d'informations EXIF -->
             <div id="exifInfo" class="exif-bar">
                 <span id="exifCamera">-</span> | 
                 <span id="exifLens">-</span> | 
                 <span id="exifParams">-</span>
             </div>
         </section>
-    </main>
 
-    <!-- 3. VUE 2 : Gestionnaire de Profils (Masqué par défaut) -->
-    <main id="view-profiles" class="app-main view-hidden" style="display: none;">
-        
-        <!-- Canvas d'aperçu secondaire -->
-        <section class="preview-panel">
-            <div class="canvas-container">
-                <canvas id="profilePreviewCanvas"></canvas>
-            </div>
-        </section>
-
-        <!-- Panneau latéral : Réglages Picture Control -->
+        <!-- Zone Droite : Panneau de réglages et de traitement -->
         <aside class="sidebar-panel">
             <div id="pictureControlStatus" class="card-panel">
                 <!-- Généré dynamiquement par pictureControlPanel.js -->
@@ -61,7 +52,32 @@
 
     </main>
 
-    <!-- 4. Scripts Moteur & Filtres -->
+    <!-- 3. VUE 2 : Gestionnaire de Profils (Bibliothèque NP3 + Canvas + Réglages) -->
+    <main id="view-profiles" class="app-main view-hidden" style="display: none;">
+        
+        <!-- Colonne 1 : Bibliothèque NP3 -->
+        <aside class="sidebar-panel np3-library-panel">
+            <h3>Bibliothèque NP3</h3>
+            <div id="np3ListContainer" class="np3-list"></div>
+        </aside>
+
+        <!-- Colonne 2 : Canvas d'aperçu du profil -->
+        <section class="preview-panel">
+            <div class="canvas-container">
+                <canvas id="profilePreviewCanvas"></canvas>
+            </div>
+        </section>
+
+        <!-- Colonne 3 : Panneau de réglages du profil -->
+        <aside class="sidebar-panel">
+            <div id="pictureControlStatusProfile" class="card-panel">
+                <!-- Conteneur secondaire si besoin -->
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- Scripts -->
     <script src="core/ImageBuffer.js"></script>
     <script src="core/DisplayCanvas.js"></script>
     <script src="core/RenderPipeline.js"></script>
@@ -84,9 +100,9 @@
     <script src="filters/SCurveFilter.js"></script>
     <script src="filters/VignetteFilter.js"></script>
     <script src="filters/DenoiseFilter.js"></script>
-    <script src="components/ToneCurveWidget.js"></script>
     <script src="filters/LensCorrectionFilter.js"></script>
 
+    <script src="components/ToneCurveWidget.js"></script>
     <script src="core/ImageProcessor.js"></script>
     <script src="components/exifPanel.js"></script>
     <script src="components/pictureControlPanel.js"></script>

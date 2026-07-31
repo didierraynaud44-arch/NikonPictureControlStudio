@@ -1,65 +1,113 @@
-/* --- Réinitialisation de base --- */
+/* =========================================================
+   1. RESET & BASE
+========================================================= */
 * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
+    user-select: none;
 }
 
-html, body {
-    width: 100vw;
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #18191c;
+    color: #dbdee1;
     height: 100vh;
-    overflow: hidden; /* Pas de scrollbar globale */
-    background-color: #1a1a1a;
-    color: #e0e0e0;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-}
-
-/* --- Header --- */
-.app-header {
-    height: 60px;
-    background-color: #111;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 20px;
-    border-bottom: 1px solid #333;
-}
-
-.header-buttons button {
-    background-color: #333;
-    color: #fff;
-    border: 1px solid #555;
-    padding: 8px 14px;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-left: 8px;
-}
-
-.header-buttons button:hover {
-    background-color: #444;
-}
-
-/* --- Disposition principale (Flexbox 2 colonnes) --- */
-.app-main {
-    display: flex;
-    height: calc(100vh - 60px); /* Toute la hauteur restante sous le header */
-    width: 100%;
-}
-
-/* --- Colonne Gauche : Aperçu --- */
-.preview-panel {
-    flex: 1; /* Prend tout l'espace disponible */
+    width: 100vw;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    padding: 15px;
-    background-color: #141414;
+}
+
+/* =========================================================
+   2. EN-TÊTE PRINCIPAL (APP HEADER)
+========================================================= */
+.app-header {
+    height: 50px;
+    min-height: 50px;
+    background-color: #1e1f22;
+    border-bottom: 1px solid #2b2d31;
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    z-index: 1000;
+}
+
+.app-header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f2f3f5;
+    letter-spacing: 0.3px;
+}
+
+.header-buttons {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#header-studio-actions {
+    display: flex;
+}
+
+button {
+    background-color: #2b2d31;
+    color: #f2f3f5;
+    border: 1px solid #3f4248;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+button:hover { background-color: #35373c; border-color: #4e5058; }
+button:active { background-color: #1e1f22; }
+
+.btn-primary { background-color: #5865f2; border-color: #5865f2; color: #fff; }
+.btn-primary:hover { background-color: #4752c4; border-color: #4752c4; }
+
+.btn-success { background-color: #23a55a; border-color: #23a55a; color: #fff; }
+.btn-success:hover { background-color: #1da054; border-color: #1da054; }
+
+.btn-secondary { background-color: #4e5058; border-color: #4e5058; color: #fff; }
+.btn-secondary:hover { background-color: #6d6f78; border-color: #6d6f78; }
+
+/* =========================================================
+   3. CONTENEURS PRINCIPAUX DE NAVIGATION
+========================================================= */
+.app-main {
+    flex: 1;
+    width: 100vw;
+    height: calc(100vh - 50px);
     overflow: hidden;
 }
 
-.preview-panel h2 {
-    font-size: 1.1rem;
-    margin-bottom: 10px;
-    color: #aaa;
+.view-active { display: flex !important; }
+.view-hidden { display: none !important; }
+
+/* =========================================================
+   4. VUE 1 : STUDIO (Canvas + Barre EXIF + Panneau Droite)
+========================================================= */
+#view-studio {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+}
+
+#view-studio .preview-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #111214;
+    height: 100%;
+    overflow: hidden;
 }
 
 .canvas-container {
@@ -67,90 +115,156 @@ html, body {
     display: flex;
     justify-content: center;
     align-items: center;
-    background-color: #0d0d0d;
-    border-radius: 6px;
-    border: 1px solid #2a2a2a;
+    width: 100%;
+    height: 100%;
     overflow: hidden;
+    position: relative;
 }
 
-/* Le Canvas s'adapte sans JAMAIS déborder ni masquer du texte */
-#previewCanvas {
+canvas {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
-/* --- Colonne Droite : Sidebar --- */
+/* Barre EXIF (vue Studio) */
+.exif-bar {
+    height: 36px;
+    min-height: 36px;
+    background-color: #1e1f22;
+    border-top: 1px solid #2b2d31;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #dbdee1;
+    padding: 0 16px;
+}
+
+/* Panneau latéral générique (utilisé à droite en Vue 1 et Vue 2) */
 .sidebar-panel {
-    width: 360px; /* Largeur fixe pour les réglages */
-    height: 100%;
-    background-color: #222;
-    border-left: 1px solid #333;
+    width: 380px;
+    min-width: 380px;
+    background-color: #2b2d31;
+    border-left: 1px solid #1e1f22;
     padding: 15px;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+/* =========================================================
+   5. VUE 2 : GESTIONNAIRE DE PROFILS (3 COLONNES)
+========================================================= */
+#view-profiles {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+}
+
+/* Colonne 1 : Bibliothèque NP3 (Gauche) */
+.np3-library-panel {
+    width: 260px;
+    min-width: 260px;
+    background-color: #2b2d31;
+    border-right: 1px solid #1e1f22;
+    border-left: none; /* Annule le border-left par défaut de .sidebar-panel */
+    padding: 12px;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.np3-library-panel h3 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #949ba4;
+    border-bottom: 1px solid #3f4248;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+}
+
+.np3-list {
     display: flex;
     flex-direction: column;
-    gap: 15px;
-    overflow-y: auto; /* Scroll uniquement dans le panneau de droite si besoin */
+    gap: 6px;
 }
 
-/* Cartes (EXIF et Curseurs) */
-.card-panel {
-    background-color: #2a2a2a;
-    border-radius: 6px;
-    padding: 15px;
-    border: 1px solid #3a3a3a;
-}
-
-/* Curseurs */
-.pc-row {
-    margin-bottom: 12px;
-}
-
-.pc-label {
+.np3-item {
+    padding: 8px 10px;
+    background-color: #1e1f22;
+    border: 1px solid #35373c;
+    border-radius: 4px;
+    color: #dbdee1;
+    cursor: pointer;
+    font-size: 12px;
     display: flex;
     justify-content: space-between;
-    font-size: 0.9rem;
-    margin-bottom: 4px;
-}
-
-.pc-slider {
-    width: 100%;
-    accent-color: #00adb5;
-    cursor: pointer;
-}
-/* Alignement du groupe de boutons */
-.header-buttons {
-    display: flex;
-    gap: 10px;
     align-items: center;
+    transition: all 0.15s ease;
 }
 
-/* Style général des nouveaux boutons */
-.btn-action {
-    background-color: #3a3f47;
+.np3-item:hover {
+    background-color: #35373c;
+    border-color: #4e5058;
+}
+
+.np3-item.active {
+    border-color: #5865f2;
+    background-color: #1e1f22;
     color: #ffffff;
-    border: 1px solid #555;
-    padding: 8px 14px;
-    border-radius: 4px;
+    font-weight: bold;
+}
+
+.btn-remove-np3 {
+    background: transparent;
+    border: none;
+    color: #949ba4;
     cursor: pointer;
-    font-weight: 500;
-    transition: background-color 0.2s, transform 0.1s;
+    font-size: 11px;
+    padding: 2px 4px;
+    border-radius: 3px;
 }
 
-.btn-action:hover {
-    background-color: #4a505a;
+.btn-remove-np3:hover {
+    color: #f23f43;
+    background-color: rgba(242, 63, 67, 0.1);
 }
 
-.btn-action:active {
-    transform: scale(0.97);
+/* Colonne 2 : Canvas d'aperçu profil (Centre) */
+#view-profiles .preview-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #111214;
+    overflow: hidden;
 }
 
-/* Accentuation verte sur le bouton d'exportation JPG */
-.btn-success {
-    background-color: #28a745;
-    border-color: #28a745;
+/* =========================================================
+   6. COMPOSANTS ET SCROLLBARS
+========================================================= */
+.card-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
-.btn-success:hover {
-    background-color: #218838;
+/* Personalisation de la barre de défilement */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: #1e1f22;
+}
+::-webkit-scrollbar-thumb {
+    background: #3f4248;
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #4e5058;
 }
