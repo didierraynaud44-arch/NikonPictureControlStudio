@@ -32,7 +32,7 @@
         <!-- Colonne Gauche : Bibliothèque NP3 -->
         <aside class="sidebar-panel np3-library-panel">
             <h3>Bibliothèque NP3</h3>
-            <div id="np3ListContainerStudio" class="np3-list"></div>
+            <div id="np3ListContainer" class="np3-list"></div>
         </aside>
 
         <!-- Colonne Centre : Canvas & EXIF -->
@@ -47,7 +47,7 @@
             </div>
         </section>
 
-        <!-- Colonne Droite : Réglages Picture Control (panneau complet) -->
+        <!-- Colonne Droite : Réglages Picture Control -->
         <aside class="sidebar-panel">
             <div id="pictureControlStatus" class="card-panel"></div>
         </aside>
@@ -56,26 +56,11 @@
 
     <!-- VUE 2 : Gestionnaire de Profils -->
     <main id="view-profiles" class="app-main view-hidden" style="display: none;">
-
-        <!-- Colonne Gauche : Bibliothèque NP3 (même bibliothèque que le Studio) -->
-        <aside class="sidebar-panel np3-library-panel">
-            <h3>Bibliothèque NP3</h3>
-            <div id="np3ListContainerProfiles" class="np3-list"></div>
-        </aside>
-
-        <section class="preview-panel">
+        <section class="preview-panel full-width">
             <div class="canvas-container">
                 <canvas id="profilePreviewCanvas"></canvas>
             </div>
         </section>
-
-        <!-- Colonne Droite : Réglages Picture Control (panneau compact,
-             sans Hautes lumières/Ombres/Correction du voile/Vibrance/
-             Courbe de tonalité/Vignettage/Bruit/Correction objectif) -->
-        <aside class="sidebar-panel">
-            <div id="profileControlStatus" class="card-panel"></div>
-        </aside>
-
     </main>
 
     <!-- Core Scripts -->

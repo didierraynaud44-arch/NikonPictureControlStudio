@@ -1,3 +1,4 @@
+const { parseLegacyNCP, findVersionAnchor } = require("./legacyNcpParser");
 const fs = require("fs");
 // Importation sécurisée du module Nikon
 const nikonLib = require("nikon-flexible-color-picture-control");
@@ -8,14 +9,45 @@ const serialize = nikonLib.serialize || nikonLib.encode;
 /* =======================================================
    1. Lecture d'un fichier NP3 / NCP
 ======================================================= */
+
+const SUPPORTED_FLEXIBLE_VERSIONS = ["0300", "0310"];
+
+function readFlexibleHeader(buffer) {
+    if (buffer.length < 16) return null;
+    return {
+        magic: buffer.toString("ascii", 0, 3),
+        version: buffer.toString("ascii", 12, 16)
+    };
+}
+
 async function loadNP3(filePath) {
     try {
         console.log("🔍 [np3Manager] Chargement du fichier :", filePath);
         const buffer = fs.readFileSync(filePath);
 
-        // Parsing binaire
-        const parsedData = typeof parse === "function" ? parse(buffer) : nikonLib(buffer); 
-        return parsedData;
+        const flexHeader = readFlexibleHeader(buffer);
+
+        // CAS 1 : format moderne Flexible Color (0300/0310, Z-mount/D6/D780) -> lib npm
+        if (flexHeader && flexHeader.magic === "NCP" && SUPPORTED_FLEXIBLE_VERSIONS.includes(flexHeader.version)) {
+            console.log("✅ [np3Manager] Format détecté : Flexible Color", flexHeader.version);
+            const parsedData = typeof parse === "function" ? parse(buffer) : nikonLib(buffer);
+            return parsedData;
+        }
+
+        // CAS 2 : tag "0100" détecté mais structure NON confirmée pour l'instant.
+        // (Le format réel utilisé par certains générateurs tiers ne correspond
+        // ni au conteneur moderne 0300/0310, ni à la structure legacy documentée
+        // par ExifTool -> on refuse plutôt que d'afficher des valeurs corrompues.)
+        if (findVersionAnchor(buffer) !== -1) {
+            throw new Error(
+                "Ce fichier utilise un format 0100 dont la structure exacte n'est pas " +
+                "encore confirmée pour cet outil tiers. Import refusé par sécurité " +
+                "(plutôt que d'afficher des valeurs corrompues type -128)."
+            );
+        }
+
+        throw new Error("Format de fichier NCP/NP3 non reconnu.");
+
     } catch (err) {
         console.error("❌ [np3Manager] Erreur lecture fichier :", err);
         throw err;

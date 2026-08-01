@@ -77,7 +77,7 @@ function renderNp3Library() {
                 console.log("👉 Application du profil importé :", item.name, pc);
 
                 const viewProfiles = document.getElementById("view-profiles");
-                const isProfilesViewActive = viewProfiles && viewProfiles.classList.contains("view-active");
+                const isProfilesViewActive = viewProfiles && viewProfiles.style.display !== "none";
 
                 if (isProfilesViewActive) {
                     // Vue Gestionnaire active -> panneau compact + canvas dédié
@@ -125,29 +125,11 @@ function initButtons() {
     const headerStudio    = document.getElementById("header-studio-actions");
     const headerProfiles  = document.getElementById("header-profile-actions");
 
-    /**
-     * Bascule entre deux vues en pilotant les CLASSES view-active/view-hidden
-     * (et non style.display) : style.css définit ces classes avec !important,
-     * qui l'emporte toujours sur un style inline. Ne pas mélanger les deux
-     * approches pour éviter que l'une masque silencieusement l'autre.
-     */
-    function showView(viewToShow, viewToHide) {
-        if (viewToHide) {
-            viewToHide.classList.remove("view-active");
-            viewToHide.classList.add("view-hidden");
-            viewToHide.style.removeProperty("display"); // nettoie un éventuel résidu inline
-        }
-        if (viewToShow) {
-            viewToShow.classList.remove("view-hidden");
-            viewToShow.classList.add("view-active");
-            viewToShow.style.removeProperty("display");
-        }
-    }
-
     // S'assurer de la visibilité par défaut de la Vue 1 (Studio)
     if (headerStudio) headerStudio.style.display = "flex";
     if (headerProfiles) headerProfiles.style.display = "none";
-    showView(viewStudio, viewProfiles);
+    if (viewStudio) viewStudio.style.display = "flex";
+    if (viewProfiles) viewProfiles.style.display = "none";
 
     // Instancier le processeur Studio par défaut s'il n'existe pas encore
     if (!window.imageProcessor && typeof ImageProcessor !== "undefined") {
@@ -164,8 +146,10 @@ function initButtons() {
     ---------------------------------------------------------*/
     if (btnOpenProfiles) {
         btnOpenProfiles.onclick = async () => {
-            showView(viewProfiles, viewStudio);
+            if (viewStudio) viewStudio.style.display = "none";
             if (headerStudio) headerStudio.style.display = "none";
+
+            if (viewProfiles) viewProfiles.style.display = "flex";
             if (headerProfiles) headerProfiles.style.display = "flex";
 
             // Initialiser le Canvas de la vue Gestionnaire si nécessaire
@@ -198,8 +182,10 @@ function initButtons() {
 
     if (btnReturnStudio) {
         btnReturnStudio.onclick = () => {
-            showView(viewStudio, viewProfiles);
+            if (viewProfiles) viewProfiles.style.display = "none";
             if (headerProfiles) headerProfiles.style.display = "none";
+
+            if (viewStudio) viewStudio.style.display = "flex";
             if (headerStudio) headerStudio.style.display = "flex";
 
             // Reporter les réglages du Gestionnaire vers le Studio
