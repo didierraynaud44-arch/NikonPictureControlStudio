@@ -184,6 +184,15 @@ function buildPanelHtml(pc, compact, extendedNP3) {
 
         ${compact ? "" : `
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
+        <h3>Exposition</h3>
+        ${createSlider("Exposition (EV)", "exposure", pc.exposure ?? 0, -3, 3, 0.1)}
+
+        <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
+        <h3>Point noir &amp; Point blanc</h3>
+        ${createSlider("Point noir", "blackPoint", pc.blackPoint ?? 0, 0, 250, 1)}
+        ${createSlider("Point blanc", "whitePoint", pc.whitePoint ?? 255, 5, 255, 1)}
+
+        <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
         <h3>Traitement de l'image</h3>
         ${createSlider("Hautes lumières", "highlights", pc.highlights ?? 0, -5, 5, 0.25)}
         ${createSlider("Ombres", "shadows", pc.shadows ?? 0, -5, 5, 0.25)}
@@ -309,6 +318,9 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             toningAmount: getVal("toningAmount"),
 
             // Champs absents du panneau compact : on conserve les valeurs déjà connues
+            exposure: compact ? (pc.exposure ?? 0) : getVal("exposure"),
+            blackPoint: compact ? (pc.blackPoint ?? 0) : getVal("blackPoint"),
+            whitePoint: compact ? (pc.whitePoint ?? 255) : getVal("whitePoint"),
             highlights: compact ? (pc.highlights ?? 0) : getVal("highlights"),
             shadows: compact ? (pc.shadows ?? 0) : getVal("shadows"),
             dehaze: compact ? (pc.dehaze ?? 0) : getVal("dehaze"),
@@ -403,6 +415,9 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             setSlider("hue", vals.hue);
 
             if (!compact) {
+                setSlider("exposure", 0);
+                setSlider("blackPoint", 0);
+                setSlider("whitePoint", 255);
                 setSlider("highlights", 0);
                 setSlider("shadows", 0);
                 setSlider("dehaze", 0);

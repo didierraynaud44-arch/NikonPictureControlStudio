@@ -34,6 +34,12 @@ class ImageProcessor {
         if (typeof MidRangeSharpenFilter !== "undefined") this.pipeline.add(new MidRangeSharpenFilter());
         if (typeof ClarityFilter !== "undefined") this.pipeline.add(new ClarityFilter());
 
+        // 1.5 Exposition & Niveaux (Point noir / Point blanc)
+        // Appliqués avant la courbe de tonalité et le contraste : ce sont les
+        // réglages fondamentaux de plage tonale, en amont des réglages créatifs.
+        if (typeof ExposureFilter !== "undefined") this.pipeline.add(new ExposureFilter());
+        if (typeof BlackWhitePointFilter !== "undefined") this.pipeline.add(new BlackWhitePointFilter());
+
         // 2. Tonalité & Courbe
         if (typeof ToneCurveFilter !== "undefined") this.pipeline.add(new ToneCurveFilter());
         if (typeof ContrastFilter !== "undefined") this.pipeline.add(new ContrastFilter());
@@ -231,6 +237,13 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
     clean.vibrance   = parseVal(clean.vibrance, 0);
     clean.vignette   = parseVal(clean.vignette, 0);
     clean.denoise    = parseVal(clean.denoise, 0);
+
+    // --- Exposition & Niveaux (Point noir / Point blanc) ---
+    clean.exposure   = parseVal(clean.exposure, 0);
+    clean.blackPoint = parseVal(clean.blackPoint, 0);
+    clean.whitePoint = clean.whitePoint === undefined || clean.whitePoint === null
+        ? 255
+        : parseVal(clean.whitePoint, 255);
 
     // --- Détection du Monochrome STRICTE ---
     clean.isMonochrome = clean.isMonochrome === true || clean.baseProfile === "MONOCHROME";
