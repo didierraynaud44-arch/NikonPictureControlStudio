@@ -4,6 +4,7 @@
 
 let currentNefFileName = "image-editee";
 let profileImageProcessor = null;
+let activeProfilePC = null; // Picture Control actuellement affiché dans le Gestionnaire
 
 // Stockage local de la bibliothèque NP3
 let np3Library = [];
@@ -15,67 +16,112 @@ try {
 }
 
 /**
- * Rendu dynamique de la liste des NP3 sauvegardés (Colonne gauche)
+ * Rend le panneau compact du Gestionnaire de Profils
+ * (pas de section "Traitement de l'image" : ni Hautes lumières/Ombres/
+ * Correction du voile/Vibrance/Courbe de tonalité/Vignettage/Bruit/Objectif)
+ */
+function renderProfilePanel(pc, isNewInstance = false) {
+    activeProfilePC = pc;
+    if (typeof window.renderPictureControlPanel !== "function") return;
+
+    window.renderPictureControlPanel("profileControlStatus", pc, {
+        compact: true,
+        extendedNP3: true,
+        isNewInstance: isNewInstance,
+        onChange: (state) => {
+            activeProfilePC = state;
+            if (profileImageProcessor) profileImageProcessor.setPictureControl(state);
+        }
+    });
+}
+
+/**
+ * Rendu dynamique de la liste des NP3 sauvegardés.
+ * Peuple les deux bibliothèques (Studio + Gestionnaire) avec les mêmes données.
  */
 function renderNp3Library() {
-    const container = document.getElementById("np3ListContainer");
-    if (!container) {
-        console.warn("⚠️ Conteneur #np3ListContainer non trouvé");
-        return;
-    }
+    const containerIds = ["np3ListContainerStudio", "np3ListContainerProfiles"];
 
-    container.innerHTML = "";
+    containerIds.forEach((containerId) => {
+        const container = document.getElementById(containerId);
+        if (!container) return; // vue pas encore initialisée, on ignore silencieusement
 
-    if (!np3Library || np3Library.length === 0) {
-        container.innerHTML = `<p style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">Aucun profil importé</p>`;
-        return;
-    }
+        container.innerHTML = "";
 
-    np3Library.forEach((item, index) => {
-        const div = document.createElement("div");
-        div.className = "np3-item";
-        div.innerHTML = `
-            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px;">📄 ${item.name}</span>
-            <button class="btn-remove-np3" data-index="${index}" title="Supprimer">✕</button>
-        `;
-
-        // Appliquer le profil au clic sur l'élément
-        div.onclick = (e) => {
-            if (e.target.classList.contains("btn-remove-np3")) return;
-
-            document.querySelectorAll(".np3-item").forEach(el => el.classList.remove("active"));
-            div.classList.add("active");
-
-            // Extraction sécurisée des données du profil
-            let pc = item.data?.pictureControl || item.data || {};
-
-            // Correction des clés de netteté binaires
-            pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
-            pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
-
-            console.log("👉 Application du profil importé :", item.name, pc);
-
-            const activeProc = profileImageProcessor || window.imageProcessor;
-            if (activeProc) {
-                activeProc.setPictureControl(pc);
-            }
-            if (typeof window.updatePictureControl === "function") {
-                window.updatePictureControl({ pictureControl: pc });
-            }
-        };
-
-        // Supprimer un profil de la liste
-        const btnRemove = div.querySelector(".btn-remove-np3");
-        if (btnRemove) {
-            btnRemove.onclick = (e) => {
-                e.stopPropagation();
-                np3Library.splice(index, 1);
-                localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
-                renderNp3Library();
-            };
+        if (!np3Library || np3Library.length === 0) {
+            container.innerHTML = `<p style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">Aucun profil importé</p>`;
+            return;
         }
 
-        container.appendChild(div);
+        np3Library.forEach((item, index) => {
+            const div = document.createElement("div");
+            div.className = "np3-item";
+            div.innerHTML = `
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px;">📄 ${item.name}</span>
+                <button class="btn-remove-np3" data-index="${index}" title="Supprimer">✕</button>
+            `;
+
+            // Appliquer le profil au clic sur l'élément
+            div.onclick = (e) => {
+                if (e.target.classList.contains("btn-remove-np3")) return;
+
+                document.querySelectorAll(".np3-item").forEach(el => el.classList.remove("active"));
+                div.classList.add("active");
+
+                // Extraction sécurisée des données du profil
+        // Extraction sécurisée des données du profil
+let pc = {};
+if (item.data?.pictureControl) {
+    pc = item.data.pictureControl;
+    // Si item.data a colorBlender au niveau racine, on le garde
+    if (item.data.colorBlender && !pc.colorBlender) {
+        pc.colorBlender = item.data.colorBlender;
+    }
+    if (item.data.colorGrading && !pc.colorGrading) {
+        pc.colorGrading = item.data.colorGrading;
+    }
+} else if (item.data) {
+    pc = item.data;
+} else {
+    pc = item;
+}
+
+// Correction des clés de netteté binaires
+pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
+pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
+
+console.log("👉 Application du profil importé :", item.name, pc);
+console.log("🎨 ColorBlender présent:", !!pc.colorBlender);
+
+                const viewProfiles = document.getElementById("view-profiles");
+                const isProfilesViewActive = viewProfiles && viewProfiles.classList.contains("view-active");
+
+                if (isProfilesViewActive) {
+                    // Vue Gestionnaire active -> panneau compact + canvas dédié
+                    if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
+                    renderProfilePanel(pc, true);
+                } else {
+                    // Vue Studio active -> panneau complet + canvas principal
+                    if (window.imageProcessor) window.imageProcessor.setPictureControl(pc);
+                    if (typeof window.updatePictureControl === "function") {
+                        window.updatePictureControl({ pictureControl: pc }, true);
+                    }
+                }
+            };
+
+            // Supprimer un profil de la liste
+            const btnRemove = div.querySelector(".btn-remove-np3");
+            if (btnRemove) {
+                btnRemove.onclick = (e) => {
+                    e.stopPropagation();
+                    np3Library.splice(index, 1);
+                    localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
+                    renderNp3Library();
+                };
+            }
+
+            container.appendChild(div);
+        });
     });
 }
 
@@ -96,11 +142,29 @@ function initButtons() {
     const headerStudio    = document.getElementById("header-studio-actions");
     const headerProfiles  = document.getElementById("header-profile-actions");
 
+    /**
+     * Bascule entre deux vues en pilotant les CLASSES view-active/view-hidden
+     * (et non style.display) : style.css définit ces classes avec !important,
+     * qui l'emporte toujours sur un style inline. Ne pas mélanger les deux
+     * approches pour éviter que l'une masque silencieusement l'autre.
+     */
+    function showView(viewToShow, viewToHide) {
+        if (viewToHide) {
+            viewToHide.classList.remove("view-active");
+            viewToHide.classList.add("view-hidden");
+            viewToHide.style.removeProperty("display"); // nettoie un éventuel résidu inline
+        }
+        if (viewToShow) {
+            viewToShow.classList.remove("view-hidden");
+            viewToShow.classList.add("view-active");
+            viewToShow.style.removeProperty("display");
+        }
+    }
+
     // S'assurer de la visibilité par défaut de la Vue 1 (Studio)
     if (headerStudio) headerStudio.style.display = "flex";
     if (headerProfiles) headerProfiles.style.display = "none";
-    if (viewStudio) viewStudio.style.display = "flex";
-    if (viewProfiles) viewProfiles.style.display = "none";
+    showView(viewStudio, viewProfiles);
 
     // Instancier le processeur Studio par défaut s'il n'existe pas encore
     if (!window.imageProcessor && typeof ImageProcessor !== "undefined") {
@@ -112,22 +176,14 @@ function initButtons() {
 
     /*---------------------------------------------------------
         1. Navigation entre Studio et Gestionnaire
+        (chaque vue a désormais son propre panneau indépendant,
+         plus aucun déplacement de DOM entre les deux)
     ---------------------------------------------------------*/
     if (btnOpenProfiles) {
         btnOpenProfiles.onclick = async () => {
-            if (viewStudio) viewStudio.style.display = "none";
+            showView(viewProfiles, viewStudio);
             if (headerStudio) headerStudio.style.display = "none";
-
-            if (viewProfiles) viewProfiles.style.display = "flex";
             if (headerProfiles) headerProfiles.style.display = "flex";
-
-            // Déplacer dynamiquement le panneau de réglages dans la Vue 2 si nécessaire
-            const settingsContainerVue1 = document.querySelector("#view-studio #pictureControlStatus");
-            const settingsContainerVue2 = document.querySelector("#view-profiles #pictureControlStatus");
-            
-            if (settingsContainerVue1 && settingsContainerVue2 && settingsContainerVue1.children.length > 0) {
-                settingsContainerVue2.appendChild(settingsContainerVue1.firstElementChild);
-            }
 
             // Initialiser le Canvas de la vue Gestionnaire si nécessaire
             if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
@@ -143,10 +199,13 @@ function initButtons() {
                     window.imageProcessor.loadedImage.src,
                     window.imageProcessor.currentOrientation
                 );
+            }
 
-                if (window.imageProcessor.pictureControl) {
-                    profileImageProcessor.setPictureControl(window.imageProcessor.pictureControl);
-                }
+            // Le Gestionnaire part du Picture Control actuellement actif dans le Studio
+            const pcToShow = activeProfilePC || window.imageProcessor?.pictureControl || null;
+            if (pcToShow) {
+                if (profileImageProcessor) profileImageProcessor.setPictureControl(pcToShow);
+                renderProfilePanel(pcToShow, true);
             }
 
             // Forcer le rendu de la bibliothèque NP3
@@ -156,23 +215,16 @@ function initButtons() {
 
     if (btnReturnStudio) {
         btnReturnStudio.onclick = () => {
-            if (viewProfiles) viewProfiles.style.display = "none";
+            showView(viewStudio, viewProfiles);
             if (headerProfiles) headerProfiles.style.display = "none";
-
-            if (viewStudio) viewStudio.style.display = "flex";
             if (headerStudio) headerStudio.style.display = "flex";
 
-            // Déplacer le panneau de réglages de retour vers la Vue 1
-            const settingsContainerVue1 = document.querySelector("#view-studio #pictureControlStatus");
-            const settingsContainerVue2 = document.querySelector("#view-profiles #pictureControlStatus");
-            
-            if (settingsContainerVue1 && settingsContainerVue2 && settingsContainerVue2.children.length > 0) {
-                settingsContainerVue1.appendChild(settingsContainerVue2.firstElementChild);
-            }
-
-            // Reporter les réglages vers l'instance principale
-            if (profileImageProcessor && window.imageProcessor) {
-                window.imageProcessor.setPictureControl(profileImageProcessor.pictureControl);
+            // Reporter les réglages du Gestionnaire vers le Studio
+            if (activeProfilePC && window.imageProcessor) {
+                window.imageProcessor.setPictureControl(activeProfilePC);
+                if (typeof window.updatePictureControl === "function") {
+                    window.updatePictureControl({ pictureControl: activeProfilePC }, true);
+                }
             }
         };
     }
@@ -232,7 +284,7 @@ function initButtons() {
                         pictureControl: pcData, 
                         lens: fileInfo.lens || "Objectif non renseigné",
                         isNewFile: true 
-                    });
+                    }, true);
                 }
             } catch (err) {
                 console.error("❌ Erreur d'ouverture NEF :", err);
@@ -243,76 +295,94 @@ function initButtons() {
     /*---------------------------------------------------------
         3. Imports NP3 & Exports
     ---------------------------------------------------------*/
-    if (btnNP3) {
-        btnNP3.onclick = async () => {
-            try {
-                const response = await window.electronAPI.loadNP3();
-                if (response) {
-                    // Extraction flexible des données du profil
-                    const pc = response.pictureControl || response.pc || response;
-                    
-                    pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
-                    pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
 
-                    const name = response.fileName || response.name || pc.name || `Profil ${np3Library.length + 1}`;
-
-                    // Stockage propre dans la bibliothèque
-                    np3Library.push({ name: name, data: pc });
-                    localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
-                    renderNp3Library();
-
-                    // Application immédiate du profil chargé
-                    if (window.imageProcessor) window.imageProcessor.setPictureControl(pc);
-                    if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
-                    if (typeof window.updatePictureControl === "function") {
-                        window.updatePictureControl({ pictureControl: pc });
+if (btnNP3) {
+    btnNP3.onclick = async () => {
+        try {
+            const response = await window.electronAPI.loadNP3();
+            if (response) {
+                // 🔥 Extraction complète des données du profil
+                let pc = {};
+                if (response.pictureControl) {
+                    pc = response.pictureControl;
+                    // Si response a colorBlender au niveau racine, on le copie
+                    if (response.colorBlender && !pc.colorBlender) {
+                        pc.colorBlender = response.colorBlender;
                     }
+                    if (response.colorGrading && !pc.colorGrading) {
+                        pc.colorGrading = response.colorGrading;
+                    }
+                } else if (response.pc) {
+                    pc = response.pc;
+                } else {
+                    pc = response;
                 }
-            } catch (err) {
-                console.error("❌ Erreur d'importation NP3 :", err);
-            }
-        };
-    }
+                
+                pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
+                pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
 
+                const name = response.fileName || response.name || pc.name || `Profil ${np3Library.length + 1}`;
+
+                // Stockage dans la bibliothèque
+                np3Library.push({ name: name, data: pc });
+                localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
+                renderNp3Library();
+
+                // Application immédiate du profil chargé
+                if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
+                renderProfilePanel(pc, true);
+            }
+        } catch (err) {
+            console.error("❌ Erreur d'importation NP3 :", err);
+        }
+    };
+}
+    // 🔥 AJOUTER CE CODE POUR btnSaveNP3
     if (btnSaveNP3) {
-        btnSaveNP3.onclick = async () => {
+        btnSaveNP3.addEventListener("click", async () => {
+            console.log("🔄 Clic sur saveNP3 détecté !");
             try {
-                const activePC = profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
-                if (activePC && window.electronAPI) {
+                const activePC = activeProfilePC || profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
+                
+                if (!activePC) {
+                    console.warn("⚠️ Aucun Picture Control actif à enregistrer.");
+                    return;
+                }
+
+                console.log("📤 Sauvegarde NP3 - Données:", activePC);
+                console.log("🎨 ColorBlender présent:", !!activePC.colorBlender);
+                console.log("🎨 ColorGrading présent:", !!activePC.colorGrading);
+
+                if (window.electronAPI) {
                     await window.electronAPI.saveNP3File(activePC);
+                    console.log("✅ NP3 sauvegardé avec succès !");
                 }
             } catch (err) {
                 console.error("❌ Erreur d'enregistrement NP3 :", err);
             }
+        });
+    }
+    if (btnExportNCP) {
+        btnExportNCP.onclick = async () => {
+            try {
+                const activePC = activeProfilePC || profileImageProcessor?.pictureControl;
+
+                if (activePC && window.electronAPI) {
+                    console.log("💾 [IHM] Exportation du profil actif :", activePC);
+                    await window.electronAPI.exportNCP(activePC);
+                } else {
+                    console.warn("⚠️ Aucun Picture Control actif à exporter.");
+                }
+            } catch (err) {
+                console.error("❌ Erreur d'exportation NCP :", err);
+            }
         };
     }
-
-if (btnExportNCP) {
-    btnExportNCP.onclick = async () => {
-        try {
-            // 🎯 Récupération prioritaire du Picture Control actif dans le processeur d'image
-            let activePC = window.imageProcessor?.pictureControl || profileImageProcessor?.pictureControl;
-
-            if (!activePC && typeof window.getCurrentPictureControl === "function") {
-                activePC = window.getCurrentPictureControl();
-            }
-
-            if (activePC && window.electronAPI) {
-                console.log("💾 [IHM] Exportation du profil actif :", activePC);
-                await window.electronAPI.exportNCP(activePC);
-            } else {
-                console.warn("⚠️ Aucun Picture Control actif à exporter.");
-            }
-        } catch (err) {
-            console.error("❌ Erreur d'exportation NCP :", err);
-        }
-    };
-}
 
     if (btnExportJpg) {
         btnExportJpg.onclick = async () => {
             try {
-                const activeProcessor = window.imageProcessor || profileImageProcessor;
+                const activeProcessor = window.imageProcessor;
                 if (!activeProcessor) return;
 
                 const base64Data = await activeProcessor.exportImage("image/jpeg", 0.95);

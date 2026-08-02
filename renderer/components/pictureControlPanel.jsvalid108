@@ -7,88 +7,6 @@
 const originalPictureControlByContainer = {};
 const toneCurveWidgetsByContainer = {};
 
-/* ---------------------------------------------------------
-   Champs exclusifs au format NP3 (Flexible Color, EXPEED 7)
-   Source : types officiels de nikon-flexible-color-picture-control
---------------------------------------------------------- */
-const COLOR_BLENDER_KEYS = [
-    { key: "red", label: "Rouge" },
-    { key: "orange", label: "Orange" },
-    { key: "yellow", label: "Jaune" },
-    { key: "green", label: "Vert" },
-    { key: "cyan", label: "Cyan" },
-    { key: "blue", label: "Bleu" },
-    { key: "purple", label: "Violet" },
-    { key: "magenta", label: "Magenta" }
-];
-
-const COLOR_GRADING_ZONES = [
-    { key: "highlights", label: "Hautes lumières" },
-    { key: "midTone", label: "Tons moyens" },
-    { key: "shadows", label: "Ombres" }
-];
-
-function miniSlider(label, field, value, min, max, step) {
-    return `
-    <div class="pc-mini-slider" data-row="${field}">
-        <div class="pc-mini-label">
-            <span>${label}</span>
-            <span class="pc-value" data-value-for="${field}">${value ?? 0}</span>
-        </div>
-        <input class="pc-slider" data-field="${field}" type="range" min="${min}" max="${max}" value="${value ?? 0}" step="${step}">
-    </div>`;
-}
-
-function buildNP3SectionHtml(pc) {
-    const cb = pc.colorBlender || {};
-    const cg = pc.colorGrading || {};
-
-    const blenderRows = COLOR_BLENDER_KEYS.map(({ key, label }) => {
-        const v = cb[key] || {};
-        return `
-        <div class="np3-color-row">
-            <div class="np3-color-name">${label}</div>
-            ${miniSlider("Teinte", `colorBlender.${key}.hue`, v.hue ?? 0, -100, 100, 1)}
-            ${miniSlider("Chroma", `colorBlender.${key}.chroma`, v.chroma ?? 0, -100, 100, 1)}
-            ${miniSlider("Luminosité", `colorBlender.${key}.brightness`, v.brightness ?? 0, -100, 100, 1)}
-        </div>`;
-    }).join("");
-
-    const gradingRows = COLOR_GRADING_ZONES.map(({ key, label }) => {
-        const v = cg[key] || {};
-        return `
-        <div class="np3-color-row">
-            <div class="np3-color-name">${label}</div>
-            ${miniSlider("Teinte", `colorGrading.${key}.hue`, v.hue ?? 0, 0, 360, 1)}
-            ${miniSlider("Chroma", `colorGrading.${key}.chroma`, v.chroma ?? 0, -100, 100, 1)}
-            ${miniSlider("Luminosité", `colorGrading.${key}.brightness`, v.brightness ?? 0, -100, 100, 1)}
-        </div>`;
-    }).join("");
-
-    return `
-        <div id="np3ExtendedSection" style="margin-top: 20px;">
-            <hr style="border: 0; border-top: 2px solid #5865f2; margin: 15px 0;">
-            <h3 style="color:#5865f2;">🎨 Réglages NP3 (Flexible Color)</h3>
-            <p style="font-size:11px; color:#949ba4; margin-bottom:10px;">
-                Ignorés lors d'un export .NCP — pris en compte uniquement pour l'export .NP3 (Z50 II / EXPEED 7).
-            </p>
-
-            <h4 style="margin: 10px 0 6px; color:#dbdee1;">Color Blender</h4>
-            <div class="np3-color-grid">
-                ${blenderRows}
-            </div>
-
-            <h4 style="margin: 16px 0 6px; color:#dbdee1;">Color Grading</h4>
-            <div class="np3-color-grid">
-                ${gradingRows}
-            </div>
-
-            ${miniSlider("Mélange (Blending)", "colorGrading.blending", cg.blending ?? 0, 0, 100, 1)}
-            ${miniSlider("Balance", "colorGrading.balance", cg.balance ?? 0, -100, 100, 1)}
-        </div>
-    `;
-}
-
 function createSlider(label, field, value, min, max, step = 1) {
     return `
     <div class="pc-row" data-row="${field}">
@@ -121,7 +39,7 @@ function resolveProfileName(pc) {
     return "Standard";
 }
 
-function buildPanelHtml(pc, compact, extendedNP3) {
+function buildPanelHtml(pc, compact) {
     const currentName = resolveProfileName(pc);
     const isMono = pc.isMonochrome === true || currentName === "Monochrome";
 
@@ -204,8 +122,6 @@ function buildPanelHtml(pc, compact, extendedNP3) {
         </div>
         `}
 
-        ${extendedNP3 ? buildNP3SectionHtml(pc) : ""}
-
         <br><br>
         <button data-action="reset" class="btn-reset">Réinitialiser</button>
     `;
@@ -223,7 +139,7 @@ function buildPanelHtml(pc, compact, extendedNP3) {
  *   - onReset {async function} optionnel, doit renvoyer un Picture Control ou rien
  */
 function renderPictureControlPanel(containerId, pc, options = {}) {
-    const { compact = false, extendedNP3 = false, isNewInstance = false, onChange = null, onReset = null } = options;
+    const { compact = false, isNewInstance = false, onChange = null, onReset = null } = options;
     const container = document.getElementById(containerId);
     if (!container) {
         console.warn(`⚠️ Conteneur #${containerId} introuvable pour le panneau Picture Control`);
@@ -244,7 +160,7 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         originalPictureControlByContainer[containerId] = structuredClone(pc);
     }
 
-    container.innerHTML = buildPanelHtml(pc, compact, extendedNP3);
+    container.innerHTML = buildPanelHtml(pc, compact);
 
     const isMono = pc.isMonochrome === true || resolveProfileName(pc) === "Monochrome";
     const satRow = container.querySelector('[data-row="saturation"]');
@@ -286,7 +202,7 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         const sharpVal = getVal("sharpening");
         const midVal = getVal("midRangeSharpening");
 
-        const baseState = {
+        return {
             name: profileName,
             pictureControlName: profileName,
             baseProfile: profileName.toUpperCase(),
@@ -319,33 +235,6 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
 
             toneCurveLut: curveLut
         };
-
-        if (extendedNP3) {
-            const colorBlender = {};
-            COLOR_BLENDER_KEYS.forEach(({ key }) => {
-                colorBlender[key] = {
-                    hue: getVal(`colorBlender.${key}.hue`),
-                    chroma: getVal(`colorBlender.${key}.chroma`),
-                    brightness: getVal(`colorBlender.${key}.brightness`)
-                };
-            });
-
-            const colorGrading = {};
-            COLOR_GRADING_ZONES.forEach(({ key }) => {
-                colorGrading[key] = {
-                    hue: getVal(`colorGrading.${key}.hue`),
-                    chroma: getVal(`colorGrading.${key}.chroma`),
-                    brightness: getVal(`colorGrading.${key}.brightness`)
-                };
-            });
-            colorGrading.blending = getVal("colorGrading.blending");
-            colorGrading.balance = getVal("colorGrading.balance");
-
-            baseState.colorBlender = colorBlender;
-            baseState.colorGrading = colorGrading;
-        }
-
-        return baseState;
     }
 
     function trigger() {
