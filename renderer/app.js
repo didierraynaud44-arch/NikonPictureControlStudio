@@ -26,10 +26,7 @@ function renderProfilePanel(pc, isNewInstance = false) {
 
     window.renderPictureControlPanel("profileControlStatus", pc, {
         compact: true,
-<<<<<<< HEAD
         extendedNP3: true,
-=======
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
         isNewInstance: isNewInstance,
         onChange: (state) => {
             activeProfilePC = state;
@@ -72,7 +69,6 @@ function renderNp3Library() {
                 div.classList.add("active");
 
                 // Extraction sécurisée des données du profil
-<<<<<<< HEAD
         // Extraction sécurisée des données du profil
 let pc = {};
 if (item.data?.pictureControl) {
@@ -96,15 +92,6 @@ pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
 
 console.log("👉 Application du profil importé :", item.name, pc);
 console.log("🎨 ColorBlender présent:", !!pc.colorBlender);
-=======
-                let pc = item.data?.pictureControl || item.data || {};
-
-                // Correction des clés de netteté binaires
-                pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
-                pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
-
-                console.log("👉 Application du profil importé :", item.name, pc);
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
 
                 const viewProfiles = document.getElementById("view-profiles");
                 const isProfilesViewActive = viewProfiles && viewProfiles.classList.contains("view-active");
@@ -309,7 +296,6 @@ function initButtons() {
         3. Imports NP3 & Exports
     ---------------------------------------------------------*/
 
-<<<<<<< HEAD
 if (btnNP3) {
     btnNP3.onclick = async () => {
         try {
@@ -330,19 +316,6 @@ if (btnNP3) {
                     pc = response.pc;
                 } else {
                     pc = response;
-=======
-                    const name = response.fileName || response.name || pc.name || `Profil ${np3Library.length + 1}`;
-
-                    // Stockage propre dans la bibliothèque
-                    np3Library.push({ name: name, data: pc });
-                    localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
-                    renderNp3Library();
-
-                    // Application immédiate du profil chargé (toujours dans le Gestionnaire,
-                    // puisque c'est la seule vue où l'import NP3 est disponible)
-                    if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
-                    renderProfilePanel(pc, true);
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
                 }
                 
                 pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
@@ -369,7 +342,6 @@ if (btnNP3) {
         btnSaveNP3.addEventListener("click", async () => {
             console.log("🔄 Clic sur saveNP3 détecté !");
             try {
-<<<<<<< HEAD
                 const activePC = activeProfilePC || profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
                 
                 if (!activePC) {
@@ -382,10 +354,6 @@ if (btnNP3) {
                 console.log("🎨 ColorGrading présent:", !!activePC.colorGrading);
 
                 if (window.electronAPI) {
-=======
-                const activePC = activeProfilePC || profileImageProcessor?.pictureControl;
-                if (activePC && window.electronAPI) {
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
                     await window.electronAPI.saveNP3File(activePC);
                     console.log("✅ NP3 sauvegardé avec succès !");
                 }
@@ -411,26 +379,6 @@ if (btnNP3) {
         };
     }
 
-<<<<<<< HEAD
-=======
-    if (btnExportNCP) {
-        btnExportNCP.onclick = async () => {
-            try {
-                const activePC = activeProfilePC || profileImageProcessor?.pictureControl;
-
-                if (activePC && window.electronAPI) {
-                    console.log("💾 [IHM] Exportation du profil actif :", activePC);
-                    await window.electronAPI.exportNCP(activePC);
-                } else {
-                    console.warn("⚠️ Aucun Picture Control actif à exporter.");
-                }
-            } catch (err) {
-                console.error("❌ Erreur d'exportation NCP :", err);
-            }
-        };
-    }
-
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
     if (btnExportJpg) {
         btnExportJpg.onclick = async () => {
             try {
