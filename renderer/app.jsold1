@@ -26,10 +26,6 @@ function renderProfilePanel(pc, isNewInstance = false) {
 
     window.renderPictureControlPanel("profileControlStatus", pc, {
         compact: true,
-<<<<<<< HEAD
-        extendedNP3: true,
-=======
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
         isNewInstance: isNewInstance,
         onChange: (state) => {
             activeProfilePC = state;
@@ -72,31 +68,6 @@ function renderNp3Library() {
                 div.classList.add("active");
 
                 // Extraction sécurisée des données du profil
-<<<<<<< HEAD
-        // Extraction sécurisée des données du profil
-let pc = {};
-if (item.data?.pictureControl) {
-    pc = item.data.pictureControl;
-    // Si item.data a colorBlender au niveau racine, on le garde
-    if (item.data.colorBlender && !pc.colorBlender) {
-        pc.colorBlender = item.data.colorBlender;
-    }
-    if (item.data.colorGrading && !pc.colorGrading) {
-        pc.colorGrading = item.data.colorGrading;
-    }
-} else if (item.data) {
-    pc = item.data;
-} else {
-    pc = item;
-}
-
-// Correction des clés de netteté binaires
-pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
-pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
-
-console.log("👉 Application du profil importé :", item.name, pc);
-console.log("🎨 ColorBlender présent:", !!pc.colorBlender);
-=======
                 let pc = item.data?.pictureControl || item.data || {};
 
                 // Correction des clés de netteté binaires
@@ -104,10 +75,9 @@ console.log("🎨 ColorBlender présent:", !!pc.colorBlender);
                 pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
 
                 console.log("👉 Application du profil importé :", item.name, pc);
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
 
                 const viewProfiles = document.getElementById("view-profiles");
-                const isProfilesViewActive = viewProfiles && viewProfiles.classList.contains("view-active");
+                const isProfilesViewActive = viewProfiles && viewProfiles.style.display !== "none";
 
                 if (isProfilesViewActive) {
                     // Vue Gestionnaire active -> panneau compact + canvas dédié
@@ -155,29 +125,11 @@ function initButtons() {
     const headerStudio    = document.getElementById("header-studio-actions");
     const headerProfiles  = document.getElementById("header-profile-actions");
 
-    /**
-     * Bascule entre deux vues en pilotant les CLASSES view-active/view-hidden
-     * (et non style.display) : style.css définit ces classes avec !important,
-     * qui l'emporte toujours sur un style inline. Ne pas mélanger les deux
-     * approches pour éviter que l'une masque silencieusement l'autre.
-     */
-    function showView(viewToShow, viewToHide) {
-        if (viewToHide) {
-            viewToHide.classList.remove("view-active");
-            viewToHide.classList.add("view-hidden");
-            viewToHide.style.removeProperty("display"); // nettoie un éventuel résidu inline
-        }
-        if (viewToShow) {
-            viewToShow.classList.remove("view-hidden");
-            viewToShow.classList.add("view-active");
-            viewToShow.style.removeProperty("display");
-        }
-    }
-
     // S'assurer de la visibilité par défaut de la Vue 1 (Studio)
     if (headerStudio) headerStudio.style.display = "flex";
     if (headerProfiles) headerProfiles.style.display = "none";
-    showView(viewStudio, viewProfiles);
+    if (viewStudio) viewStudio.style.display = "flex";
+    if (viewProfiles) viewProfiles.style.display = "none";
 
     // Instancier le processeur Studio par défaut s'il n'existe pas encore
     if (!window.imageProcessor && typeof ImageProcessor !== "undefined") {
@@ -194,8 +146,10 @@ function initButtons() {
     ---------------------------------------------------------*/
     if (btnOpenProfiles) {
         btnOpenProfiles.onclick = async () => {
-            showView(viewProfiles, viewStudio);
+            if (viewStudio) viewStudio.style.display = "none";
             if (headerStudio) headerStudio.style.display = "none";
+
+            if (viewProfiles) viewProfiles.style.display = "flex";
             if (headerProfiles) headerProfiles.style.display = "flex";
 
             // Initialiser le Canvas de la vue Gestionnaire si nécessaire
@@ -228,8 +182,10 @@ function initButtons() {
 
     if (btnReturnStudio) {
         btnReturnStudio.onclick = () => {
-            showView(viewStudio, viewProfiles);
+            if (viewProfiles) viewProfiles.style.display = "none";
             if (headerProfiles) headerProfiles.style.display = "none";
+
+            if (viewStudio) viewStudio.style.display = "flex";
             if (headerStudio) headerStudio.style.display = "flex";
 
             // Reporter les réglages du Gestionnaire vers le Studio
@@ -308,29 +264,17 @@ function initButtons() {
     /*---------------------------------------------------------
         3. Imports NP3 & Exports
     ---------------------------------------------------------*/
+    if (btnNP3) {
+        btnNP3.onclick = async () => {
+            try {
+                const response = await window.electronAPI.loadNP3();
+                if (response) {
+                    // Extraction flexible des données du profil
+                    const pc = response.pictureControl || response.pc || response;
+                    
+                    pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
+                    pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
 
-<<<<<<< HEAD
-if (btnNP3) {
-    btnNP3.onclick = async () => {
-        try {
-            const response = await window.electronAPI.loadNP3();
-            if (response) {
-                // 🔥 Extraction complète des données du profil
-                let pc = {};
-                if (response.pictureControl) {
-                    pc = response.pictureControl;
-                    // Si response a colorBlender au niveau racine, on le copie
-                    if (response.colorBlender && !pc.colorBlender) {
-                        pc.colorBlender = response.colorBlender;
-                    }
-                    if (response.colorGrading && !pc.colorGrading) {
-                        pc.colorGrading = response.colorGrading;
-                    }
-                } else if (response.pc) {
-                    pc = response.pc;
-                } else {
-                    pc = response;
-=======
                     const name = response.fileName || response.name || pc.name || `Profil ${np3Library.length + 1}`;
 
                     // Stockage propre dans la bibliothèque
@@ -342,58 +286,26 @@ if (btnNP3) {
                     // puisque c'est la seule vue où l'import NP3 est disponible)
                     if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
                     renderProfilePanel(pc, true);
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
                 }
-                
-                pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
-                pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
-
-                const name = response.fileName || response.name || pc.name || `Profil ${np3Library.length + 1}`;
-
-                // Stockage dans la bibliothèque
-                np3Library.push({ name: name, data: pc });
-                localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
-                renderNp3Library();
-
-                // Application immédiate du profil chargé
-                if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
-                renderProfilePanel(pc, true);
+            } catch (err) {
+                console.error("❌ Erreur d'importation NP3 :", err);
             }
-        } catch (err) {
-            console.error("❌ Erreur d'importation NP3 :", err);
-        }
-    };
-}
-    // 🔥 AJOUTER CE CODE POUR btnSaveNP3
+        };
+    }
+
     if (btnSaveNP3) {
-        btnSaveNP3.addEventListener("click", async () => {
-            console.log("🔄 Clic sur saveNP3 détecté !");
+        btnSaveNP3.onclick = async () => {
             try {
-<<<<<<< HEAD
-                const activePC = activeProfilePC || profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
-                
-                if (!activePC) {
-                    console.warn("⚠️ Aucun Picture Control actif à enregistrer.");
-                    return;
-                }
-
-                console.log("📤 Sauvegarde NP3 - Données:", activePC);
-                console.log("🎨 ColorBlender présent:", !!activePC.colorBlender);
-                console.log("🎨 ColorGrading présent:", !!activePC.colorGrading);
-
-                if (window.electronAPI) {
-=======
                 const activePC = activeProfilePC || profileImageProcessor?.pictureControl;
                 if (activePC && window.electronAPI) {
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
                     await window.electronAPI.saveNP3File(activePC);
-                    console.log("✅ NP3 sauvegardé avec succès !");
                 }
             } catch (err) {
                 console.error("❌ Erreur d'enregistrement NP3 :", err);
             }
-        });
+        };
     }
+
     if (btnExportNCP) {
         btnExportNCP.onclick = async () => {
             try {
@@ -411,26 +323,6 @@ if (btnNP3) {
         };
     }
 
-<<<<<<< HEAD
-=======
-    if (btnExportNCP) {
-        btnExportNCP.onclick = async () => {
-            try {
-                const activePC = activeProfilePC || profileImageProcessor?.pictureControl;
-
-                if (activePC && window.electronAPI) {
-                    console.log("💾 [IHM] Exportation du profil actif :", activePC);
-                    await window.electronAPI.exportNCP(activePC);
-                } else {
-                    console.warn("⚠️ Aucun Picture Control actif à exporter.");
-                }
-            } catch (err) {
-                console.error("❌ Erreur d'exportation NCP :", err);
-            }
-        };
-    }
-
->>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
     if (btnExportJpg) {
         btnExportJpg.onclick = async () => {
             try {

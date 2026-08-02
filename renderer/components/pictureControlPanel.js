@@ -7,6 +7,7 @@
 const originalPictureControlByContainer = {};
 const toneCurveWidgetsByContainer = {};
 
+<<<<<<< HEAD
 /* ---------------------------------------------------------
    Champs exclusifs au format NP3 (Flexible Color, EXPEED 7)
    Source : types officiels de nikon-flexible-color-picture-control
@@ -91,6 +92,10 @@ function buildNP3SectionHtml(pc) {
 
 function createSlider(label, field, value, min, max, step = 1) {
     return `
+=======
+function createSlider(label, field, value, min, max, step = 1) {
+    return `
+>>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
     <div class="pc-row" data-row="${field}">
         <div class="pc-label">
             <span>${label}</span>
@@ -121,7 +126,11 @@ function resolveProfileName(pc) {
     return "Standard";
 }
 
+<<<<<<< HEAD
 function buildPanelHtml(pc, compact, extendedNP3) {
+=======
+function buildPanelHtml(pc, compact) {
+>>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
     const currentName = resolveProfileName(pc);
     const isMono = pc.isMonochrome === true || currentName === "Monochrome";
 
@@ -203,8 +212,11 @@ function buildPanelHtml(pc, compact, extendedNP3) {
             <input type="checkbox" data-field="lensCorrection" class="pc-checkbox" ${pc.lensCorrection ? 'checked' : ''}>
         </div>
         `}
+<<<<<<< HEAD
 
         ${extendedNP3 ? buildNP3SectionHtml(pc) : ""}
+=======
+>>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
 
         <br><br>
         <button data-action="reset" class="btn-reset">Réinitialiser</button>
@@ -223,7 +235,11 @@ function buildPanelHtml(pc, compact, extendedNP3) {
  *   - onReset {async function} optionnel, doit renvoyer un Picture Control ou rien
  */
 function renderPictureControlPanel(containerId, pc, options = {}) {
+<<<<<<< HEAD
     const { compact = false, extendedNP3 = false, isNewInstance = false, onChange = null, onReset = null } = options;
+=======
+    const { compact = false, isNewInstance = false, onChange = null, onReset = null } = options;
+>>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
     const container = document.getElementById(containerId);
     if (!container) {
         console.warn(`⚠️ Conteneur #${containerId} introuvable pour le panneau Picture Control`);
@@ -244,7 +260,11 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         originalPictureControlByContainer[containerId] = structuredClone(pc);
     }
 
+<<<<<<< HEAD
     container.innerHTML = buildPanelHtml(pc, compact, extendedNP3);
+=======
+    container.innerHTML = buildPanelHtml(pc, compact);
+>>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
 
     const isMono = pc.isMonochrome === true || resolveProfileName(pc) === "Monochrome";
     const satRow = container.querySelector('[data-row="saturation"]');
@@ -286,7 +306,11 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         const sharpVal = getVal("sharpening");
         const midVal = getVal("midRangeSharpening");
 
+<<<<<<< HEAD
         const baseState = {
+=======
+        return {
+>>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
             name: profileName,
             pictureControlName: profileName,
             baseProfile: profileName.toUpperCase(),
@@ -319,6 +343,7 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
 
             toneCurveLut: curveLut
         };
+<<<<<<< HEAD
 
         if (extendedNP3) {
             const colorBlender = {};
@@ -346,6 +371,8 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         }
 
         return baseState;
+=======
+>>>>>>> 2b2839837d6d30562a1e921347e99313eef92f80
     }
 
     function trigger() {
