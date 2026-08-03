@@ -128,6 +128,12 @@ function buildPanelHtml(pc, compact, extendedNP3) {
     return `
         <h2>Picture Control Nikon</h2>
 
+        ${compact ? "" : `
+        <div class="scope-banner scope-global">
+            🌍 Réglages GLOBAUX — s'appliquent à <b>toute l'image</b>
+        </div>
+        `}
+
         <div class="pc-row" style="margin-bottom: 12px;">
             <label style="font-weight: bold;">Profil :</label>
             <select data-field="pcProfileSelect" class="pc-select" style="background:#222; color:#fff; border:1px solid #555; padding:4px 8px; border-radius:4px;">
@@ -457,6 +463,7 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
 }
 
 window.renderPictureControlPanel = renderPictureControlPanel;
+window.createSlider = createSlider; // réutilisé par components/masksPanel.js
 
 // --- Compatibilité rétroactive : panneau complet du Studio ---
 window.updatePictureControl = function (info, isNewPhoto = false) {

@@ -13,6 +13,10 @@ class ImageProcessor {
         this.currentLensInfo = null;
         this.display = new DisplayCanvas(canvasId);
 
+        // Calque de contour des masques (superposé, uniquement pour le Studio)
+        this.overlayCanvas = document.getElementById("maskOverlayCanvas");
+        this.overlayCtx = this.overlayCanvas ? this.overlayCanvas.getContext("2d") : null;
+
         // 🔍 Zoom & Pan
         this.zoom = 1;
         this.minZoom = 0.5;
@@ -25,6 +29,13 @@ class ImageProcessor {
 
         this.pictureControl = null;
         this.pipeline = new RenderPipeline();
+
+        // Masques locaux (linéaire/radial/pinceau) — Studio uniquement.
+        // enableMasks reste à false par défaut ; app.js l'active explicitement
+        // sur l'instance du Studio (jamais sur celle du Gestionnaire de Profils).
+        this.enableMasks = false;
+        this.maskController = null; // branché depuis app.js après construction
+        this.showMaskOverlay = true; // permet de masquer temporairement les contours (voir l'effet réel)
 
         // ---------------------------------------------------------
         // PIPELINE PICTURE CONTROL NIKON (Ordre d'exécution)
@@ -86,6 +97,8 @@ class ImageProcessor {
 
         canvas.addEventListener("mousedown", (e) => {
             if (e.button !== 0) return;
+            if (this.maskController && typeof this.maskController.shouldInterceptMouseEvent === "function"
+                && this.maskController.shouldInterceptMouseEvent(e.clientX, e.clientY)) return;
             this.isDragging = true;
             this.dragStartX = e.clientX - this.panX;
             this.dragStartY = e.clientY - this.panY;
@@ -94,6 +107,7 @@ class ImageProcessor {
 
         window.addEventListener("mousemove", (e) => {
             if (!this.isDragging) return;
+            if (this.maskController && (this.maskController.isDrawing || this.maskController.editState)) return;
             this.panX = e.clientX - this.dragStartX;
             this.panY = e.clientY - this.dragStartY;
             this.render();
@@ -185,6 +199,11 @@ class ImageProcessor {
                 if (this.display && this.display.canvas) {
                     this.display.canvas.width = previewCanvas.width;
                     this.display.canvas.height = previewCanvas.height;
+                }
+
+                if (this.overlayCanvas) {
+                    this.overlayCanvas.width = previewCanvas.width;
+                    this.overlayCanvas.height = previewCanvas.height;
                 }
 
                 this.initZoomAndPanEvents();
@@ -316,6 +335,15 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
             }
         }
 
+        // Masques locaux (après le pipeline global, Studio uniquement)
+        if (this.enableMasks && typeof MaskEngine !== "undefined" && typeof MasksManager !== "undefined") {
+            try {
+                currentImageData = MaskEngine.applyAllMasks(currentImageData, MasksManager.getMasks(), this.pipeline);
+            } catch (err) {
+                console.error("❌ Erreur application des masques :", err);
+            }
+        }
+
         const tempCanvas = document.createElement("canvas");
         tempCanvas.width = currentImageData.width;
         tempCanvas.height = currentImageData.height;
@@ -330,6 +358,120 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
         ctx.scale(this.zoom, this.zoom);
         ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
         ctx.restore();
+
+        if (this.enableMasks) this.renderMaskOverlay();
+    }
+
+    /**
+     * Dessine le contour des masques sur le calque superposé :
+     * - le masque en cours de tracé (aperçu en direct)
+     * - le contour du masque actuellement sélectionné
+     * Utilise le même repère (zoom/pan) que le rendu principal.
+     */
+    renderMaskOverlay() {
+        if (!this.overlayCtx || !this.overlayCanvas) return;
+        if (typeof MasksManager === "undefined") return;
+
+        const ctx = this.overlayCtx;
+        const canvas = this.overlayCanvas;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (!this.showMaskOverlay) return; // contours masqués : on s'arrête après avoir nettoyé le calque
+
+        ctx.save();
+        ctx.translate(this.panX, this.panY);
+        ctx.scale(this.zoom, this.zoom);
+
+        const masksToDraw = [];
+        const activeMask = MasksManager.getActiveMask();
+        if (activeMask) masksToDraw.push({ mask: activeMask, live: false });
+
+        // Le masque en cours de tracé (s'il diffère du masque actif déjà listé)
+        const controller = this.maskController;
+        if (controller && controller.isDrawing && controller.pendingMask) {
+            const pending = MasksManager.getMask(controller.pendingMask.id);
+            if (pending && (!activeMask || pending.id !== activeMask.id)) {
+                masksToDraw.push({ mask: pending, live: true });
+            }
+        }
+
+        for (const { mask, live } of masksToDraw) {
+            this._drawMaskShape(ctx, canvas.width, canvas.height, mask, live);
+        }
+
+        ctx.restore();
+    }
+
+    _drawMaskShape(ctx, width, height, mask, live) {
+        ctx.lineWidth = live ? 2 / this.zoom : 1.5 / this.zoom;
+        ctx.strokeStyle = live ? "#ffffff" : "#5865f2";
+        ctx.setLineDash(live ? [] : [6 / this.zoom, 4 / this.zoom]);
+
+        if (mask.type === "linear") {
+            const g = mask.geometry;
+            const ax = g.x1 * width, ay = g.y1 * height;
+            const bx = g.x2 * width, by = g.y2 * height;
+
+            // Ligne d'axe (direction du dégradé)
+            ctx.beginPath();
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(bx, by);
+            ctx.stroke();
+
+            // Bandes perpendiculaires aux deux extrémités (effet 100% / 0%)
+            const dx = bx - ax, dy = by - ay;
+            const len = Math.hypot(dx, dy) || 1;
+            const perpX = -dy / len, perpY = dx / len;
+            const bandHalf = Math.max(width, height);
+
+            ctx.setLineDash([4 / this.zoom, 4 / this.zoom]);
+            [[ax, ay], [bx, by]].forEach(([px, py]) => {
+                ctx.beginPath();
+                ctx.moveTo(px - perpX * bandHalf, py - perpY * bandHalf);
+                ctx.lineTo(px + perpX * bandHalf, py + perpY * bandHalf);
+                ctx.stroke();
+            });
+
+        } else if (mask.type === "radial") {
+            const g = mask.geometry;
+            const cx = g.cx * width, cy = g.cy * height;
+            const rx = Math.max(1, g.radiusX * width);
+            const ry = Math.max(1, g.radiusY * height);
+            const angleRad = (g.angle || 0) * Math.PI / 180;
+
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, rx, ry, angleRad, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Petit marqueur au centre
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.arc(cx, cy, 3 / this.zoom, 0, Math.PI * 2);
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.fill();
+
+        } else if (mask.type === "brush") {
+            const strokes = mask.geometry.strokes || [];
+            // Tracé fin purement indicatif : ne recouvre PAS la zone peinte
+            // (contrairement à un trait de la largeur réelle du pinceau,
+            // qui masquerait l'effet du réglage sous une couleur pleine).
+            ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+            ctx.lineWidth = (live ? 2 : 1.5) / this.zoom;
+            ctx.strokeStyle = live ? "#ffffff" : "#5865f2";
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            for (const stroke of strokes) {
+                if (!stroke.length) continue;
+                ctx.beginPath();
+                ctx.moveTo(stroke[0].x * width, stroke[0].y * height);
+                for (let i = 1; i < stroke.length; i++) {
+                    ctx.lineTo(stroke[i].x * width, stroke[i].y * height);
+                }
+                ctx.stroke();
+            }
+        }
+
+        ctx.setLineDash([]);
     }
 
     async exportImage(format = "image/jpeg", quality = 0.95) {
@@ -343,6 +485,14 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
 
         if (this.pictureControl && this.pipeline) {
             fullResImageData = this.pipeline.process(fullResImageData, this.pictureControl);
+        }
+
+        if (this.enableMasks && typeof MaskEngine !== "undefined" && typeof MasksManager !== "undefined") {
+            try {
+                fullResImageData = MaskEngine.applyAllMasks(fullResImageData, MasksManager.getMasks(), this.pipeline);
+            } catch (err) {
+                console.error("❌ Erreur application des masques (export) :", err);
+            }
         }
 
         const exportCanvas = document.createElement("canvas");

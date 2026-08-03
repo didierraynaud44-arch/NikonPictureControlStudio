@@ -128,6 +128,27 @@ canvas {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
+.canvas-stack {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+.canvas-stack #previewCanvas {
+    display: block;
+    position: relative;
+}
+
+.canvas-stack #maskOverlayCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* laisse passer les clics vers le vrai canvas en dessous */
+}
+
 /* Barre EXIF (vue Studio) */
 .exif-bar {
     height: 36px;
@@ -367,3 +388,97 @@ canvas {
     height: 3px;
 }
 
+/* =========================================================
+   8. PANNEAU MASQUES LOCAUX (Studio)
+========================================================= */
+#masksPanelStatus h3 {
+    font-size: 14px;
+    font-weight: 700;
+    color: #5865f2;
+}
+
+.mask-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.mask-toolbar button {
+    flex: 1;
+    justify-content: center;
+    font-size: 11px;
+    padding: 8px 6px;
+}
+
+.mask-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.mask-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background-color: #1e1f22;
+    border: 1px solid #35373c;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s ease;
+}
+
+.mask-item:hover {
+    background-color: #35373c;
+    border-color: #4e5058;
+}
+
+.mask-item.active {
+    border-color: #5865f2;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+.mask-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mask-detail .mask-adjustments h4 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #949ba4;
+    margin: 14px 0 6px;
+    border-bottom: 1px solid #35373c;
+    padding-bottom: 4px;
+}
+
+.mask-detail .mask-adjustments h4:first-child {
+    margin-top: 4px;
+}
+
+.scope-banner {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+.scope-banner.scope-global {
+    background-color: rgba(148, 155, 164, 0.15);
+    border: 1px solid #4e5058;
+    color: #dbdee1;
+}
+
+.scope-banner.scope-local {
+    background-color: rgba(88, 101, 242, 0.15);
+    border: 1px solid #5865f2;
+    color: #ffffff;
+}

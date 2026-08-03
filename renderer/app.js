@@ -69,29 +69,13 @@ function renderNp3Library() {
                 div.classList.add("active");
 
                 // Extraction sécurisée des données du profil
-        // Extraction sécurisée des données du profil
-let pc = {};
-if (item.data?.pictureControl) {
-    pc = item.data.pictureControl;
-    // Si item.data a colorBlender au niveau racine, on le garde
-    if (item.data.colorBlender && !pc.colorBlender) {
-        pc.colorBlender = item.data.colorBlender;
-    }
-    if (item.data.colorGrading && !pc.colorGrading) {
-        pc.colorGrading = item.data.colorGrading;
-    }
-} else if (item.data) {
-    pc = item.data;
-} else {
-    pc = item;
-}
+                let pc = item.data?.pictureControl || item.data || {};
 
-// Correction des clés de netteté binaires
-pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
-pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
+                // Correction des clés de netteté binaires
+                pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
+                pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
 
-console.log("👉 Application du profil importé :", item.name, pc);
-console.log("🎨 ColorBlender présent:", !!pc.colorBlender);
+                console.log("👉 Application du profil importé :", item.name, pc);
 
                 const viewProfiles = document.getElementById("view-profiles");
                 const isProfilesViewActive = viewProfiles && viewProfiles.classList.contains("view-active");
@@ -172,6 +156,11 @@ function initButtons() {
         if (studioCanvas) {
             window.imageProcessor = new ImageProcessor("previewCanvas");
         }
+    }
+
+    // Masques locaux (linéaire/radial/pinceau) — Studio uniquement
+    if (window.imageProcessor && typeof window.initMasksController === "function") {
+        window.initMasksController(window.imageProcessor);
     }
 
     /*---------------------------------------------------------
@@ -295,73 +284,48 @@ function initButtons() {
     /*---------------------------------------------------------
         3. Imports NP3 & Exports
     ---------------------------------------------------------*/
-
-if (btnNP3) {
-    btnNP3.onclick = async () => {
-        try {
-            const response = await window.electronAPI.loadNP3();
-            if (response) {
-                // 🔥 Extraction complète des données du profil
-                let pc = {};
-                if (response.pictureControl) {
-                    pc = response.pictureControl;
-                    // Si response a colorBlender au niveau racine, on le copie
-                    if (response.colorBlender && !pc.colorBlender) {
-                        pc.colorBlender = response.colorBlender;
-                    }
-                    if (response.colorGrading && !pc.colorGrading) {
-                        pc.colorGrading = response.colorGrading;
-                    }
-                } else if (response.pc) {
-                    pc = response.pc;
-                } else {
-                    pc = response;
-                }
-                
-                pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
-                pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
-
-                const name = response.fileName || response.name || pc.name || `Profil ${np3Library.length + 1}`;
-
-                // Stockage dans la bibliothèque
-                np3Library.push({ name: name, data: pc });
-                localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
-                renderNp3Library();
-
-                // Application immédiate du profil chargé
-                if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
-                renderProfilePanel(pc, true);
-            }
-        } catch (err) {
-            console.error("❌ Erreur d'importation NP3 :", err);
-        }
-    };
-}
-    // 🔥 AJOUTER CE CODE POUR btnSaveNP3
-    if (btnSaveNP3) {
-        btnSaveNP3.addEventListener("click", async () => {
-            console.log("🔄 Clic sur saveNP3 détecté !");
+    if (btnNP3) {
+        btnNP3.onclick = async () => {
             try {
-                const activePC = activeProfilePC || profileImageProcessor?.pictureControl || window.imageProcessor?.pictureControl;
-                
-                if (!activePC) {
-                    console.warn("⚠️ Aucun Picture Control actif à enregistrer.");
-                    return;
+                const response = await window.electronAPI.loadNP3();
+                if (response) {
+                    // Extraction flexible des données du profil
+                    const pc = response.pictureControl || response.pc || response;
+                    
+                    pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
+                    pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
+
+                    const name = response.fileName || response.name || pc.name || `Profil ${np3Library.length + 1}`;
+
+                    // Stockage propre dans la bibliothèque
+                    np3Library.push({ name: name, data: pc });
+                    localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
+                    renderNp3Library();
+
+                    // Application immédiate du profil chargé (toujours dans le Gestionnaire,
+                    // puisque c'est la seule vue où l'import NP3 est disponible)
+                    if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
+                    renderProfilePanel(pc, true);
                 }
+            } catch (err) {
+                console.error("❌ Erreur d'importation NP3 :", err);
+            }
+        };
+    }
 
-                console.log("📤 Sauvegarde NP3 - Données:", activePC);
-                console.log("🎨 ColorBlender présent:", !!activePC.colorBlender);
-                console.log("🎨 ColorGrading présent:", !!activePC.colorGrading);
-
-                if (window.electronAPI) {
+    if (btnSaveNP3) {
+        btnSaveNP3.onclick = async () => {
+            try {
+                const activePC = activeProfilePC || profileImageProcessor?.pictureControl;
+                if (activePC && window.electronAPI) {
                     await window.electronAPI.saveNP3File(activePC);
-                    console.log("✅ NP3 sauvegardé avec succès !");
                 }
             } catch (err) {
                 console.error("❌ Erreur d'enregistrement NP3 :", err);
             }
-        });
+        };
     }
+
     if (btnExportNCP) {
         btnExportNCP.onclick = async () => {
             try {
@@ -400,6 +364,7 @@ if (btnNP3) {
 
     // Afficher la bibliothèque au chargement initial
     renderNp3Library();
+    if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
 }
 
 // Lancement au chargement du DOM

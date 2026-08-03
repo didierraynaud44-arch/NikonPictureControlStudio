@@ -38,7 +38,10 @@
         <!-- Colonne Centre : Canvas & EXIF -->
         <section class="preview-panel">
             <div class="canvas-container">
-                <canvas id="previewCanvas"></canvas>
+                <div class="canvas-stack">
+                    <canvas id="previewCanvas"></canvas>
+                    <canvas id="maskOverlayCanvas"></canvas>
+                </div>
             </div>
             <div id="exifInfo" class="exif-bar">
                 <span id="exifCamera">-</span> | 
@@ -47,9 +50,10 @@
             </div>
         </section>
 
-        <!-- Colonne Droite : Réglages Picture Control (panneau complet) -->
+        <!-- Colonne Droite : Réglages Picture Control (panneau complet) + Masques locaux -->
         <aside class="sidebar-panel">
             <div id="pictureControlStatus" class="card-panel"></div>
+            <div id="masksPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
         </aside>
 
     </main>
@@ -110,6 +114,13 @@
     <script src="core/ImageProcessor.js"></script>
     <script src="components/exifPanel.js"></script>
     <script src="components/pictureControlPanel.js"></script>
+
+    <!-- Masques locaux (Studio uniquement) -->
+    <script src="core/MaskEngine.js"></script>
+    <script src="core/MasksManager.js"></script>
+    <script src="components/MaskCanvasController.js"></script>
+    <script src="components/masksPanel.js"></script>
+
     <script src="app.js"></script>
 </body>
 </html>
