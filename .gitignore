@@ -4,5 +4,6 @@ build/
 out/
 *.log
 *.tmp
+*.db
 .DS_Store
 Thumbs.db

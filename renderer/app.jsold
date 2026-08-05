@@ -103,7 +103,7 @@ function pathFileName(filePath) {
 }
 
 /**
- * Fonction universelle pour charger une photo depuis le Catalogue ou les menus vers le Studio
+ * Fonction universelle pour charger une photo depuis le Catalogue directement dans le Studio
  */
 async function loadImageInStudio(filePath) {
     if (!filePath) return;
@@ -111,7 +111,7 @@ async function loadImageInStudio(filePath) {
     try {
         currentNefFileName = pathFileName(filePath);
 
-        // 1. Décodage et lecture du fichier via Electron backend
+        // 1. Lecture transparente du fichier via le backend Electron (sans pop-up)
         let fileInfo = null;
         if (window.electronAPI && typeof window.electronAPI.readFileDirect === "function") {
             fileInfo = await window.electronAPI.readFileDirect(filePath);
@@ -122,7 +122,7 @@ async function loadImageInStudio(filePath) {
             return;
         }
 
-        // 2. Formatage de la source (DataURL pour RAW/NEF ou file:// pour images classiques)
+        // 2. Préparation de la source image (Base64 ou protocole file://)
         let rawSrc = fileInfo.preview || fileInfo.filePath || fileInfo.path;
         let imageSrc = "";
 
@@ -137,22 +137,18 @@ async function loadImageInStudio(filePath) {
             }
         }
 
-        // 3. Mise à jour des informations EXIF
+        // 3. Mise à jour des données Exif
         if (typeof window.updateExif === "function") {
             window.updateExif(fileInfo);
         }
 
-        // 4. Extraction et normalisation du Picture Control
+        // 4. Extraction et mise à jour du Picture Control
         const pcData = fileInfo.pictureControl || fileInfo.pc || {};
         pcData.sharpening = pcData.sharpening ?? pcData.sharpness ?? 3.25;
         pcData.midRangeSharpening = pcData.midRangeSharpening ?? 1.0;
 
-        // 5. Chargement de la nouvelle image dans le processeur Canvas (avec purge de l'ancienne image)
+        // 5. Envoi de la texture dans le processeur Canvas WebGL
         if (imageSrc && window.imageProcessor) {
-            if (typeof window.imageProcessor.clear === "function") {
-                window.imageProcessor.clear();
-            }
-
             await window.imageProcessor.load(
                 imageSrc,
                 fileInfo.orientation || 1,
@@ -162,12 +158,9 @@ async function loadImageInStudio(filePath) {
                     aperture: fileInfo.rawAperture || fileInfo.aperture
                 }
             );
-
-            // Application immédiate du Picture Control de la NOUVELLE image
             window.imageProcessor.setPictureControl(pcData);
         }
 
-        // 6. Mise à jour de l'IHM avec le nouveau Picture Control
         if (typeof window.updatePictureControl === "function") {
             window.updatePictureControl({
                 pictureControl: pcData,
@@ -176,7 +169,7 @@ async function loadImageInStudio(filePath) {
             }, true);
         }
 
-        // 7. Bascule vers la vue Studio
+        // 6. Bascule vers la vue Studio
         if (typeof window.switchToView === "function") {
             window.switchToView("view-studio");
         }
@@ -205,7 +198,7 @@ function initButtons() {
 
     const ALL_VIEW_IDS = ["view-studio", "view-profiles", "view-catalog"];
 
-    // Bascule entre les vues principales
+    // Bascule entre les 3 vues principales
     function switchToView(targetViewId) {
         ALL_VIEW_IDS.forEach((id) => {
             const el = document.getElementById(id);
@@ -228,7 +221,7 @@ function initButtons() {
     // Affichage par défaut au démarrage
     switchToView("view-studio");
 
-    // Instanciation du processeur WebGL principal
+    // Instanciation de l'engine Studio s'il n'existe pas encore
     if (!window.imageProcessor && typeof ImageProcessor !== "undefined") {
         const studioCanvas = document.getElementById("previewCanvas");
         if (studioCanvas) {
@@ -297,9 +290,8 @@ function initButtons() {
                 const fileInfo = await window.electronAPI.openNEF();
                 if (!fileInfo) return;
 
-                const newFilePath = fileInfo.filePath || fileInfo.path;
-                if (newFilePath) {
-                    await loadImageInStudio(newFilePath);
+                if (fileInfo.filePath) {
+                    await loadImageInStudio(fileInfo.filePath);
                 }
             } catch (err) {
                 console.error("❌ Erreur d'ouverture NEF :", err);
@@ -307,7 +299,7 @@ function initButtons() {
         };
     }
 
-    /* 3. Imports & Exports */
+    /* 3. Import & Export */
     if (btnNP3) {
         btnNP3.onclick = async () => {
             try {

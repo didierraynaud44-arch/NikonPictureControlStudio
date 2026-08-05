@@ -23,6 +23,10 @@ const { readPictureControl } = require("./engine/pictureControl");
 
 // Import du décodeur RAW multi-marques (LibRaw)
 const { decodeRAWImage, SUPPORTED_EXTENSIONS } = require("./services/rawDecoder");
+// Manager Catalogue & SQLite
+// Import du Catalogue Photos & SQLite (fichiers placés à la racine)
+const { initDatabase, dbAll } = require("./db");
+const { scanFolder } = require("./scanner");
 
 // Import du manager NP3 / NCP
 const { loadNP3, saveNP3, saveNCP } = require("./services/np3Manager");
@@ -208,7 +212,55 @@ ipcMain.handle("loadNP3", async () => {
         throw err;
     }
 });
+// --- Lecture directe d'un fichier (utilisé par le Catalogue sans ouvrir de boite de dialogue) ---
+ipcMain.handle("read-file-direct", async (event, filePath) => {
+    if (!filePath || !fs.existsSync(filePath)) return null;
 
+    const ext = path.extname(filePath).toLowerCase();
+
+    try {
+        // CAS 1 : Fichier NEF Nikon
+        if (ext === ".nef") {
+            const info = await readNEF(filePath);
+            info.preview = await getPreview(filePath);
+
+            try {
+                const pictureControl = await readPictureControl(filePath);
+                pictureControlEngine.load(pictureControl);
+                info.pictureControl = pictureControlEngine.get();
+            } catch (pcErr) {
+                console.warn("⚠️ Impossible de lire le Picture Control embarqué du NEF :", pcErr.message);
+            }
+
+            return info;
+        }
+
+        // CAS 2 : Autre format RAW (Canon, Sony, Fuji...)
+        if (SUPPORTED_EXTENSIONS.includes(ext)) {
+            const previewDataUrl = await decodeRAWImage(filePath);
+            return {
+                filePath: filePath,
+                fileName: path.basename(filePath),
+                preview: previewDataUrl,
+                isRaw: true,
+                pictureControl: pictureControlEngine.get()
+            };
+        }
+
+        // CAS 3 : Image Standard (JPG, PNG...)
+        return {
+            filePath: filePath,
+            fileName: path.basename(filePath),
+            preview: filePath,
+            isStandardImage: true,
+            pictureControl: pictureControlEngine.get()
+        };
+
+    } catch (err) {
+        console.error("❌ Erreur lors de la lecture directe du fichier :", err);
+        return null;
+    }
+});
 /* =======================================================
    6. Handlers IPC : Moteur Picture Control Engine
 ======================================================= */
@@ -328,12 +380,83 @@ ipcMain.handle("export-ncp", async (event, pcData) => {
         throw err;
     }
 });
+/* =======================================================
+   9. Handlers IPC : Catalogue Photos
+======================================================= */
 
+// 1. Sélection et scan d'un répertoire
+ipcMain.handle("catalog:select-folder", async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        title: "Sélectionner un dossier de photos",
+        properties: ["openDirectory"]
+    });
+
+    if (canceled || !filePaths.length) return null;
+
+    const folderPath = filePaths[0];
+    const cacheDir = path.join(app.getPath("userData"), "thumbnails");
+
+    // Lancement du scan avec envoi de la progression en temps réel au renderer
+    const totalIndexed = await scanFolder(folderPath, cacheDir, (current, total, filename) => {
+        if (mainWindow) {
+            mainWindow.webContents.send("catalog:scan-progress", { current, total, filename });
+        }
+    });
+
+    return { folderPath, totalIndexed };
+});
+
+// 2. Récupération de la liste des dossiers indexés
+ipcMain.handle("catalog:get-folders", async () => {
+    try {
+        return await dbAll("SELECT * FROM folders ORDER BY folder_name ASC");
+    } catch (err) {
+        console.error("❌ Erreur récupération dossiers catalogue :", err);
+        return [];
+    }
+});
+
+// 3. Récupération des photos (avec conversion des vignettes en Base64 pour l'IHM)
+ipcMain.handle("catalog:get-photos", async (event, folderPath) => {
+    try {
+        let query = "SELECT * FROM photos ORDER BY id DESC";
+        let params = [];
+
+        if (folderPath && folderPath !== "ALL") {
+            query = "SELECT * FROM photos WHERE folder_path = ? ORDER BY id DESC";
+            params = [folderPath];
+        }
+
+        const photos = await dbAll(query, params);
+        const cacheDir = path.join(app.getPath("userData"), "thumbnails");
+
+        // Attacher l'image de vignette encodée en base64 pour chaque photo
+        return photos.map((photo) => {
+            const thumbPath = path.join(cacheDir, `${path.parse(photo.file_name).name}_thumb.jpg`);
+            let thumbBase64 = null;
+
+            if (fs.existsSync(thumbPath)) {
+                const buffer = fs.readFileSync(thumbPath);
+                thumbBase64 = `data:image/jpeg;base64,${buffer.toString("base64")}`;
+            }
+
+            return {
+                ...photo,
+                thumbBase64: thumbBase64
+            };
+        });
+    } catch (err) {
+        console.error("❌ Erreur récupération photos catalogue :", err);
+        return [];
+    }
+});
 /* =======================================================
    8. Cycle de vie de l'application Electron
 ======================================================= */
 
 app.whenReady().then(() => {
+    const dbPath = path.join(app.getPath("userData"), "catalog.db");
+    initDatabase(dbPath);
     createMainWindow();
     createAppMenu();
 });

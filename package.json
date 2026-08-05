@@ -1,10 +1,11 @@
 {
   "name": "nikon-picture-control-studio",
-  "version": "0.2.5",
+  "version": "0.2.7",
   "description": "Éditeur Nikon Picture Control",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "postinstall": "electron-builder install-app-deps",
     "dist": "electron-builder"
   },
   "author": "Didier Raynaud",
@@ -31,28 +32,26 @@
     "asarUnpack": [
       "bin/**/*",
       "**/node_modules/nikon-flexible-color-picture-control/**/*",
-      "**/node_modules/sharp/**/*"
+      "**/node_modules/sharp/**/*",
+      "**/node_modules/sqlite3/**/*",
+      "**/node_modules/exiftool-vendored/**/*"
     ],
     "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
+        "nsis",
+        "portable"
       ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
       "shortcutName": "Nikon PC Studio"
     }
   },
   "devDependencies": {
-    "electron": "^37.0.0",
+    "electron": "^37.10.3",
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
@@ -61,6 +60,7 @@
     "exifreader": "^4",
     "exiftool-vendored": "^37.0.0",
     "nikon-flexible-color-picture-control": "^1",
-    "sharp": "^0.34"
+    "sharp": "^0.34",
+    "sqlite3": "^5.1.7"
   }
 }

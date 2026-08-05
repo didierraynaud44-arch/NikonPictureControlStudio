@@ -482,3 +482,132 @@ canvas {
     border: 1px solid #5865f2;
     color: #ffffff;
 }
+/* ==========================================================================
+   VUE 3 : CATALOGUE PHOTO (Intégration)
+   ========================================================================== */
+
+/* Structure principale du catalogue */
+#view-catalog {
+    display: flex;
+    flex: 1;
+    height: calc(100vh - 50px);
+    overflow: hidden;
+    background-color: #1e1e1e;
+    color: #fff;
+}
+
+/* Sidebar des dossiers */
+#view-catalog .catalog-tree-panel,
+#view-catalog #sidebar {
+    width: 240px;
+    background: #252526;
+    border-right: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+#view-catalog .sidebar-title {
+    padding: 12px 15px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #888;
+    text-transform: uppercase;
+    border-bottom: 1px solid #333;
+}
+
+#view-catalog .folder-item {
+    padding: 10px 15px;
+    font-size: 13px;
+    color: #ccc;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-bottom: 1px solid #2d2d2d;
+}
+
+#view-catalog .folder-item:hover {
+    background: #2a2d2e;
+    color: #fff;
+}
+
+#view-catalog .folder-item.active {
+    background: #094771;
+    color: #fff;
+    font-weight: bold;
+}
+
+/* Grille de vignettes */
+#view-catalog #grid,
+#view-catalog .catalog-grid {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 15px;
+    align-content: start;
+}
+
+/* Cartes des photos */
+#view-catalog .card {
+    background: #2a2a2a;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #3c3c3c;
+    display: flex;
+    flex-direction: column;
+    height: 230px;
+    min-height: 230px;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+}
+
+#view-catalog .card:hover {
+    border-color: #007acc;
+}
+
+#view-catalog .img-container {
+    width: 100%;
+    height: 150px;
+    min-height: 150px;
+    background: #111;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+#view-catalog .img-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Infos sous les vignettes */
+#view-catalog .card-info {
+    padding: 8px;
+    font-size: 11px;
+    height: 80px;
+}
+
+#view-catalog .card-title {
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #fff;
+}
+
+#view-catalog .card-meta {
+    color: #888;
+    margin-top: 4px;
+}
+
+/* Secours d'affichage du Header */
+.app-header {
+    position: relative;
+    z-index: 9999;
+}
