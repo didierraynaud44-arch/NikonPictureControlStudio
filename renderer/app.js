@@ -399,3 +399,144 @@ if (document.readyState === "loading") {
 } else {
     initButtons();
 }
+// A ajouter au début de initButtons()
+/* --- Module de Rotation & Miroir --- */
+const btnRotateLeft   = document.getElementById("btnRotateLeft");
+const btnRotateRight  = document.getElementById("btnRotateRight");
+const btnFlipH        = document.getElementById("btnFlipH");
+const btnFlipV        = document.getElementById("btnFlipV");
+const rangeDegree     = document.getElementById("rangeRotationDegree");
+const inputDegree     = document.getElementById("inputRotationDegree");
+const btnResetRot     = document.getElementById("btnResetRotation");
+
+let currentTransform = { rotation: 0, flipH: false, flipV: false };
+
+function applyStudioTransform() {
+    if (window.imageProcessor && typeof window.imageProcessor.setTransform === "function") {
+        window.imageProcessor.setTransform(currentTransform);
+    }
+}
+
+// Calcule l'angle fin relatif (-45 à +45)
+function getFineAngle() {
+    const base90 = Math.round(currentTransform.rotation / 90) * 90;
+    return parseFloat((currentTransform.rotation - base90).toFixed(1));
+}
+
+// Met à jour la valeur affichée dans le slider et l'input sans casser la base 90°
+function syncDegreeInputs() {
+    const fineAngle = getFineAngle();
+    if (rangeDegree) rangeDegree.value = fineAngle;
+    if (inputDegree) inputDegree.value = fineAngle;
+}
+
+if (btnRotateLeft) {
+    btnRotateLeft.onclick = () => {
+        currentTransform.rotation = currentTransform.rotation - 90;
+        applyStudioTransform();
+    };
+}
+
+if (btnRotateRight) {
+    btnRotateRight.onclick = () => {
+        currentTransform.rotation = currentTransform.rotation + 90;
+        applyStudioTransform();
+    };
+}
+
+if (btnFlipH) {
+    btnFlipH.onclick = () => {
+        currentTransform.flipH = !currentTransform.flipH;
+        btnFlipH.classList.toggle("active", currentTransform.flipH);
+        applyStudioTransform();
+    };
+}
+
+if (btnFlipV) {
+    btnFlipV.onclick = () => {
+        currentTransform.flipV = !currentTransform.flipV;
+        btnFlipV.classList.toggle("active", currentTransform.flipV);
+        applyStudioTransform();
+    };
+}
+
+// Modification via le curseur
+if (rangeDegree) {
+    rangeDegree.oninput = (e) => {
+        const fineAngle = parseFloat(e.target.value) || 0;
+        const base90 = Math.round(currentTransform.rotation / 90) * 90;
+        currentTransform.rotation = base90 + fineAngle;
+        if (inputDegree) inputDegree.value = fineAngle;
+        applyStudioTransform();
+    };
+}
+
+// Modification via la case numérique
+if (inputDegree) {
+    const handleInput = () => {
+        let val = parseFloat(inputDegree.value);
+        if (isNaN(val)) val = 0;
+        if (val > 45) val = 45;
+        if (val < -45) val = -45;
+
+        const base90 = Math.round(currentTransform.rotation / 90) * 90;
+        currentTransform.rotation = base90 + val;
+        if (rangeDegree) rangeDegree.value = val;
+        applyStudioTransform();
+    };
+
+    inputDegree.oninput = handleInput;
+    inputDegree.onchange = handleInput;
+}
+
+if (btnResetRot) {
+    btnResetRot.onclick = () => {
+        currentTransform = { rotation: 0, flipH: false, flipV: false };
+        syncDegreeInputs();
+        if (btnFlipH) btnFlipH.classList.remove("active");
+        if (btnFlipV) btnFlipV.classList.remove("active");
+        applyStudioTransform();
+    };
+}
+
+if (btnRotateRight) {
+    btnRotateRight.onclick = () => {
+        currentTransform.rotation = (currentTransform.rotation + 90) % 360;
+        applyStudioTransform();
+    };
+}
+
+if (btnFlipH) {
+    btnFlipH.onclick = () => {
+        currentTransform.flipH = !currentTransform.flipH;
+        btnFlipH.classList.toggle("active", currentTransform.flipH);
+        applyStudioTransform();
+    };
+}
+
+if (btnFlipV) {
+    btnFlipV.onclick = () => {
+        currentTransform.flipV = !currentTransform.flipV;
+        btnFlipV.classList.toggle("active", currentTransform.flipV);
+        applyStudioTransform();
+    };
+}
+
+if (rangeDegree) {
+    rangeDegree.oninput = (e) => {
+        const fineAngle = parseFloat(e.target.value);
+        const base90 = Math.round(currentTransform.rotation / 90) * 90;
+        currentTransform.rotation = base90 + fineAngle;
+        applyStudioTransform();
+    };
+}
+
+if (btnResetRot) {
+    btnResetRot.onclick = () => {
+        currentTransform = { rotation: 0, flipH: false, flipV: false };
+        if (rangeDegree) rangeDegree.value = 0;
+        if (btnFlipH) btnFlipH.classList.remove("active");
+        if (btnFlipV) btnFlipV.classList.remove("active");
+        applyStudioTransform();
+    };
+}

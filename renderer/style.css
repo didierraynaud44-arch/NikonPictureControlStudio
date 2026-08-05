@@ -611,3 +611,46 @@ canvas {
     position: relative;
     z-index: 9999;
 }
+/* --- Style du panneau de Rotation / Miroir --- */
+.rotation-buttons {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.btn-tool {
+    flex: 1;
+    background: #323639;
+    color: #e8eaed;
+    border: 1px solid #4a4d51;
+    border-radius: 4px;
+    padding: 6px 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.btn-tool:hover {
+    background: #45494e;
+    border-color: #8ab4f8;
+}
+
+.btn-tool.active {
+    background: #1a73e8;
+    color: #ffffff;
+    border-color: #8ab4f8;
+}
+
+.btn-secondary {
+    background: transparent;
+    color: #9aa0a6;
+    border: 1px solid #5f6368;
+    border-radius: 4px;
+    padding: 4px;
+    cursor: pointer;
+}
+
+.btn-secondary:hover {
+    color: #fff;
+    border-color: #8ab4f8;
+}

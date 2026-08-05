@@ -27,46 +27,43 @@ class ImageProcessor {
         this.dragStartX = 0;
         this.dragStartY = 0;
 
+        // 🔄 Orientation & Rotation
+        this.transform = {
+            rotation: 0,   // Angle en degrés (ex: 90, -90, 12.5...)
+            flipH: false,  // Miroir Horizontal
+            flipV: false   // Miroir Vertical
+        };
+
         this.pictureControl = null;
         this.pipeline = new RenderPipeline();
 
-        // Masques locaux (linéaire/radial/pinceau) — Studio uniquement.
-        // enableMasks reste à false par défaut ; app.js l'active explicitement
-        // sur l'instance du Studio (jamais sur celle du Gestionnaire de Profils).
+        // Masques locaux (Studio uniquement)
         this.enableMasks = false;
-        this.maskController = null; // branché depuis app.js après construction
-        this.showMaskOverlay = true; // permet de masquer temporairement les contours (voir l'effet réel)
+        this.maskController = null;
+        this.showMaskOverlay = true;
 
         // ---------------------------------------------------------
         // PIPELINE PICTURE CONTROL NIKON (Ordre d'exécution)
         // ---------------------------------------------------------
-        // 1. Sharpening / Detail
         if (typeof SharpenFilter !== "undefined") this.pipeline.add(new SharpenFilter());
         if (typeof MidRangeSharpenFilter !== "undefined") this.pipeline.add(new MidRangeSharpenFilter());
         if (typeof ClarityFilter !== "undefined") this.pipeline.add(new ClarityFilter());
 
-        // 1.5 Exposition & Niveaux (Point noir / Point blanc)
-        // Appliqués avant la courbe de tonalité et le contraste : ce sont les
-        // réglages fondamentaux de plage tonale, en amont des réglages créatifs.
         if (typeof ExposureFilter !== "undefined") this.pipeline.add(new ExposureFilter());
         if (typeof BlackWhitePointFilter !== "undefined") this.pipeline.add(new BlackWhitePointFilter());
 
-        // 2. Tonalité & Courbe
         if (typeof ToneCurveFilter !== "undefined") this.pipeline.add(new ToneCurveFilter());
         if (typeof ContrastFilter !== "undefined") this.pipeline.add(new ContrastFilter());
         if (typeof BrightnessFilter !== "undefined") this.pipeline.add(new BrightnessFilter());
         if (typeof HighlightsFilter !== "undefined") this.pipeline.add(new HighlightsFilter());
         if (typeof ShadowsFilter !== "undefined") this.pipeline.add(new ShadowsFilter());
 
-        // 3. Couleur
         if (typeof SaturationFilter !== "undefined") this.pipeline.add(new SaturationFilter());
         if (typeof ColorBlenderFilter !== "undefined") this.pipeline.add(new ColorBlenderFilter());
         if (typeof ColorGradingFilter !== "undefined") this.pipeline.add(new ColorGradingFilter());
 
-        // 4. Monochrome (Strictement verrouillé à la fin)
         if (typeof MonochromeFilter !== "undefined") this.pipeline.add(new MonochromeFilter());
 
-        // 5. Effets & Corrections
         if (typeof DehazeFilter !== "undefined") this.pipeline.add(new DehazeFilter());
         if (typeof VibranceFilter !== "undefined") this.pipeline.add(new VibranceFilter());
         if (typeof SCurveFilter !== "undefined") this.pipeline.add(new SCurveFilter());
@@ -75,6 +72,19 @@ class ImageProcessor {
         if (typeof DenoiseFilter !== "undefined") this.pipeline.add(new DenoiseFilter());
 
         this.initZoomAndPanEvents();
+    }
+
+    /* --- Gestion des Transformations (Rotation & Miroir) --- */
+    setTransform({ rotation, flipH, flipV }) {
+        if (rotation !== undefined) this.transform.rotation = rotation;
+        if (flipH !== undefined) this.transform.flipH = flipH;
+        if (flipV !== undefined) this.transform.flipV = flipV;
+
+        this.render();
+    }
+
+    resetTransform() {
+        this.transform = { rotation: 0, flipH: false, flipV: false };
     }
 
     initZoomAndPanEvents() {
@@ -187,6 +197,7 @@ class ImageProcessor {
                 this.zoom = 1;
                 this.panX = 0;
                 this.panY = 0;
+                this.resetTransform(); // Réinitialise la rotation/miroir sur la nouvelle image
 
                 const fullCanvas = this.createRotatedCanvas(img, this.currentOrientation);
                 const fullCtx = fullCanvas.getContext("2d");
@@ -221,60 +232,52 @@ class ImageProcessor {
         });
     }
 
-    /**
-     * Assainissement rigoureux de tous les paramètres du profil
-     */
-cleanPictureControl(pcData) {
-    if (!pcData || typeof pcData !== "object") return {};
+    cleanPictureControl(pcData) {
+        if (!pcData || typeof pcData !== "object") return {};
 
-    const clean = { ...pcData };
+        const clean = { ...pcData };
 
-    // Helper : si la valeur vaut -128 (valeur nulle/offset Nikon) ou NaN, on renvoie 0
-    const parseVal = (val, defaultVal = 0) => {
-        if (typeof val === "number" && !isNaN(val)) {
-            return val === -128 ? 0 : val;
+        const parseVal = (val, defaultVal = 0) => {
+            if (typeof val === "number" && !isNaN(val)) {
+                return val === -128 ? 0 : val;
+            }
+            if (val === "Normal" || val === null || val === undefined) return defaultVal;
+            const p = parseFloat(val);
+            if (isNaN(p) || p === -128) return defaultVal;
+            return p;
+        };
+
+        clean.sharpening = parseVal(pcData.sharpening ?? pcData.sharpning ?? pcData.sharpness, 0);
+        clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRangeSharpning, 0);
+        clean.clarity            = parseVal(clean.clarity, 0);
+        clean.contrast           = parseVal(clean.contrast, 0);
+        clean.brightness         = parseVal(clean.brightness, 0);
+        clean.saturation         = parseVal(clean.saturation, 0);
+        clean.hue                = parseVal(clean.hue, 0);
+
+        clean.highlights = parseVal(clean.highlights, 0);
+        clean.shadows    = parseVal(clean.shadows, 0);
+        clean.dehaze     = parseVal(clean.dehaze, 0);
+        clean.vibrance   = parseVal(clean.vibrance, 0);
+        clean.vignette   = parseVal(clean.vignette, 0);
+        clean.denoise    = parseVal(clean.denoise, 0);
+
+        clean.exposure   = parseVal(clean.exposure, 0);
+        clean.blackPoint = parseVal(clean.blackPoint, 0);
+        clean.whitePoint = clean.whitePoint === undefined || clean.whitePoint === null
+            ? 255
+            : parseVal(clean.whitePoint, 255);
+
+        clean.isMonochrome = clean.isMonochrome === true || clean.baseProfile === "MONOCHROME";
+        clean.monoFilter   = clean.monoFilter || "None";
+        clean.monoToning   = clean.monoToning || "None";
+
+        if (clean.isMonochrome) {
+            clean.saturation = -100;
         }
-        if (val === "Normal" || val === null || val === undefined) return defaultVal;
-        const p = parseFloat(val);
-        if (isNaN(p) || p === -128) return defaultVal;
-        return p;
-    };
 
-    // --- Réglages Nikon Officiels ---
-clean.sharpening = parseVal(pcData.sharpening ?? pcData.sharpning ?? pcData.sharpness, 0);
-clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRangeSharpning, 0);
-    clean.clarity            = parseVal(clean.clarity, 0);
-    clean.contrast           = parseVal(clean.contrast, 0);
-    clean.brightness         = parseVal(clean.brightness, 0);
-    clean.saturation         = parseVal(clean.saturation, 0);
-    clean.hue                = parseVal(clean.hue, 0);
-
-    // --- Traitements complémentaires ---
-    clean.highlights = parseVal(clean.highlights, 0);
-    clean.shadows    = parseVal(clean.shadows, 0);
-    clean.dehaze     = parseVal(clean.dehaze, 0);
-    clean.vibrance   = parseVal(clean.vibrance, 0);
-    clean.vignette   = parseVal(clean.vignette, 0);
-    clean.denoise    = parseVal(clean.denoise, 0);
-
-    // --- Exposition & Niveaux (Point noir / Point blanc) ---
-    clean.exposure   = parseVal(clean.exposure, 0);
-    clean.blackPoint = parseVal(clean.blackPoint, 0);
-    clean.whitePoint = clean.whitePoint === undefined || clean.whitePoint === null
-        ? 255
-        : parseVal(clean.whitePoint, 255);
-
-    // --- Détection du Monochrome STRICTE ---
-    clean.isMonochrome = clean.isMonochrome === true || clean.baseProfile === "MONOCHROME";
-    clean.monoFilter   = clean.monoFilter || "None";
-    clean.monoToning   = clean.monoToning || "None";
-
-    if (clean.isMonochrome) {
-        clean.saturation = -100;
+        return clean;
     }
-
-    return clean;
-}
 
     setPictureControl(pcData) {
         this.pictureControl = this.cleanPictureControl(pcData);
@@ -283,9 +286,6 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
         }
     }
 
-    /**
-     * Synchronisation instantanée entre l'IHM et le processeur
-     */
     updateFilter(filterType, value) {
         if (!this.pictureControl) {
             this.pictureControl = {};
@@ -335,7 +335,7 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
             }
         }
 
-        // Masques locaux (après le pipeline global, Studio uniquement)
+        // Masques locaux (Studio uniquement)
         if (this.enableMasks && typeof MaskEngine !== "undefined" && typeof MasksManager !== "undefined") {
             try {
                 currentImageData = MaskEngine.applyAllMasks(currentImageData, MasksManager.getMasks(), this.pipeline);
@@ -353,21 +353,32 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
         const ctx = canvas.getContext("2d");
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // --- Application des Transformations (Zoom / Pan / Rotation / Miroir) ---
         ctx.save();
+        
+        // 1. Zoom & Pan
         ctx.translate(this.panX, this.panY);
         ctx.scale(this.zoom, this.zoom);
+
+        // 2. Rotation & Miroir autour du centre du Canvas
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+
+        ctx.translate(centerX, centerY);
+        ctx.rotate((this.transform.rotation * Math.PI) / 180);
+        ctx.scale(
+            this.transform.flipH ? -1 : 1,
+            this.transform.flipV ? -1 : 1
+        );
+        ctx.translate(-centerX, -centerY);
+
+        // 3. Dessin de l'image
         ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
         ctx.restore();
 
         if (this.enableMasks) this.renderMaskOverlay();
     }
 
-    /**
-     * Dessine le contour des masques sur le calque superposé :
-     * - le masque en cours de tracé (aperçu en direct)
-     * - le contour du masque actuellement sélectionné
-     * Utilise le même repère (zoom/pan) que le rendu principal.
-     */
     renderMaskOverlay() {
         if (!this.overlayCtx || !this.overlayCanvas) return;
         if (typeof MasksManager === "undefined") return;
@@ -376,17 +387,27 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
         const canvas = this.overlayCanvas;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        if (!this.showMaskOverlay) return; // contours masqués : on s'arrête après avoir nettoyé le calque
+        if (!this.showMaskOverlay) return;
 
         ctx.save();
         ctx.translate(this.panX, this.panY);
         ctx.scale(this.zoom, this.zoom);
 
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+
+        ctx.translate(centerX, centerY);
+        ctx.rotate((this.transform.rotation * Math.PI) / 180);
+        ctx.scale(
+            this.transform.flipH ? -1 : 1,
+            this.transform.flipV ? -1 : 1
+        );
+        ctx.translate(-centerX, -centerY);
+
         const masksToDraw = [];
         const activeMask = MasksManager.getActiveMask();
         if (activeMask) masksToDraw.push({ mask: activeMask, live: false });
 
-        // Le masque en cours de tracé (s'il diffère du masque actif déjà listé)
         const controller = this.maskController;
         if (controller && controller.isDrawing && controller.pendingMask) {
             const pending = MasksManager.getMask(controller.pendingMask.id);
@@ -412,13 +433,11 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
             const ax = g.x1 * width, ay = g.y1 * height;
             const bx = g.x2 * width, by = g.y2 * height;
 
-            // Ligne d'axe (direction du dégradé)
             ctx.beginPath();
             ctx.moveTo(ax, ay);
             ctx.lineTo(bx, by);
             ctx.stroke();
 
-            // Bandes perpendiculaires aux deux extrémités (effet 100% / 0%)
             const dx = bx - ax, dy = by - ay;
             const len = Math.hypot(dx, dy) || 1;
             const perpX = -dy / len, perpY = dx / len;
@@ -443,7 +462,6 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
             ctx.ellipse(cx, cy, rx, ry, angleRad, 0, Math.PI * 2);
             ctx.stroke();
 
-            // Petit marqueur au centre
             ctx.setLineDash([]);
             ctx.beginPath();
             ctx.arc(cx, cy, 3 / this.zoom, 0, Math.PI * 2);
@@ -452,9 +470,6 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
 
         } else if (mask.type === "brush") {
             const strokes = mask.geometry.strokes || [];
-            // Tracé fin purement indicatif : ne recouvre PAS la zone peinte
-            // (contrairement à un trait de la largeur réelle du pinceau,
-            // qui masquerait l'effet du réglage sous une couleur pleine).
             ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
             ctx.lineWidth = (live ? 2 : 1.5) / this.zoom;
             ctx.strokeStyle = live ? "#ffffff" : "#5865f2";
@@ -495,11 +510,32 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
             }
         }
 
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = fullResImageData.width;
+        tempCanvas.height = fullResImageData.height;
+        const tempCtx = tempCanvas.getContext("2d");
+        tempCtx.putImageData(fullResImageData, 0, 0);
+
+        // Canvas d'exportation avec application de la rotation et du miroir
         const exportCanvas = document.createElement("canvas");
         exportCanvas.width = fullResImageData.width;
         exportCanvas.height = fullResImageData.height;
         const ctx = exportCanvas.getContext("2d");
-        ctx.putImageData(fullResImageData, 0, 0);
+
+        ctx.save();
+        const centerX = exportCanvas.width / 2;
+        const centerY = exportCanvas.height / 2;
+
+        ctx.translate(centerX, centerY);
+        ctx.rotate((this.transform.rotation * Math.PI) / 180);
+        ctx.scale(
+            this.transform.flipH ? -1 : 1,
+            this.transform.flipV ? -1 : 1
+        );
+        ctx.translate(-centerX, -centerY);
+
+        ctx.drawImage(tempCanvas, 0, 0);
+        ctx.restore();
 
         if (format === "image/tiff") {
             return exportCanvas.toDataURL("image/png");
@@ -508,4 +544,5 @@ clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRange
     }
 }
 
+// Instanciation globale
 window.imageProcessor = new ImageProcessor("previewCanvas");
