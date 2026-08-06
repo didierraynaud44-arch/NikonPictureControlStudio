@@ -126,10 +126,8 @@ function buildPanelHtml(pc, compact, extendedNP3) {
     const isMono = pc.isMonochrome === true || currentName === "Monochrome";
 
     return `
-        <h2>Picture Control Nikon</h2>
-
         ${compact ? "" : `
-        <div class="scope-banner scope-global">
+        <div class="scope-banner scope-global" style="margin-bottom: 12px;">
             🌍 Réglages GLOBAUX — s'appliquent à <b>toute l'image</b>
         </div>
         `}
@@ -190,16 +188,16 @@ function buildPanelHtml(pc, compact, extendedNP3) {
 
         ${compact ? "" : `
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
-        <h3>Exposition</h3>
+        <h3 style="margin-bottom: 10px;">Exposition</h3>
         ${createSlider("Exposition (EV)", "exposure", pc.exposure ?? 0, -3, 3, 0.1)}
 
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
-        <h3>Point noir &amp; Point blanc</h3>
+        <h3 style="margin-bottom: 10px;">Point noir &amp; Point blanc</h3>
         ${createSlider("Point noir", "blackPoint", pc.blackPoint ?? 0, 0, 250, 1)}
         ${createSlider("Point blanc", "whitePoint", pc.whitePoint ?? 255, 5, 255, 1)}
 
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
-        <h3>Traitement de l'image</h3>
+        <h3 style="margin-bottom: 10px;">Traitement de l'image</h3>
         ${createSlider("Hautes lumières", "highlights", pc.highlights ?? 0, -5, 5, 0.25)}
         ${createSlider("Ombres", "shadows", pc.shadows ?? 0, -5, 5, 0.25)}
         ${createSlider("Correction du voile", "dehaze", pc.dehaze ?? 0, 0, 10, 0.5)}
@@ -229,10 +227,9 @@ function buildPanelHtml(pc, compact, extendedNP3) {
 /**
  * Rend le panneau de réglages dans un conteneur donné.
  * @param {string} containerId  id du <div> cible (ex: "pictureControlStatus", "profileControlStatus")
- * @param {object|null} pc      Picture Control à afficher (null => message vide)
+ * @param {object|null} pc      Picture Control à afficher (null => profil Standard par défaut)
  * @param {object} options
- *   - compact {boolean}       masque la section "Traitement de l'image" (Hautes lumières/Ombres/
- *                              Correction du voile/Vibrance/Courbe/Vignettage/Bruit/Objectif)
+ *   - compact {boolean}       masque la section "Traitement de l'image"
  *   - isNewInstance {boolean} force la mémorisation d'un nouvel état "original" pour le Reset
  *   - onChange {function}     appelé avec le state courant à chaque modification
  *   - onReset {async function} optionnel, doit renvoyer un Picture Control ou rien
@@ -245,23 +242,43 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         return;
     }
 
-    if (!pc) {
-        container.innerHTML = "<p>Aucun Picture Control chargé.</p>";
-        delete originalPictureControlByContainer[containerId];
-        return;
-    }
+    // Profil Standard par défaut pour alimenter l'interface au démarrage
+    const defaultPC = {
+        name: "Standard",
+        pictureControlName: "Standard",
+        baseProfile: "STANDARD",
+        sharpening: 3,
+        midRangeSharpening: 2,
+        clarity: 1,
+        contrast: 0,
+        brightness: 0,
+        saturation: 0,
+        hue: 0,
+        exposure: 0,
+        blackPoint: 0,
+        whitePoint: 255,
+        highlights: 0,
+        shadows: 0,
+        dehaze: 0,
+        vibrance: 0,
+        vignette: 0,
+        denoise: 0,
+        lensCorrection: false
+    };
+
+    const currentPC = pc || defaultPC;
 
     // Normalisation des clés de netteté
-    pc.sharpening = pc.sharpening ?? pc.sharpning ?? pc.sharpness ?? 0;
-    pc.midRangeSharpening = pc.midRangeSharpening ?? pc.midRangeSharpning ?? 0;
+    currentPC.sharpening = currentPC.sharpening ?? currentPC.sharpning ?? currentPC.sharpness ?? 3;
+    currentPC.midRangeSharpening = currentPC.midRangeSharpening ?? currentPC.midRangeSharpning ?? 2;
 
     if (isNewInstance || !originalPictureControlByContainer[containerId]) {
-        originalPictureControlByContainer[containerId] = structuredClone(pc);
+        originalPictureControlByContainer[containerId] = structuredClone(currentPC);
     }
 
-    container.innerHTML = buildPanelHtml(pc, compact, extendedNP3);
+    container.innerHTML = buildPanelHtml(currentPC, compact, extendedNP3);
 
-    const isMono = pc.isMonochrome === true || resolveProfileName(pc) === "Monochrome";
+    const isMono = currentPC.isMonochrome === true || resolveProfileName(currentPC) === "Monochrome";
     const satRow = container.querySelector('[data-row="saturation"]');
     const hueRow = container.querySelector('[data-row="hue"]');
     if (satRow) satRow.style.display = isMono ? "none" : "flex";
@@ -323,17 +340,16 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             toningEffect: getStr("toningEffect", "B&W"),
             toningAmount: getVal("toningAmount"),
 
-            // Champs absents du panneau compact : on conserve les valeurs déjà connues
-            exposure: compact ? (pc.exposure ?? 0) : getVal("exposure"),
-            blackPoint: compact ? (pc.blackPoint ?? 0) : getVal("blackPoint"),
-            whitePoint: compact ? (pc.whitePoint ?? 255) : getVal("whitePoint"),
-            highlights: compact ? (pc.highlights ?? 0) : getVal("highlights"),
-            shadows: compact ? (pc.shadows ?? 0) : getVal("shadows"),
-            dehaze: compact ? (pc.dehaze ?? 0) : getVal("dehaze"),
-            vibrance: compact ? (pc.vibrance ?? 0) : getVal("vibrance"),
-            vignette: compact ? (pc.vignette ?? 0) : getVal("vignette"),
-            denoise: compact ? (pc.denoise ?? 0) : getVal("denoise"),
-            lensCorrection: compact ? !!pc.lensCorrection : getBool("lensCorrection"),
+            exposure: compact ? (currentPC.exposure ?? 0) : getVal("exposure"),
+            blackPoint: compact ? (currentPC.blackPoint ?? 0) : getVal("blackPoint"),
+            whitePoint: compact ? (currentPC.whitePoint ?? 255) : getVal("whitePoint"),
+            highlights: compact ? (currentPC.highlights ?? 0) : getVal("highlights"),
+            shadows: compact ? (currentPC.shadows ?? 0) : getVal("shadows"),
+            dehaze: compact ? (currentPC.dehaze ?? 0) : getVal("dehaze"),
+            vibrance: compact ? (currentPC.vibrance ?? 0) : getVal("vibrance"),
+            vignette: compact ? (currentPC.vignette ?? 0) : getVal("vignette"),
+            denoise: compact ? (currentPC.denoise ?? 0) : getVal("denoise"),
+            lensCorrection: compact ? !!currentPC.lensCorrection : getBool("lensCorrection"),
 
             toneCurveLut: curveLut
         };
@@ -396,13 +412,13 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             const isMonoSel = selectedProfile === "Monochrome";
 
             const presetValues = {
-                Standard:  { sharpening: 3, midRangeSharpening: 2, clarity: 1, contrast: 0, saturation: 0, hue: 0 },
-                Neutral:   { sharpening: 2, midRangeSharpening: 1, clarity: 0, contrast: -1, saturation: -1, hue: 0 },
-                Vivid:     { sharpening: 4, midRangeSharpening: 3, clarity: 1.5, contrast: 2, saturation: 2, hue: 0 },
-                Portrait:  { sharpening: 2, midRangeSharpening: 1, clarity: -0.5, contrast: -1, saturation: 0, hue: 0 },
-                Landscape: { sharpening: 5, midRangeSharpening: 3, clarity: 2, contrast: 2, saturation: 2, hue: 0 },
-                Flat:      { sharpening: 2, midRangeSharpening: 1, clarity: 0, contrast: -3, saturation: -2, hue: 0 },
-                Monochrome:{ sharpening: 3, midRangeSharpening: 2, clarity: 1, contrast: 1, saturation: -100, hue: 0 }
+                Standard:   { sharpening: 3, midRangeSharpening: 2, clarity: 1, contrast: 0, saturation: 0, hue: 0 },
+                Neutral:    { sharpening: 2, midRangeSharpening: 1, clarity: 0, contrast: -1, saturation: -1, hue: 0 },
+                Vivid:      { sharpening: 4, midRangeSharpening: 3, clarity: 1.5, contrast: 2, saturation: 2, hue: 0 },
+                Portrait:   { sharpening: 2, midRangeSharpening: 1, clarity: -0.5, contrast: -1, saturation: 0, hue: 0 },
+                Landscape:  { sharpening: 5, midRangeSharpening: 3, clarity: 2, contrast: 2, saturation: 2, hue: 0 },
+                Flat:       { sharpening: 2, midRangeSharpening: 1, clarity: 0, contrast: -3, saturation: -2, hue: 0 },
+                Monochrome: { sharpening: 3, midRangeSharpening: 2, clarity: 1, contrast: 1, saturation: -100, hue: 0 }
             };
             const vals = presetValues[selectedProfile] || presetValues.Standard;
 
@@ -463,7 +479,7 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
 }
 
 window.renderPictureControlPanel = renderPictureControlPanel;
-window.createSlider = createSlider; // réutilisé par components/masksPanel.js
+window.createSlider = createSlider;
 
 // --- Compatibilité rétroactive : panneau complet du Studio ---
 window.updatePictureControl = function (info, isNewPhoto = false) {

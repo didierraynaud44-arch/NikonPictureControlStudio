@@ -22,9 +22,9 @@ const { getPreview } = require("./engine/nefPreview");
 const { readPictureControl } = require("./engine/pictureControl");
 
 // Import du décodeur RAW multi-marques (LibRaw)
-const { decodeRAWImage, SUPPORTED_EXTENSIONS } = require("./services/rawDecoder");
-// Manager Catalogue & SQLite
-// Import du Catalogue Photos & SQLite (fichiers placés à la racine)
+const { decodeRAWImage, SUPPORTED_EXTENSIONS, shutdownExiftool } = require("./services/rawDecoder");
+
+// Import du Catalogue Photos & SQLite
 const { initDatabase, dbAll } = require("./db");
 const { scanFolder } = require("./scanner");
 
@@ -90,16 +90,55 @@ function createAppMenu() {
 }
 
 /* =======================================================
-   5. Handlers IPC : Ouverture des fichiers (NEF, RAW & NP3)
+   5. Handlers IPC : Ouverture des fichiers & Arborescence
 ======================================================= */
 
-// Liste complète des extensions acceptées dans la boîte de dialogue
 const ALL_IMAGE_EXTENSIONS = [
     "nef", "cr2", "cr3", "raf", "arw", "rw2", "dng", "pef", "orf",
     "jpg", "jpeg", "png", "webp", "tif", "tiff"
 ];
 
-// --- Ouverture d'un fichier Image ou RAW ---
+// Fonction utilitaire pour scanner récursivement les dossiers photo du Studio
+function scanDirectoryRecursive(dirPath) {
+    const name = path.basename(dirPath);
+    const item = { name, path: dirPath, children: [], files: [] };
+
+    try {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+            const fullPath = path.join(dirPath, entry.name);
+            if (entry.isDirectory()) {
+                if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
+                    item.children.push(scanDirectoryRecursive(fullPath));
+                }
+            } else if (entry.isFile()) {
+                const ext = path.extname(entry.name).toLowerCase().replace('.', '');
+                if (ALL_IMAGE_EXTENSIONS.includes(ext)) {
+                    item.files.push({ name: entry.name, path: fullPath });
+                }
+            }
+        }
+    } catch (err) {
+        console.error("❌ Erreur de lecture récursive du dossier :", dirPath, err);
+    }
+
+    return item;
+}
+
+// Handler pour sélectionner et scanner un dossier récursif (Studio)
+ipcMain.handle("select-folder-recursive", async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        title: "Sélectionner un répertoire de photos",
+        properties: ["openDirectory"]
+    });
+
+    if (result.canceled || !result.filePaths.length) return null;
+
+    return scanDirectoryRecursive(result.filePaths[0]);
+});
+
+// --- Ouverture d'un fichier Image ou RAW via boite de dialogue ---
 ipcMain.handle("open-nef", async () => {
     const result = await dialog.showOpenDialog({
         title: "Choisir un fichier Image ou RAW",
@@ -126,7 +165,6 @@ ipcMain.handle("open-nef", async () => {
     const ext = path.extname(filePath).toLowerCase();
 
     try {
-        // CAS 1 : Fichier NEF Nikon (Logique d'origine conservée pour les métadonnées et PC)
         if (ext === ".nef") {
             const info = await readNEF(filePath);
             info.preview = await getPreview(filePath);
@@ -142,7 +180,6 @@ ipcMain.handle("open-nef", async () => {
             return info;
         }
 
-        // CAS 2 : Autre format RAW (Canon, Fuji, Sony, Panasonic...)
         if (SUPPORTED_EXTENSIONS.includes(ext)) {
             console.log(`📷 Décodage du fichier RAW multi-marques (${ext}) :`, filePath);
             const previewDataUrl = await decodeRAWImage(filePath);
@@ -156,7 +193,6 @@ ipcMain.handle("open-nef", async () => {
             };
         }
 
-        // CAS 3 : Image Standard (JPG, PNG, TIFF...)
         return {
             filePath: filePath,
             fileName: path.basename(filePath),
@@ -171,7 +207,7 @@ ipcMain.handle("open-nef", async () => {
     }
 });
 
-// --- Handler IPC dédié au décodage direct d'un RAW ---
+// --- Decodage direct RAW ---
 ipcMain.handle("decode-raw", async (event, filePath) => {
     try {
         const ext = path.extname(filePath).toLowerCase();
@@ -186,7 +222,7 @@ ipcMain.handle("decode-raw", async (event, filePath) => {
     }
 });
 
-// --- Chargement d'un fichier binaire NP3 / NCP ---
+// --- Chargement d'un fichier NP3 / NCP ---
 ipcMain.handle("loadNP3", async () => {
     const result = await dialog.showOpenDialog({
         title: "Charger un Picture Control",
@@ -202,9 +238,7 @@ ipcMain.handle("loadNP3", async () => {
     if (result.canceled || !result.filePaths.length) return null;
 
     try {
-        const np3Manager = require("./services/np3Manager");
-        const pc = await np3Manager.loadNP3(result.filePaths[0]);
-
+        const pc = await loadNP3(result.filePaths[0]);
         pictureControlEngine.load(pc);
         return pictureControlEngine.get();
     } catch (err) {
@@ -212,14 +246,14 @@ ipcMain.handle("loadNP3", async () => {
         throw err;
     }
 });
-// --- Lecture directe d'un fichier (utilisé par le Catalogue sans ouvrir de boite de dialogue) ---
+
+// --- Lecture directe d'un fichier sans boite de dialogue ---
 ipcMain.handle("read-file-direct", async (event, filePath) => {
     if (!filePath || !fs.existsSync(filePath)) return null;
 
     const ext = path.extname(filePath).toLowerCase();
 
     try {
-        // CAS 1 : Fichier NEF Nikon
         if (ext === ".nef") {
             const info = await readNEF(filePath);
             info.preview = await getPreview(filePath);
@@ -235,7 +269,6 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
             return info;
         }
 
-        // CAS 2 : Autre format RAW (Canon, Sony, Fuji...)
         if (SUPPORTED_EXTENSIONS.includes(ext)) {
             const previewDataUrl = await decodeRAWImage(filePath);
             return {
@@ -247,7 +280,6 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
             };
         }
 
-        // CAS 3 : Image Standard (JPG, PNG...)
         return {
             filePath: filePath,
             fileName: path.basename(filePath),
@@ -261,6 +293,7 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
         return null;
     }
 });
+
 /* =======================================================
    6. Handlers IPC : Moteur Picture Control Engine
 ======================================================= */
@@ -280,10 +313,9 @@ ipcMain.handle("pc-reset", () => {
 });
 
 /* =======================================================
-   7. Handlers IPC : Exportation & Sauvegarde (NP3 & JPEG)
+   7. Handlers IPC : Exportation & Sauvegarde (NP3, NCP, JPEG)
 ======================================================= */
 
-// --- Sauvegarde du fichier NP3 binaire ---
 ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
     console.log("🚀 Lancement de l'enregistrement NP3...");
 
@@ -293,22 +325,16 @@ ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
         filters: [{ name: "Nikon Picture Control", extensions: ["NP3", "np3"] }]
     });
 
-    if (canceled || !filePath) {
-        console.log("🛑 Sauvegarde annulée.");
-        return false;
-    }
+    if (canceled || !filePath) return false;
 
     try {
-        console.log("📝 Données à encoder :", pcData);
-
         const buffer = await saveNP3(pcData); 
-
         if (!buffer || buffer.length === 0) {
             throw new Error("L'encodage NP3 a produit un buffer vide.");
         }
 
         fs.writeFileSync(filePath, buffer);
-        console.log("✅ Fichier NP3 binaire sauvegardé avec succès sous :", filePath);
+        console.log("✅ Fichier NP3 binaire sauvegardé sous :", filePath);
 
         return true;
     } catch (err) {
@@ -317,7 +343,6 @@ ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
     }
 });
 
-// --- Exportation du rendu au format Image HD ---
 ipcMain.handle("dialog:saveJPEG", async (event, data) => {
     const win = BrowserWindow.getFocusedWindow();
 
@@ -349,7 +374,7 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
         const imageBuffer = Buffer.from(cleanBase64, "base64");
 
         fs.writeFileSync(filePath, imageBuffer);
-        console.log("✅ Photo exportée avec succès sous :", filePath);
+        console.log("✅ Photo exportée sous :", filePath);
 
         return true;
     } catch (err) {
@@ -358,7 +383,6 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
     }
 });
 
-// --- Exportation du fichier NCP (Nikon Z6 II) ---
 ipcMain.handle("export-ncp", async (event, pcData) => {
     try {
         const { filePath, canceled } = await dialog.showSaveDialog({
@@ -370,9 +394,8 @@ ipcMain.handle("export-ncp", async (event, pcData) => {
         if (canceled || !filePath) return { success: false };
 
         const buffer = await saveNCP(pcData);
-        
         fs.writeFileSync(filePath, buffer);
-        console.log("✅ Fichier NCP (Z6 II) sauvegardé sous :", filePath);
+        console.log("✅ Fichier NCP sauvegardé sous :", filePath);
 
         return { success: true, path: filePath };
     } catch (err) {
@@ -380,11 +403,11 @@ ipcMain.handle("export-ncp", async (event, pcData) => {
         throw err;
     }
 });
+
 /* =======================================================
-   9. Handlers IPC : Catalogue Photos
+   8. Handlers IPC : Catalogue Photos
 ======================================================= */
 
-// 1. Sélection et scan d'un répertoire
 ipcMain.handle("catalog:select-folder", async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
         title: "Sélectionner un dossier de photos",
@@ -396,7 +419,6 @@ ipcMain.handle("catalog:select-folder", async () => {
     const folderPath = filePaths[0];
     const cacheDir = path.join(app.getPath("userData"), "thumbnails");
 
-    // Lancement du scan avec envoi de la progression en temps réel au renderer
     const totalIndexed = await scanFolder(folderPath, cacheDir, (current, total, filename) => {
         if (mainWindow) {
             mainWindow.webContents.send("catalog:scan-progress", { current, total, filename });
@@ -406,7 +428,6 @@ ipcMain.handle("catalog:select-folder", async () => {
     return { folderPath, totalIndexed };
 });
 
-// 2. Récupération de la liste des dossiers indexés
 ipcMain.handle("catalog:get-folders", async () => {
     try {
         return await dbAll("SELECT * FROM folders ORDER BY folder_name ASC");
@@ -416,7 +437,6 @@ ipcMain.handle("catalog:get-folders", async () => {
     }
 });
 
-// 3. Récupération des photos (avec conversion des vignettes en Base64 pour l'IHM)
 ipcMain.handle("catalog:get-photos", async (event, folderPath) => {
     try {
         let query = "SELECT * FROM photos ORDER BY id DESC";
@@ -430,7 +450,6 @@ ipcMain.handle("catalog:get-photos", async (event, folderPath) => {
         const photos = await dbAll(query, params);
         const cacheDir = path.join(app.getPath("userData"), "thumbnails");
 
-        // Attacher l'image de vignette encodée en base64 pour chaque photo
         return photos.map((photo) => {
             const thumbPath = path.join(cacheDir, `${path.parse(photo.file_name).name}_thumb.jpg`);
             let thumbBase64 = null;
@@ -450,8 +469,9 @@ ipcMain.handle("catalog:get-photos", async (event, folderPath) => {
         return [];
     }
 });
+
 /* =======================================================
-   8. Cycle de vie de l'application Electron
+   9. Cycle de vie de l'application Electron
 ======================================================= */
 
 app.whenReady().then(() => {
@@ -472,11 +492,7 @@ app.on("activate", () => {
         createMainWindow();
     }
 });
+
 app.on('will-quit', async () => {
-    const { shutdownExiftool } = require('./services/rawDecoder');
-    await shutdownExiftool();
-});
-app.on('will-quit', async () => {
-    const { shutdownExiftool } = require('./services/rawDecoder');
     await shutdownExiftool();
 });

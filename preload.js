@@ -1,10 +1,11 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
-    // 1. Ouverture de fichiers
+    // 1. Ouverture de fichiers et explorateur récursif
     openNEF: () => ipcRenderer.invoke("open-nef"),
-    readFileDirect: (filePath) => ipcRenderer.invoke("read-file-direct", filePath), // 👈 Indispensable pour l'ouverture depuis le catalogue
+    readFileDirect: (filePath) => ipcRenderer.invoke("read-file-direct", filePath),
     loadNP3: () => ipcRenderer.invoke("loadNP3"),
+    selectFolderRecursive: () => ipcRenderer.invoke("select-folder-recursive"),
 
     // 2. Gestion du Picture Control Engine
     updatePC: (key, value) => ipcRenderer.invoke("pc-update", key, value),

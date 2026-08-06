@@ -654,3 +654,51 @@ canvas {
     color: #fff;
     border-color: #8ab4f8;
 }
+/* --- Explorateur d'arborescence du Studio --- */
+.folder-tree-container ul {
+    list-style: none;
+    padding-left: 12px;
+    margin: 0;
+}
+
+.folder-tree-container li {
+    font-size: 12px;
+    color: #ccc;
+    user-select: none;
+    margin: 2px 0;
+}
+
+.tree-folder-title {
+    cursor: pointer;
+    font-weight: bold;
+    color: #e8eaed;
+    padding: 3px 4px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.tree-folder-title:hover {
+    background: #33373b;
+}
+
+.tree-file-item {
+    cursor: pointer;
+    padding: 3px 6px 3px 18px;
+    border-radius: 3px;
+    color: #b0b5ba;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tree-file-item:hover {
+    background: #2a2d32;
+    color: #8ab4f8;
+}
+
+.tree-file-item.active {
+    background: #1a73e8;
+    color: #ffffff;
+}
