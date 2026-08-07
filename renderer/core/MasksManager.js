@@ -1,28 +1,19 @@
 /*=========================================================
     Nikon Picture Control Studio - Masks Manager
-    Gère la liste des masques locaux (linéaire/radial/pinceau)
-    pour l'image actuellement affichée dans le Studio.
 =========================================================*/
 
 let masksList = [];
 let activeMaskId = null;
 let maskIdCounter = 0;
 
-// --- Historique Annuler / Rétablir ---
 const MAX_HISTORY = 50;
 let historyStack = [];
 let redoStack = [];
 
-/**
- * Enregistre l'état actuel dans l'historique, à appeler UNE SEULE FOIS
- * avant le début d'une action continue (glisser un curseur, déplacer un
- * masque...). Ne pas appeler à chaque étape d'un glisser, sinon Ctrl+Z
- * n'annulerait qu'un pixel de mouvement à la fois.
- */
 function beginAction() {
     historyStack.push(JSON.parse(JSON.stringify(masksList)));
     if (historyStack.length > MAX_HISTORY) historyStack.shift();
-    redoStack = []; // toute nouvelle action invalide la pile de rétablissement
+    redoStack = [];
 }
 
 function undo() {
@@ -59,35 +50,29 @@ const DEFAULT_MASK_ADJUSTMENTS = {
 function createMask(type, geometry) {
     beginAction();
     maskIdCounter += 1;
+    
+    // 🛠️ CORRECTION : Donner un léger réglage d'exposition par défaut (+0.3 EV) 
+    // pour que l'effet visuel soit immédiatement décelable à la création du masque.
+    const initialAdjustments = { ...DEFAULT_MASK_ADJUSTMENTS, exposure: 0.3 };
+
     const mask = {
         id: `mask_${Date.now()}_${maskIdCounter}`,
-        type, // "linear" | "radial" | "brush"
-        name: null, // affecté à l'affichage si null (ex: "Linéaire 1")
+        type,
+        name: null,
         enabled: true,
         opacity: 1,
         geometry,
-        adjustments: { ...DEFAULT_MASK_ADJUSTMENTS }
+        adjustments: initialAdjustments
     };
     masksList.push(mask);
     activeMaskId = mask.id;
     return mask;
 }
 
-function getMasks() {
-    return masksList;
-}
-
-function getMask(id) {
-    return masksList.find(m => m.id === id) || null;
-}
-
-function getActiveMask() {
-    return getMask(activeMaskId);
-}
-
-function setActiveMask(id) {
-    activeMaskId = id;
-}
+function getMasks() { return masksList; }
+function getMask(id) { return masksList.find(m => m.id === id) || null; }
+function getActiveMask() { return getMask(activeMaskId); }
+function setActiveMask(id) { activeMaskId = id; }
 
 function updateMaskGeometry(id, geometry) {
     const mask = getMask(id);

@@ -1,16 +1,8 @@
 /*=========================================================
     Nikon Picture Control Studio - Mask Canvas Controller
-    Gère la création ET l'édition (déplacement/redimensionnement)
-    des masques par interaction souris sur le canvas du Studio.
-    Coordonnées normalisées (0..1) par rapport à l'image affichée.
-
-    LIMITE CONNUE (v1) : le pinceau ne peut pas être "déplacé" après
-    coup (repasser en mode Pinceau pour ajouter des traits). Le
-    linéaire et le radial supportent déplacement + redimensionnement
-    du masque actuellement sélectionné.
 =========================================================*/
 
-const HIT_TOLERANCE_PX = 14; // tolérance de clic sur une poignée, en pixels canvas
+const HIT_TOLERANCE_PX = 14;
 
 class MaskCanvasController {
     constructor(imageProcessor) {
@@ -19,14 +11,12 @@ class MaskCanvasController {
         this.isDrawing = false;
         this.pendingMask = null;
 
-        // Édition d'un masque existant (déplacement / redimensionnement)
-        this.editState = null;   // { maskId, hit: {type}, dragStart, origGeometry }
+        this.editState = null;
 
-        // Réglages du pinceau (ajustables depuis la barre d'outils)
-        this.brushSize = 0.05;      // rayon, fraction de la largeur de l'image
-        this.brushHardness = 0.5;   // 0 = bord très doux, 1 = bord net
+        this.brushSize = 0.05;
+        this.brushHardness = 0.5;
 
-        this.onMaskChange = null;   // callback(masks) appelé à chaque modification
+        this.onMaskChange = null;
 
         this._bindEvents();
     }
@@ -52,23 +42,39 @@ class MaskCanvasController {
 
     /**
      * Convertit une position souris (coordonnées écran) en coordonnées
-     * normalisées (0..1) dans le repère de l'image, en tenant compte :
-     * - de la mise à l'échelle CSS du canvas (résolution interne vs taille affichée)
-     * - du zoom et du pan actuels
+     * normalisées (0..1) relatives au buffer réel de l'image.
      */
     _canvasToNormalized(clientX, clientY) {
-        const canvas = this.imageProcessor.display.canvas;
+        const display = this.imageProcessor?.display;
+        if (!display || !display.canvas || !display.offscreenCanvas.width) {
+            return { x: 0.5, y: 0.5 };
+        }
+
+        const canvas = display.canvas;
         const rect = canvas.getBoundingClientRect();
 
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
+        const xOnCanvas = clientX - rect.left;
+        const yOnCanvas = clientY - rect.top;
 
-        const xOnCanvas = ((clientX - rect.left) * scaleX - this.imageProcessor.panX) / this.imageProcessor.zoom;
-        const yOnCanvas = ((clientY - rect.top) * scaleY - this.imageProcessor.panY) / this.imageProcessor.zoom;
+        const w = canvas.width;
+        const h = canvas.height;
+        const imgW = display.offscreenCanvas.width;
+        const imgH = display.offscreenCanvas.height;
+
+        const scale = display.scale || 1;
+        const panX = display.panX || 0;
+        const panY = display.panY || 0;
+
+        // Inversion de la transformation de DisplayCanvas.render()
+        const drawX = (w - imgW * scale) / 2 + panX;
+        const drawY = (h - imgH * scale) / 2 + panY;
+
+        const imgX = (xOnCanvas - drawX) / scale;
+        const imgY = (yOnCanvas - drawY) / scale;
 
         return {
-            x: Math.min(1, Math.max(0, xOnCanvas / canvas.width)),
-            y: Math.min(1, Math.max(0, yOnCanvas / canvas.height))
+            x: Math.min(1, Math.max(0, imgX / imgW)),
+            y: Math.min(1, Math.max(0, imgY / imgH))
         };
     }
 
@@ -81,16 +87,13 @@ class MaskCanvasController {
         return Math.hypot(px - cx, py - cy);
     }
 
-    /**
-     * Teste si une position souris tombe sur une poignée du masque donné.
-     * Retourne { type } ou null. Types possibles :
-     *   radial : "move" (centre) | "resize" (bord de l'ellipse)
-     *   linear : "point-a" | "point-b" | "move" (sur la ligne)
-     */
     _hitTest(mask, clientX, clientY) {
-        const canvas = this.imageProcessor.display.canvas;
+        const display = this.imageProcessor?.display;
+        if (!display || !display.offscreenCanvas.width) return null;
+
         const pos = this._canvasToNormalized(clientX, clientY);
-        const w = canvas.width, h = canvas.height;
+        const w = display.offscreenCanvas.width;
+        const h = display.offscreenCanvas.height;
 
         if (mask.type === "radial") {
             const g = mask.geometry;
@@ -98,9 +101,7 @@ class MaskCanvasController {
             const ry = Math.max(0.001, g.radiusY);
             const d = Math.sqrt(((pos.x - g.cx) / rx) ** 2 + ((pos.y - g.cy) / ry) ** 2);
 
-            // Bande de redimensionnement : proche du bord de l'ellipse
             if (d >= 0.85 && d <= 1.2) return { type: "resize" };
-            // Tout le reste de l'intérieur : déplacement (plus besoin de viser le centre)
             if (d < 0.85) return { type: "move" };
             return null;
         }
@@ -120,11 +121,11 @@ class MaskCanvasController {
             return null;
         }
 
-        return null; // pinceau : pas de poignée en v1
+        return null;
     }
 
     _applyEdit(clientX, clientY) {
-        const mask = window.MasksManager.getMask(this.editState.maskId);
+        const mask = window.MasksManager?.getMask(this.editState.maskId);
         if (!mask) return;
         const pos = this._canvasToNormalized(clientX, clientY);
         const hit = this.editState.hit;
@@ -168,11 +169,6 @@ class MaskCanvasController {
         return "grab";
     }
 
-    /**
-     * Utilisé par ImageProcessor AVANT de démarrer un pan, pour savoir si
-     * ce mousedown doit plutôt être intercepté par l'édition de masque
-     * (outil de création actif, ou clic sur une poignée du masque actif).
-     */
     shouldInterceptMouseEvent(clientX, clientY) {
         if (this.mode) return true;
         const activeMask = window.MasksManager?.getActiveMask?.();
@@ -187,7 +183,6 @@ class MaskCanvasController {
         canvas.addEventListener("mousedown", (e) => {
             if (e.button !== 0) return;
 
-            // CAS 1 : un outil de création est actif -> tracer un nouveau masque
             if (this.mode) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -216,26 +211,21 @@ class MaskCanvasController {
                 return;
             }
 
-            // CAS 2 : pas d'outil actif -> tester si on clique sur une poignée
-            // du masque actuellement sélectionné, pour le déplacer/redimensionner
-            const activeMask = window.MasksManager.getActiveMask();
+            const activeMask = window.MasksManager?.getActiveMask?.();
             if (activeMask) {
                 const hit = this._hitTest(activeMask, e.clientX, e.clientY);
                 if (hit) {
                     e.preventDefault();
                     e.stopPropagation();
-                    window.MasksManager.beginAction(); // un seul point d'annulation pour tout le glisser
+                    window.MasksManager.beginAction();
                     this.editState = { maskId: activeMask.id, hit, dragStart: null, origGeometry: null };
                     this._setCursor(this._cursorForHit(hit));
                     return;
                 }
             }
-
-            // CAS 3 : clic dans le vide -> laisse le pan normal de la photo s'exécuter
         });
 
         canvas.addEventListener("mousemove", (e) => {
-            // Édition d'un masque existant (déplacement / redimensionnement)
             if (this.editState) {
                 e.preventDefault();
                 this._applyEdit(e.clientX, e.clientY);
@@ -244,7 +234,6 @@ class MaskCanvasController {
                 return;
             }
 
-            // Tracé d'un nouveau masque
             if (this.isDrawing && this.pendingMask) {
                 e.preventDefault();
                 const pos = this._canvasToNormalized(e.clientX, e.clientY);
@@ -270,11 +259,8 @@ class MaskCanvasController {
                 return;
             }
 
-            // Ni édition ni tracé en cours : survol -> retour visuel du curseur
-            // uniquement si un masque est sélectionné (évite un test à chaque
-            // mousemove quand ce n'est pas utile)
             if (!this.mode) {
-                const activeMask = window.MasksManager.getActiveMask();
+                const activeMask = window.MasksManager?.getActiveMask?.();
                 if (activeMask) {
                     const hit = this._hitTest(activeMask, e.clientX, e.clientY);
                     this._setCursor(this._cursorForHit(hit));
@@ -296,17 +282,13 @@ class MaskCanvasController {
             if (!this.isDrawing) return;
             this.isDrawing = false;
             this.pendingMask = null;
-            this.mode = null; // repasse en mode pan normal après chaque création
+            this.mode = null;
             this._setCursor();
             this._notify();
-            this._render(); // rendu complet (effet réel du masque) une fois le tracé terminé
+            this._render();
         });
     }
 
-    /**
-     * Rendu léger : ne redessine que le contour vectoriel (rapide),
-     * utilisé pendant le glisser pour rester fluide sur les grandes images.
-     */
     _renderOverlayOnly() {
         if (this.imageProcessor && typeof this.imageProcessor.renderMaskOverlay === "function") {
             this.imageProcessor.renderMaskOverlay();
@@ -320,7 +302,7 @@ class MaskCanvasController {
     }
 
     _notify() {
-        if (typeof this.onMaskChange === "function") {
+        if (typeof this.onMaskChange === "function" && window.MasksManager) {
             this.onMaskChange(window.MasksManager.getMasks());
         }
     }

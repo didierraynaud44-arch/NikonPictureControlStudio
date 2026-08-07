@@ -6,15 +6,6 @@
 
 class MaskEngine {
 
-    /**
-     * Masque Linéaire (dégradé). Géométrie normalisée (0..1, relative à
-     * la largeur/hauteur de l'image) :
-     *   x1,y1 : point où l'effet est à 100%
-     *   x2,y2 : point où l'effet est à 0%
-     * Le dégradé s'étend perpendiculairement à l'axe (x1,y1)->(x2,y2)
-     * sur toute la largeur de l'image (bandes infinies, comme un filtre
-     * gradué photo).
-     */
     static computeLinearAlpha(width, height, geometry) {
         const alpha = new Float32Array(width * height);
 
@@ -27,10 +18,6 @@ class MaskEngine {
         const dy = by - ay;
         const lenSq = dx * dx + dy * dy || 1e-6;
 
-        // Progressivité indépendante de la distance entre les deux points.
-        // feather = 1 -> comportement d'origine (transition sur toute la
-        // distance glissée). feather < 1 -> transition plus dure, resserrée
-        // autour du milieu. feather > 1 -> transition plus douce, étalée.
         const feather = Math.max(0.05, geometry.feather ?? 1);
         const midT = 0.5;
 
@@ -48,15 +35,6 @@ class MaskEngine {
         return geometry.invert ? MaskEngine._invert(alpha) : alpha;
     }
 
-    /**
-     * Masque Radial (ellipse). Géométrie normalisée (0..1) :
-     *   cx,cy       : centre
-     *   radiusX,radiusY : demi-axes (fraction de la largeur/hauteur)
-     *   angle       : rotation en degrés
-     *   feather     : 0..1, largeur de la zone de transition douce
-     *                 (0 = bord net, 1 = dégradé jusqu'au centre)
-     *   invert      : false = effet plein à l'intérieur, true = à l'extérieur
-     */
     static computeRadialAlpha(width, height, geometry) {
         const alpha = new Float32Array(width * height);
 
@@ -69,7 +47,6 @@ class MaskEngine {
         const sinA = Math.sin(angleRad);
         const feather = Math.min(1, Math.max(0, geometry.feather ?? 0.5));
 
-        // Distance normalisée [innerEdge] où l'effet commence à s'atténuer
         const innerEdge = 1 - feather;
 
         for (let y = 0; y < height; y++) {
@@ -77,7 +54,6 @@ class MaskEngine {
                 const dx = x - cx;
                 const dy = y - cy;
 
-                // Rotation inverse pour ramener dans le repère de l'ellipse
                 const rxLocal = dx * cosA - dy * sinA;
                 const ryLocal = dx * sinA + dy * cosA;
 
@@ -89,7 +65,6 @@ class MaskEngine {
                 } else if (d >= 1) {
                     a = 0;
                 } else {
-                    // Transition lissée (smoothstep) entre innerEdge et 1
                     const t = (d - innerEdge) / Math.max(1e-6, 1 - innerEdge);
                     a = 1 - (t * t * (3 - 2 * t));
                 }
@@ -101,13 +76,6 @@ class MaskEngine {
         return geometry.invert ? MaskEngine._invert(alpha) : alpha;
     }
 
-    /**
-     * Masque Pinceau. geometry.strokes = tableau de traits, chaque trait
-     * est un tableau de points {x, y, radius, hardness} en coordonnées
-     * normalisées (0..1) — radius en fraction de la largeur de l'image.
-     * Rasterisé à la résolution demandée (permet un rendu correct aussi
-     * bien en aperçu qu'à l'export pleine résolution).
-     */
     static computeBrushAlpha(width, height, geometry) {
         const alpha = new Float32Array(width * height);
         const strokes = geometry.strokes || [];
@@ -115,8 +83,6 @@ class MaskEngine {
         for (const stroke of strokes) {
             if (!stroke || stroke.length === 0) continue;
 
-            // Interpolation entre points consécutifs pour éviter les trous
-            // lors de traits tracés rapidement.
             const points = [];
             for (let i = 0; i < stroke.length; i++) {
                 const p = stroke[i];
@@ -167,7 +133,6 @@ class MaskEngine {
                         }
 
                         const idx = y * width + x;
-                        // Traits multiples : on garde le maximum (peinture cumulative)
                         if (a > alpha[idx]) alpha[idx] = a;
                     }
                 }
@@ -183,9 +148,6 @@ class MaskEngine {
         return out;
     }
 
-    /**
-     * Calcule la carte d'alpha pour un masque, quel que soit son type.
-     */
     static computeAlpha(width, height, mask) {
         switch (mask.type) {
             case "linear": return MaskEngine.computeLinearAlpha(width, height, mask.geometry);
@@ -193,18 +155,10 @@ class MaskEngine {
             case "brush":  return MaskEngine.computeBrushAlpha(width, height, mask.geometry);
             default:
                 console.warn("⚠️ Type de masque inconnu :", mask.type);
-                return new Float32Array(width * height); // aucun effet
+                return new Float32Array(width * height);
         }
     }
 
-    /**
-     * Applique les réglages locaux d'un masque à une image, en fusionnant
-     * uniquement dans la zone couverte par son alpha.
-     * - imageData : image courante (déjà passée par le pipeline global)
-     * - mask      : { type, geometry, adjustments, enabled, opacity }
-     * - pipeline  : instance de RenderPipeline (réutilise les mêmes filtres)
-     * Retourne une NOUVELLE ImageData (l'originale n'est pas modifiée).
-     */
     static applyMask(imageData, mask, pipeline) {
         if (!mask || mask.enabled === false) return imageData;
 
@@ -214,7 +168,6 @@ class MaskEngine {
         const alpha = MaskEngine.computeAlpha(width, height, mask);
         const globalOpacity = mask.opacity ?? 1;
 
-        // Clone pour ne pas modifier l'original avant fusion
         const original = imageData.data;
         const workingCopy = new ImageData(
             new Uint8ClampedArray(original),
@@ -222,14 +175,25 @@ class MaskEngine {
             height
         );
 
-        // Applique le pipeline standard avec UNIQUEMENT les réglages du masque
-        const adjusted = pipeline.process(workingCopy, mask.adjustments || {});
+        // 🛠️ CORRECTION : Fusionner les réglages du masque avec le Picture Control global
+        const basePc = window.imageProcessor?.pictureControl || {};
+        const combinedAdjustments = { ...basePc, ...(mask.adjustments || {}) };
+
+        let adjusted = null;
+        try {
+            adjusted = pipeline.process(workingCopy, combinedAdjustments);
+        } catch (err) {
+            console.error("❌ Erreur traitement pipeline masque :", err);
+            return imageData;
+        }
+
+        if (!adjusted || !adjusted.data) return imageData;
 
         const outData = new Uint8ClampedArray(original.length);
         for (let i = 0, p = 0; i < original.length; i += 4, p++) {
             const a = alpha[p] * globalOpacity;
             if (a <= 0) {
-                outData[i] = original[i];
+                outData[i]     = original[i];
                 outData[i + 1] = original[i + 1];
                 outData[i + 2] = original[i + 2];
                 outData[i + 3] = original[i + 3];
@@ -244,10 +208,6 @@ class MaskEngine {
         return new ImageData(outData, width, height);
     }
 
-    /**
-     * Applique une liste de masques séquentiellement (chacun agit sur le
-     * résultat du précédent), après le pipeline global.
-     */
     static applyAllMasks(imageData, masks, pipeline) {
         let current = imageData;
         for (const mask of (masks || [])) {

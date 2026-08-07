@@ -4,10 +4,6 @@
 
 let maskCanvasController = null;
 
-/**
- * Initialise le contrôleur de masques sur l'ImageProcessor du Studio.
- * À appeler une seule fois, après la création de window.imageProcessor.
- */
 function initMasksController(imageProcessor) {
     if (!imageProcessor || maskCanvasController) return;
 
@@ -22,12 +18,11 @@ function initMasksController(imageProcessor) {
 }
 
 function fieldRow(label, field, value, min, max, step) {
-    // Réutilise le générateur de slider du panneau Picture Control
     return window.createSlider ? window.createSlider(label, field, value, min, max, step) : "";
 }
 
 function buildMaskAdjustmentsHtml(mask) {
-    const a = mask.adjustments;
+    const a = mask.adjustments || {};
     return `
         <div class="mask-adjustments">
             <h4>Exposition &amp; Niveaux</h4>
@@ -158,15 +153,18 @@ function renderMasksPanel() {
 }
 
 function _bindMasksPanelEvents(container) {
-    // Outils de création
     container.querySelectorAll("[data-mask-tool]").forEach(btn => {
         btn.addEventListener("click", () => {
-            if (!maskCanvasController) return;
-            maskCanvasController.startNewMask(btn.dataset.maskTool);
+            if (window.imageProcessor) window.imageProcessor.enableMasks = true;
+            if (!maskCanvasController && window.imageProcessor) {
+                initMasksController(window.imageProcessor);
+            }
+            if (maskCanvasController) {
+                maskCanvasController.startNewMask(btn.dataset.maskTool);
+            }
         });
     });
 
-    // Annuler / Rétablir
     const undoBtn = container.querySelector('[data-mask-action="undo"]');
     if (undoBtn) {
         undoBtn.addEventListener("click", () => {
@@ -186,7 +184,6 @@ function _bindMasksPanelEvents(container) {
         });
     }
 
-    // Afficher/masquer le contour de tous les masques
     const overlayToggle = container.querySelector('[data-mask-action="toggle-overlay"]');
     if (overlayToggle) {
         overlayToggle.addEventListener("change", () => {
@@ -197,7 +194,6 @@ function _bindMasksPanelEvents(container) {
         });
     }
 
-    // Sélection d'un masque dans la liste
     container.querySelectorAll(".mask-item").forEach(item => {
         item.addEventListener("click", (e) => {
             if (e.target.classList.contains("mask-toggle") || e.target.classList.contains("btn-remove-mask")) return;
@@ -207,7 +203,6 @@ function _bindMasksPanelEvents(container) {
         });
     });
 
-    // Activer/désactiver un masque
     container.querySelectorAll(".mask-toggle").forEach(cb => {
         cb.addEventListener("click", (e) => e.stopPropagation());
         cb.addEventListener("change", () => {
@@ -216,7 +211,6 @@ function _bindMasksPanelEvents(container) {
         });
     });
 
-    // Supprimer un masque
     container.querySelectorAll(".btn-remove-mask").forEach(btn => {
         btn.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -226,7 +220,6 @@ function _bindMasksPanelEvents(container) {
         });
     });
 
-    // Opacité / inversion / feather du masque actif
     const opacitySlider = container.querySelector('[data-mask-field="opacity"]');
     if (opacitySlider) {
         opacitySlider.addEventListener("mousedown", () => window.MasksManager.beginAction());
@@ -264,7 +257,6 @@ function _bindMasksPanelEvents(container) {
         });
     }
 
-    // Progressivité du masque linéaire (indépendante de la distance glissée)
     const linearFeatherSlider = container.querySelector('[data-mask-field="linear-feather"]');
     if (linearFeatherSlider) {
         linearFeatherSlider.addEventListener("mousedown", () => window.MasksManager.beginAction());
@@ -279,8 +271,6 @@ function _bindMasksPanelEvents(container) {
         });
     }
 
-    // Douceur du pinceau : rétroactif sur tout le trait déjà peint,
-    // et mémorisé pour les prochains traits sur ce masque.
     const brushSoftnessSlider = container.querySelector('[data-mask-field="brush-softness"]');
     if (brushSoftnessSlider) {
         brushSoftnessSlider.addEventListener("mousedown", () => window.MasksManager.beginAction());
@@ -303,7 +293,6 @@ function _bindMasksPanelEvents(container) {
         });
     }
 
-    // Sliders de réglages du masque actif
     let renderTimer = null;
     container.querySelectorAll(".mask-adjustments .pc-slider").forEach(slider => {
         slider.addEventListener("mousedown", () => window.MasksManager.beginAction());
@@ -325,7 +314,7 @@ function _bindMasksPanelEvents(container) {
 }
 
 function _bindGlobalUndoShortcut() {
-    if (window._maskUndoShortcutBound) return; // évite les doublons si initMasksController est rappelé
+    if (window._maskUndoShortcutBound) return;
     window._maskUndoShortcutBound = true;
 
     document.addEventListener("keydown", (e) => {

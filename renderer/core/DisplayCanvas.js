@@ -10,18 +10,15 @@ class DisplayCanvas {
 
         this.ctx = this.canvas.getContext("2d", { alpha: false });
 
-        // Buffer mémoire (Image brute issue du pipeline)
         this.offscreenCanvas = document.createElement("canvas");
         this.offscreenCtx = this.offscreenCanvas.getContext("2d");
 
-        // Paramètres de Zoom et Pan
         this.scale = 1;
         this.minScale = 0.05;
         this.maxScale = 10;
         this.panX = 0;
         this.panY = 0;
 
-        // Rotation & Miroir transmis par ImageProcessor
         this.transform = { rotation: 0, flipH: false, flipV: false };
 
         this.isDragging = false;
@@ -180,6 +177,15 @@ class DisplayCanvas {
 
         targetContainer.addEventListener("mousedown", (e) => {
             if (e.button !== 0) return;
+
+            // Interception par le contrôleur de masque
+            const controller = window.imageProcessor?.maskController || window.masksController;
+            if (controller && typeof controller.shouldInterceptMouseEvent === "function") {
+                if (controller.shouldInterceptMouseEvent(e.clientX, e.clientY)) {
+                    return;
+                }
+            }
+
             this.isDragging = true;
             this.startX = e.clientX - this.panX;
             this.startY = e.clientY - this.panY;
@@ -220,7 +226,7 @@ class DisplayCanvas {
             }
         }
 
-        if (isNewImage || !this.scale || this.scale === 1) {
+        if (isNewImage || !this.scale) {
             this.resetZoom();
         } else {
             this.requestRender();
@@ -250,7 +256,6 @@ class DisplayCanvas {
 
         this.ctx.save();
 
-        // Recalcul strict du centrage de base + translation utilisateur (pan)
         const drawX = (w - imgW * this.scale) / 2 + this.panX;
         const drawY = (h - imgH * this.scale) / 2 + this.panY;
 
