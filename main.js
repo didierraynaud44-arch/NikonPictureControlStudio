@@ -83,6 +83,30 @@ function createAppMenu() {
                     click: () => app.quit()
                 }
             ]
+        },
+        {
+            label: "Studio",
+            click: () => {
+                if (mainWindow) mainWindow.webContents.send("menu-switch-view", "view-studio");
+            }
+        },
+        {
+            label: "Gestionnaire de Profils",
+            click: () => {
+                if (mainWindow) mainWindow.webContents.send("menu-switch-view", "view-profiles");
+            }
+        },
+        {
+            label: "Exporter",
+            submenu: [
+                {
+                    label: "Exporter l'image active...",
+                    accelerator: "CmdOrCtrl+E",
+                    click: () => {
+                        if (mainWindow) mainWindow.webContents.send("menu-trigger-export");
+                    }
+                }
+            ]
         }
     ]);
 
@@ -98,7 +122,7 @@ const ALL_IMAGE_EXTENSIONS = [
     "jpg", "jpeg", "png", "webp", "tif", "tiff"
 ];
 
-// Fonction utilitaire pour scanner récursivement les dossiers photo du Studio
+// Scanner récursif de répertoire
 function scanDirectoryRecursive(dirPath) {
     const name = path.basename(dirPath);
     const item = { name, path: dirPath, children: [], files: [] };
@@ -126,7 +150,7 @@ function scanDirectoryRecursive(dirPath) {
     return item;
 }
 
-// Handler pour sélectionner et scanner un dossier récursif (Studio)
+// Sélectionner un dossier via boîte de dialogue
 ipcMain.handle("select-folder-recursive", async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         title: "Sélectionner un répertoire de photos",
@@ -138,29 +162,45 @@ ipcMain.handle("select-folder-recursive", async () => {
     return scanDirectoryRecursive(result.filePaths[0]);
 });
 
-// Handler pour recharger directement un dossier sauvegardé sans boîte de dialogue
+// Recharger un dossier sauvegardé sans boîte de dialogue
 ipcMain.handle("read-folder-recursive", async (event, folderPath) => {
     if (!folderPath || !fs.existsSync(folderPath)) return null;
     return scanDirectoryRecursive(folderPath);
 });
 
-// --- Ouverture d'un fichier Image ou RAW via boîte de dialogue ---
+// Sélectionner le dossier de destination pour l'exportation
+ipcMain.handle("dialog:selectExportFolder", async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        title: "Sélectionner le dossier de destination",
+        properties: ["openDirectory"]
+    });
+    return result.canceled ? null : result.filePaths[0];
+});
+
+// Ouverture d'un fichier Image ou RAW (Filtrage Tolérant Majuscules/Minuscules)
+
+// Ouverture d'un fichier Image ou RAW
 ipcMain.handle("open-nef", async () => {
-    const result = await dialog.showOpenDialog({
-        title: "Choisir un fichier Image ou RAW",
-        properties: ["openFile"],
+    const result = await dialog.showOpenDialog(mainWindow, {
+        title: "Sélectionner une photo / fichier RAW",
+        properties: ["openFile"], // 👈 Forcer l'ouverture de FICHIER uniquement
         filters: [
             {
-                name: "Tous les fichiers RAW & Images",
-                extensions: ALL_IMAGE_EXTENSIONS
+                name: "Fichiers Images & RAW",
+                extensions: [
+                    "nef", "NEF", 
+                    "cr2", "CR2", "cr3", "CR3", 
+                    "raf", "RAF", "arw", "ARW", 
+                    "rw2", "RW2", "dng", "DNG", 
+                    "pef", "PEF", "orf", "ORF", 
+                    "jpg", "JPG", "jpeg", "JPEG", 
+                    "png", "PNG", "webp", "WEBP", 
+                    "tif", "TIF", "tiff", "TIFF"
+                ]
             },
             {
-                name: "Fichiers RAW (Nikon, Canon, Fuji, Sony, Panasonic)",
-                extensions: ["nef", "cr2", "cr3", "raf", "arw", "rw2", "dng", "pef", "orf"]
-            },
-            {
-                name: "Images Standard",
-                extensions: ["jpg", "jpeg", "png", "webp", "tif", "tiff"]
+                name: "Tous les fichiers (*.*)",
+                extensions: ["*"]
             }
         ]
     });
@@ -212,8 +252,7 @@ ipcMain.handle("open-nef", async () => {
         throw err;
     }
 });
-
-// --- Décodage direct RAW ---
+// Décodage direct RAW
 ipcMain.handle("decode-raw", async (event, filePath) => {
     try {
         const ext = path.extname(filePath).toLowerCase();
@@ -228,7 +267,7 @@ ipcMain.handle("decode-raw", async (event, filePath) => {
     }
 });
 
-// --- Chargement d'un fichier NP3 / NCP ---
+// Chargement d'un fichier NP3 / NCP
 ipcMain.handle("loadNP3", async () => {
     const result = await dialog.showOpenDialog({
         title: "Charger un Picture Control",
@@ -237,6 +276,10 @@ ipcMain.handle("loadNP3", async () => {
             {
                 name: "Picture Control Nikon",
                 extensions: ["np3", "ncp", "NP3", "NCP"]
+            },
+            {
+                name: "Tous les fichiers (*.*)",
+                extensions: ["*"]
             }
         ]
     });
@@ -253,7 +296,7 @@ ipcMain.handle("loadNP3", async () => {
     }
 });
 
-// --- Lecture directe d'un fichier sans boîte de dialogue ---
+// Lecture directe d'un fichier sans boîte de dialogue
 ipcMain.handle("read-file-direct", async (event, filePath) => {
     if (!filePath || !fs.existsSync(filePath)) return null;
 
@@ -323,8 +366,6 @@ ipcMain.handle("pc-reset", () => {
 ======================================================= */
 
 ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
-    console.log("🚀 Lancement de l'enregistrement NP3...");
-
     const { filePath, canceled } = await dialog.showSaveDialog({
         title: "Enregistrer le Picture Control",
         defaultPath: "CustomPictureControl.NP3",
@@ -340,8 +381,6 @@ ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
         }
 
         fs.writeFileSync(filePath, buffer);
-        console.log("✅ Fichier NP3 binaire sauvegardé sous :", filePath);
-
         return true;
     } catch (err) {
         console.error("❌ Erreur lors de l'enregistrement du NP3 :", err);
@@ -380,8 +419,6 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
         const imageBuffer = Buffer.from(cleanBase64, "base64");
 
         fs.writeFileSync(filePath, imageBuffer);
-        console.log("✅ Photo exportée sous :", filePath);
-
         return true;
     } catch (err) {
         console.error("❌ Erreur écriture image :", err);
@@ -401,7 +438,6 @@ ipcMain.handle("export-ncp", async (event, pcData) => {
 
         const buffer = await saveNCP(pcData);
         fs.writeFileSync(filePath, buffer);
-        console.log("✅ Fichier NCP sauvegardé sous :", filePath);
 
         return { success: true, path: filePath };
     } catch (err) {
@@ -476,7 +512,7 @@ ipcMain.handle("catalog:get-photos", async (event, folderPath) => {
     }
 });
 
-// Forcer l'utilisation de la carte graphique haute performance
+// Performance GPU
 app.commandLine.appendSwitch("ignore-gpu-blocklist");
 app.commandLine.appendSwitch("enable-gpu-rasterization");
 app.commandLine.appendSwitch("enable-zero-copy");

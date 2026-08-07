@@ -6,7 +6,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     readFileDirect: (filePath) => ipcRenderer.invoke("read-file-direct", filePath),
     loadNP3: () => ipcRenderer.invoke("loadNP3"),
     selectFolderRecursive: () => ipcRenderer.invoke("select-folder-recursive"),
-    readFolderRecursive: (folderPath) => ipcRenderer.invoke("read-folder-recursive", folderPath), // 👈 Canal d'ouverture auto
+    readFolderRecursive: (folderPath) => ipcRenderer.invoke("read-folder-recursive", folderPath),
+    selectExportFolder: () => ipcRenderer.invoke("dialog:selectExportFolder"),
 
     // 2. Gestion du Picture Control Engine
     updatePC: (key, value) => ipcRenderer.invoke("pc-update", key, value),
@@ -21,7 +22,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     // 4. Écouteurs de menu
     onMenuOpenNEF: (callback) => ipcRenderer.on("menu-open-nef", callback),
-    onMenuOpenNP3: (callback) => ipcRenderer.on("menu-open-np3", callback)
+    onMenuOpenNP3: (callback) => ipcRenderer.on("menu-open-np3", callback),
+    onMenuSwitchView: (callback) => ipcRenderer.on("menu-switch-view", (event, viewId) => callback(viewId)),
+    onMenuTriggerExport: (callback) => ipcRenderer.on("menu-trigger-export", callback)
 });
 
 // --- Catalogue Photos ---

@@ -7,24 +7,18 @@
 </head>
 <body>
 
-    <!-- En-tête -->
+    <!-- En-tête Dynamique -->
     <header class="app-header">
-        <!-- Titre global supprimé pour épurage -->
-        
-        <!-- Actions Vue 1 (Studio) - Visible par défaut -->
-<!-- Actions Vue 1 (Studio) -->
-<div id="header-studio-actions" class="header-buttons">
-    <button id="btnOpenProfilesPage" class="btn-action">🎛️ Gestionnaire de Profils Nikon</button>
-    <!-- Masqué au démarrage -->
-    <button id="exportJpg" class="btn-action btn-success" style="display: none;">📸 Exporter JPG</button>
-</div>
+        <!-- Actions Vue 1 (Studio) -->
+        <div id="header-studio-actions" class="header-buttons">
+            <button id="exportJpg" class="btn-action btn-success" style="display: none;">📸 Exporter JPG</button>
+        </div>
 
-        <!-- Actions Vue 2 (Gestionnaire) - Masqué par défaut -->
+        <!-- Actions Vue 2 (Gestionnaire) -->
         <div id="header-profile-actions" class="header-buttons" style="display: none;">
             <button id="openNP3" class="btn-primary">📂 Importer un NP3</button>
             <button id="saveNP3" class="btn-action">💾 Exporter pour Z50 II (.NP3)</button>
             <button id="exportNCP" class="btn-action">💾 Exporter pour Z6 II (.NCP)</button>
-            <button id="btnReturnToStudio" class="btn-secondary">⬅️ Retour au Studio</button>
         </div>
     </header>
 
@@ -119,6 +113,76 @@
 
     </main>
 
+    <!-- MODALE D'EXPORTATION CONFIGURABLE -->
+    <div id="exportModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:460px; color:#e8eaed; font-family:sans-serif;">
+            <h3 style="margin-top:0; color:#5865f2; font-size:16px;">📤 Exporter l'image</h3>
+
+            <!-- 1. Dossier de destination -->
+            <div style="margin-bottom:12px;">
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:4px;">1. Dossier de destination :</label>
+                <div style="display:flex; gap:6px;">
+                    <input type="text" id="expFolderPath" readonly placeholder="Aucun dossier sélectionné" style="flex:1; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px; font-size:11px;">
+                    <button id="btnBrowseExpFolder" style="background:#3c4043; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">Parcourir</button>
+                </div>
+            </div>
+
+            <!-- 2. Format de sortie -->
+            <div style="margin-bottom:12px;">
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:4px;">2. Format de sortie :</label>
+                <select id="expFormat" style="width:100%; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px;">
+                    <option value="image/jpeg">JPEG (.jpg)</option>
+                    <option value="image/png">PNG (.png)</option>
+                    <option value="image/tiff">TIFF (.tif)</option>
+                    <option value="image/x-adobe-dng">DNG (.dng)</option>
+                    <option value="application/pdf">PDF (.pdf)</option>
+                </select>
+            </div>
+
+            <!-- 3. Taux de compression -->
+            <div style="margin-bottom:12px;">
+                <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:bold; margin-bottom:4px;">
+                    <span>3. Qualité / Compression :</span>
+                    <span id="expQualityVal">90%</span>
+                </div>
+                <input type="range" id="expQuality" min="10" max="100" value="90" style="width:100%;">
+            </div>
+
+            <!-- 4. Dimensions et Résolution -->
+            <div style="margin-bottom:12px; border-top:1px solid #333; padding-top:10px;">
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">4. Dimensions &amp; Résolution :</label>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+                    <div>
+                        <span style="font-size:10px; color:#aaa;">Largeur (px)</span>
+                        <input type="number" id="expWidth" placeholder="Auto" style="width:100%; background:#171717; border:1px solid #444; color:#fff; padding:4px; border-radius:4px;">
+                    </div>
+                    <div>
+                        <span style="font-size:10px; color:#aaa;">Hauteur (px)</span>
+                        <input type="number" id="expHeight" placeholder="Auto" style="width:100%; background:#171717; border:1px solid #444; color:#fff; padding:4px; border-radius:4px;">
+                    </div>
+                    <div>
+                        <span style="font-size:10px; color:#aaa;">Résolution (DPI)</span>
+                        <input type="number" id="expDpi" value="300" style="width:100%; background:#171717; border:1px solid #444; color:#fff; padding:4px; border-radius:4px;">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. Métadonnées -->
+            <div style="margin-bottom:18px; border-top:1px solid #333; padding-top:10px;">
+                <label style="font-size:12px; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="expStripExif">
+                    <span>5. Supprimer les métadonnées (EXIF)</span>
+                </label>
+            </div>
+
+            <!-- Boutons d'action -->
+            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button id="btnCancelExport" style="background:transparent; border:1px solid #555; color:#fff; padding:6px 14px; border-radius:4px; cursor:pointer;">Annuler</button>
+                <button id="btnConfirmExport" style="background:#5865f2; border:none; color:#fff; padding:6px 16px; border-radius:4px; cursor:pointer; font-weight:bold;">Lancer l'export</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Core Scripts -->
     <script src="core/ImageBuffer.js"></script>
     <script src="core/DisplayCanvas.js"></script>
@@ -126,6 +190,7 @@
     <script src="core/BaseFilter.js"></script>
 
     <!-- Filtres -->
+    <script src="filters/WhiteBalanceFilter.js"></script>
     <script src="filters/ContrastFilter.js"></script>
     <script src="filters/BrightnessFilter.js"></script>
     <script src="filters/HighlightsFilter.js"></script>
@@ -148,8 +213,6 @@
 
     <!-- UI & Moteur -->
     <script src="components/ToneCurveWidget.js"></script>
-    <script src="filters/WhiteBalanceFilter.js"></script>
-
     <script src="core/ImageProcessor.js"></script>
     <script src="components/exifPanel.js"></script>
     <script src="components/pictureControlPanel.js"></script>

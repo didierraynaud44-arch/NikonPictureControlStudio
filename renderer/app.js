@@ -119,14 +119,12 @@ function renderStudioFolderTree() {
         return;
     }
 
-    // Affichage de chaque dossier racine importé
     studioFoldersList.forEach((folderStructure, index) => {
         const rootItem = document.createElement("div");
         rootItem.style.marginBottom = "8px";
         rootItem.style.borderBottom = "1px solid #2b2d31";
         rootItem.style.paddingBottom = "4px";
 
-        // En-tête du dossier racine avec bouton de suppression
         const rootHeader = document.createElement("div");
         rootHeader.style.cssText = `
             display: flex;
@@ -175,32 +173,22 @@ function renderStudioFolderTree() {
     });
 }
 
-/**
- * Supprime un dossier de la liste et met à jour le stockage
- */
 function removeStudioFolder(index) {
     studioFoldersList.splice(index, 1);
     saveSavedStudioFoldersList();
     renderStudioFolderTree();
 }
 
-/**
- * Sauvegarde la liste des chemins de dossiers dans le localStorage
- */
 function saveSavedStudioFoldersList() {
     const paths = studioFoldersList.map(f => f.path);
     localStorage.setItem("nikon_studio_folders_paths", JSON.stringify(paths));
 }
 
-/**
- * Ouvre la boîte de dialogue pour importer un nouveau répertoire
- */
 async function openStudioFolder() {
     try {
         if (window.electronAPI && typeof window.electronAPI.selectFolderRecursive === "function") {
             const folderData = await window.electronAPI.selectFolderRecursive();
             if (folderData && folderData.path) {
-                // Évite d'ajouter des doublons
                 const exists = studioFoldersList.some(f => f.path === folderData.path);
                 if (!exists) {
                     studioFoldersList.push(folderData);
@@ -216,9 +204,6 @@ async function openStudioFolder() {
     }
 }
 
-/**
- * Recharge automatiquement tous les dossiers sauvegardés au lancement
- */
 async function loadSavedStudioFolders() {
     let savedPaths = [];
     try {
@@ -227,7 +212,6 @@ async function loadSavedStudioFolders() {
         savedPaths = [];
     }
 
-    // Rétro-compatibilité si un seul dossier était sauvegardé sous l'ancienne clé
     const oldPath = localStorage.getItem("nikon_studio_last_folder");
     if (oldPath && !savedPaths.includes(oldPath)) {
         savedPaths.push(oldPath);
@@ -395,11 +379,6 @@ async function loadImageInStudio(filePath) {
             }, true);
         }
 
-        const btnExportJpg = document.getElementById("exportJpg");
-        if (btnExportJpg) {
-            btnExportJpg.style.display = "inline-block";
-        }
-
         if (typeof window.switchToView === "function") {
             window.switchToView("view-studio");
         }
@@ -412,45 +391,127 @@ window.loadImageInStudio = loadImageInStudio;
 
 
 /* =========================================================
+    MODULE EXPORTATION
+========================================================= */
+
+function initExportModal() {
+    const modal = document.getElementById("exportModal");
+    const btnBrowse = document.getElementById("btnBrowseExpFolder");
+    const folderInput = document.getElementById("expFolderPath");
+    const qualitySlider = document.getElementById("expQuality");
+    const qualityLabel = document.getElementById("expQualityVal");
+    const btnCancel = document.getElementById("btnCancelExport");
+    const btnConfirm = document.getElementById("btnConfirmExport");
+
+    if (qualitySlider && qualityLabel) {
+        qualitySlider.oninput = (e) => {
+            qualityLabel.textContent = `${e.target.value}%`;
+        };
+    }
+
+    if (btnBrowse && folderInput) {
+        btnBrowse.onclick = async () => {
+            const folder = await window.electronAPI?.selectExportFolder();
+            if (folder) folderInput.value = folder;
+        };
+    }
+
+    if (btnCancel && modal) {
+        btnCancel.onclick = () => {
+            modal.style.display = "none";
+        };
+    }
+
+    if (btnConfirm && modal) {
+        btnConfirm.onclick = async () => {
+            const config = {
+                folder: folderInput ? folderInput.value : "",
+                format: document.getElementById("expFormat")?.value || "image/jpeg",
+                quality: qualitySlider ? parseFloat(qualitySlider.value) / 100 : 0.9,
+                width: parseInt(document.getElementById("expWidth")?.value) || null,
+                height: parseInt(document.getElementById("expHeight")?.value) || null,
+                dpi: parseInt(document.getElementById("expDpi")?.value) || 300,
+                stripExif: document.getElementById("expStripExif")?.checked || false
+            };
+
+            if (!config.folder) {
+                alert("Veuillez choisir un dossier de destination.");
+                return;
+            }
+
+            modal.style.display = "none";
+
+            if (window.imageProcessor) {
+                const base64Data = await window.imageProcessor.exportImage(config.format, config.quality);
+                if (base64Data && window.electronAPI) {
+                    await window.electronAPI.saveImageFile({
+                        defaultName: currentNefFileName,
+                        base64Data: base64Data,
+                        exportConfig: config
+                    });
+                }
+            }
+        };
+    }
+}
+
+
+/* =========================================================
     INITIALISATION ET EVENEMENTS IHM
 ========================================================= */
 
+async function switchToView(targetViewId) {
+    const ALL_VIEW_IDS = ["view-studio", "view-profiles"];
+
+    ALL_VIEW_IDS.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.removeProperty("display");
+        if (id === targetViewId) {
+            el.classList.remove("view-hidden");
+            el.classList.add("view-active");
+            el.style.display = "flex";
+        } else {
+            el.classList.remove("view-active");
+            el.classList.add("view-hidden");
+            el.style.display = "none";
+        }
+    });
+
+    const headerStudio = document.getElementById("header-studio-actions");
+    const headerProfiles = document.getElementById("header-profile-actions");
+
+    if (headerStudio) headerStudio.style.display = (targetViewId === "view-studio") ? "flex" : "none";
+    if (headerProfiles) headerProfiles.style.display = (targetViewId === "view-profiles") ? "flex" : "none";
+
+    if (targetViewId === "view-profiles") {
+        if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
+            profileImageProcessor = new ImageProcessor("profilePreviewCanvas");
+        }
+
+        if (profileImageProcessor && window.imageProcessor?.loadedImage) {
+            await profileImageProcessor.load(
+                window.imageProcessor.loadedImage.src,
+                window.imageProcessor.currentOrientation
+            );
+        }
+
+        const pcToShow = activeProfilePC || window.imageProcessor?.pictureControl || null;
+        if (pcToShow) {
+            if (profileImageProcessor) profileImageProcessor.setPictureControl(pcToShow);
+            renderProfilePanel(pcToShow, true);
+        }
+
+        renderNp3Library();
+    }
+}
+window.switchToView = switchToView;
+
 function initButtons() {
-    const btnExportJpg         = document.getElementById("exportJpg");
-    const btnOpenProfiles      = document.getElementById("btnOpenProfilesPage");
-    const btnReturnStudio      = document.getElementById("btnReturnToStudio");
     const btnSaveNP3           = document.getElementById("saveNP3");
     const btnExportNCP         = document.getElementById("exportNCP");
     const btnStudioOpenFolder  = document.getElementById("btnStudioOpenFolder");
-
-    const btnImportMenu        = document.getElementById("btnImportProfileMenu");
-    const dropdownContent      = document.getElementById("importDropdownContent");
     const btnNP3               = document.getElementById("openNP3");
-    const btnNCP               = document.getElementById("openNCP");
-
-    const headerStudio         = document.getElementById("header-studio-actions");
-    const headerProfiles       = document.getElementById("header-profile-actions");
-
-    const ALL_VIEW_IDS = ["view-studio", "view-profiles"];
-
-    function switchToView(targetViewId) {
-        ALL_VIEW_IDS.forEach((id) => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.style.removeProperty("display");
-            if (id === targetViewId) {
-                el.classList.remove("view-hidden");
-                el.classList.add("view-active");
-            } else {
-                el.classList.remove("view-active");
-                el.classList.add("view-hidden");
-            }
-        });
-
-        if (headerStudio) headerStudio.style.display = (targetViewId === "view-studio") ? "flex" : "none";
-        if (headerProfiles) headerProfiles.style.display = (targetViewId === "view-profiles") ? "flex" : "none";
-    }
-    window.switchToView = switchToView;
 
     switchToView("view-studio");
 
@@ -466,59 +527,8 @@ function initButtons() {
         btnStudioOpenFolder.onclick = openStudioFolder;
     }
 
-    if (btnOpenProfiles) {
-        btnOpenProfiles.onclick = async () => {
-            switchToView("view-profiles");
-
-            if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
-                profileImageProcessor = new ImageProcessor("profilePreviewCanvas");
-            }
-
-            if (profileImageProcessor && window.imageProcessor?.loadedImage) {
-                await profileImageProcessor.load(
-                    window.imageProcessor.loadedImage.src,
-                    window.imageProcessor.currentOrientation
-                );
-            }
-
-            const pcToShow = activeProfilePC || window.imageProcessor?.pictureControl || null;
-            if (pcToShow) {
-                if (profileImageProcessor) profileImageProcessor.setPictureControl(pcToShow);
-                renderProfilePanel(pcToShow, true);
-            }
-
-            renderNp3Library();
-        };
-    }
-
-    if (btnReturnStudio) {
-        btnReturnStudio.onclick = () => {
-            switchToView("view-studio");
-            if (activeProfilePC && window.imageProcessor) {
-                window.imageProcessor.setPictureControl(activeProfilePC);
-                if (typeof window.updatePictureControl === "function") {
-                    window.updatePictureControl({ pictureControl: activeProfilePC }, true);
-                }
-            }
-        };
-    }
-
-    if (btnImportMenu && dropdownContent) {
-        btnImportMenu.onclick = (e) => {
-            e.stopPropagation();
-            const isVisible = dropdownContent.style.display === "block";
-            dropdownContent.style.display = isVisible ? "none" : "block";
-        };
-
-        window.addEventListener("click", () => {
-            if (dropdownContent) dropdownContent.style.display = "none";
-        });
-    }
-
     const importProfileFile = async () => {
         try {
-            if (dropdownContent) dropdownContent.style.display = "none";
-
             const response = await window.electronAPI.loadNP3();
             if (response) {
                 const pc = response.pictureControl || response.pc || response;
@@ -537,7 +547,6 @@ function initButtons() {
     };
 
     if (btnNP3) btnNP3.onclick = importProfileFile;
-    if (btnNCP) btnNCP.onclick = importProfileFile;
 
     if (btnSaveNP3) {
         btnSaveNP3.onclick = async () => {
@@ -550,19 +559,6 @@ function initButtons() {
         btnExportNCP.onclick = async () => {
             const activePC = activeProfilePC || profileImageProcessor?.pictureControl;
             if (activePC && window.electronAPI) await window.electronAPI.exportNCP(activePC);
-        };
-    }
-
-    if (btnExportJpg) {
-        btnExportJpg.onclick = async () => {
-            if (!window.imageProcessor) return;
-            const base64Data = await window.imageProcessor.exportImage("image/jpeg", 0.95);
-            if (base64Data && window.electronAPI) {
-                await window.electronAPI.saveImageFile({
-                    defaultName: currentNefFileName,
-                    base64Data: base64Data
-                });
-            }
         };
     }
 
@@ -630,12 +626,52 @@ function initButtons() {
     }
 
     renderStudioFolderTree();
+    initExportModal();
+
     if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
 }
 
+// 🔹 Écouteurs IPC du Menu Electron
+// 🔹 Écouteur du Menu : Ouvrir un fichier RAW / Image
 if (window.electronAPI?.onMenuOpenNEF) {
-    window.electronAPI.onMenuOpenNEF(() => {
-        openStudioFolder();
+    window.electronAPI.onMenuOpenNEF(async () => {
+        try {
+            // 1. Déclenche la boîte de dialogue d'ouverture de fichier
+            const fileData = await window.electronAPI.openNEF();
+            
+            if (!fileData) return; // Annulation par l'utilisateur
+
+            // 2. Extrait le chemin du fichier (fileData peut être un objet ou un string)
+            const filePath = typeof fileData === "string" ? fileData : (fileData.filePath || fileData.path);
+
+            if (filePath) {
+                // 3. Charge la photo dans le Studio
+                await window.loadImageInStudio(filePath);
+            } else if (fileData.preview && window.imageProcessor) {
+                // 4. Fallback si le preview Base64 est directement disponible
+                if (typeof window.imageProcessor.clear === "function") {
+                    window.imageProcessor.clear();
+                }
+                await window.imageProcessor.load(fileData.preview, fileData.orientation || 1);
+            }
+        } catch (err) {
+            console.error("❌ Erreur lors de l'affichage de l'image sélectionnée :", err);
+        }
+    });
+}
+
+if (window.electronAPI?.onMenuSwitchView) {
+    window.electronAPI.onMenuSwitchView((targetViewId) => {
+        if (typeof window.switchToView === "function") {
+            window.switchToView(targetViewId);
+        }
+    });
+}
+
+if (window.electronAPI?.onMenuTriggerExport) {
+    window.electronAPI.onMenuTriggerExport(() => {
+        const modal = document.getElementById("exportModal");
+        if (modal) modal.style.display = "flex";
     });
 }
 
