@@ -1,6 +1,12 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
+
+    // Passerelle Catalogue SQLite
+    addCatalogFolder: (folderData) => ipcRenderer.invoke("catalog:add-folder", folderData),
+    getCatalog: () => ipcRenderer.invoke("catalog:get-all"),
+    removeCatalogFolder: (folderPath) => ipcRenderer.invoke("catalog:remove-folder", folderPath),
+    savePhotoSettings: (filePath, pcData) => ipcRenderer.invoke("catalog:save-photo-pc", filePath, pcData),
     // 1. Ouverture de fichiers et explorateur récursif
     openNEF: () => ipcRenderer.invoke("open-nef"),
     readFileDirect: (filePath) => ipcRenderer.invoke("read-file-direct", filePath),

@@ -88,16 +88,35 @@ class GridManager {
         return fileList;
     }
 
+    formatShortName(fileName) {
+        if (!fileName) return "";
+
+        // Simplifie les répétitions "-Modifier-Modifier..." en "_Edit"
+        let cleanName = fileName.replace(/(-Modifier)+/gi, "_Edit");
+
+        // Tronque si le nom dépasse 20 caractères tout en gardant l'extension
+        if (cleanName.length > 20) {
+            const extIndex = cleanName.lastIndexOf(".");
+            if (extIndex !== -1) {
+                const ext = cleanName.substring(extIndex);
+                const base = cleanName.substring(0, extIndex);
+                return base.substring(0, 13) + "..." + ext;
+            }
+        }
+
+        return cleanName;
+    }
+
     setImages(items) {
         const flatList = this._extractFiles(items);
 
         this.images = flatList.map((item, idx) => {
             const isFile = item instanceof File;
             const filePath = isFile ? item.path || item.name : item.path || item.url || item.filePath || item.name;
-            const fileName = isFile ? item.name : item.name || `Photo ${idx + 1}`;
+            const fileName = isFile ? item.name : item.name || ("Photo " + (idx + 1));
 
             return {
-                id: `img_${idx}_${Date.now()}`,
+                id: "img_" + idx + "_" + Date.now(),
                 rawItem: item,
                 name: fileName,
                 path: filePath
@@ -115,7 +134,7 @@ class GridManager {
         if (countSpan) countSpan.textContent = this.images.length;
 
         if (this.images.length === 0) {
-            this.gridWrapper.innerHTML = `<p style="color:#777; font-size:12px; font-style:italic; grid-column: 1 / -1; text-align:center; padding: 20px;">Aucune image sélectionnée.</p>`;
+            this.gridWrapper.innerHTML = '<p style="color:#777; font-size:12px; font-style:italic; grid-column: 1 / -1; text-align:center; padding: 20px;">Aucune image sélectionnée.</p>';
             return;
         }
 
@@ -123,13 +142,15 @@ class GridManager {
 
         this.images.forEach(item => {
             const card = document.createElement("div");
-            card.className = `grid-card ${this.selectedIds.has(item.id) ? "selected" : ""}`;
+            card.className = "grid-card " + (this.selectedIds.has(item.id) ? "selected" : "");
+
+            const displayName = this.formatShortName(item.name);
 
             card.innerHTML = `
                 <input type="checkbox" class="grid-checkbox" ${this.selectedIds.has(item.id) ? "checked" : ""}>
                 <div class="grid-card-thumb" id="thumb_${item.id}">
                     <span class="grid-card-icon">⌛</span>
-                    <span class="grid-card-name">${item.name}</span>
+                    <span class="grid-card-name" title="${item.name}">${displayName}</span>
                 </div>
             `;
 
@@ -161,7 +182,6 @@ class GridManager {
 
         this.gridWrapper.appendChild(fragment);
 
-        // Chargement parallèle par lots de 6 images
         this._loadThumbnailsInBatch();
     }
 
@@ -174,31 +194,43 @@ class GridManager {
     }
 
     async _loadThumbnail(item) {
-        if (!item.path || !window.electronAPI?.readFileDirect) return;
+        if (!item.path) return;
 
         try {
-            const fileInfo = await window.electronAPI.readFileDirect(item.path);
-            const thumbContainer = document.getElementById(`thumb_${item.id}`);
-            if (!thumbContainer || !fileInfo) return;
+            const displayName = this.formatShortName(item.name);
+            const thumbContainer = document.getElementById("thumb_" + item.id);
+            if (!thumbContainer) return;
 
-            let rawSrc = fileInfo.preview || fileInfo.filePath || fileInfo.path;
             let imageSrc = "";
 
-            if (rawSrc) {
-                if (rawSrc.startsWith("data:") || rawSrc.startsWith("file:")) {
-                    imageSrc = rawSrc;
-                } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.toString().trim().substring(0, 100))) {
-                    imageSrc = `data:image/jpeg;base64,${rawSrc.toString().trim()}`;
-                } else {
-                    const formattedPath = rawSrc.toString().replace(/\\/g, "/");
-                    imageSrc = formattedPath.startsWith("/") ? `file://${formattedPath}` : `file:///${formattedPath}`;
+            // 1. Essai via l'API Electron directe
+            if (window.electronAPI && typeof window.electronAPI.readFileDirect === "function") {
+                const fileInfo = await window.electronAPI.readFileDirect(item.path);
+                if (fileInfo) {
+                    let rawSrc = fileInfo.preview || fileInfo.filePath || fileInfo.path;
+                    if (rawSrc) {
+                        if (rawSrc.startsWith("data:") || rawSrc.startsWith("file:")) {
+                            imageSrc = rawSrc;
+                        } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.toString().trim().substring(0, 100))) {
+                            imageSrc = "data:image/jpeg;base64," + rawSrc.toString().trim();
+                        } else {
+                            const formattedPath = rawSrc.toString().replace(/\\/g, "/");
+                            imageSrc = formattedPath.startsWith("/") ? "file://" + formattedPath : "file:///" + formattedPath;
+                        }
+                    }
                 }
+            }
+
+            // 2. Repli direct pour les TIFF/TIF/JPG si l'API n'a pas renvoyé de data-URL
+            if (!imageSrc && item.path) {
+                const formattedPath = item.path.replace(/\\/g, "/");
+                imageSrc = formattedPath.startsWith("/") ? "file://" + formattedPath : "file:///" + formattedPath;
             }
 
             if (imageSrc) {
                 thumbContainer.innerHTML = `
                     <img src="${imageSrc}" alt="${item.name}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">
-                    <div class="grid-card-overlay-title">${item.name}</div>
+                    <div class="grid-card-overlay-title" title="${item.name}">${displayName}</div>
                 `;
             }
         } catch (err) {
@@ -220,7 +252,7 @@ class GridManager {
 
         for (const item of selectedList) {
             try {
-                if (!window.electronAPI?.readFileDirect) continue;
+                if (!window.electronAPI || !window.electronAPI.readFileDirect) continue;
                 const fileInfo = await window.electronAPI.readFileDirect(item.path);
                 if (!fileInfo) continue;
 
@@ -231,10 +263,10 @@ class GridManager {
                     if (rawSrc.startsWith("data:") || rawSrc.startsWith("file:")) {
                         imageSrc = rawSrc;
                     } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.toString().trim().substring(0, 100))) {
-                        imageSrc = `data:image/jpeg;base64,${rawSrc.toString().trim()}`;
+                        imageSrc = "data:image/jpeg;base64," + rawSrc.toString().trim();
                     } else {
                         const formattedPath = rawSrc.toString().replace(/\\/g, "/");
-                        imageSrc = formattedPath.startsWith("/") ? `file://${formattedPath}` : `file:///${formattedPath}`;
+                        imageSrc = formattedPath.startsWith("/") ? "file://" + formattedPath : "file:///" + formattedPath;
                     }
                 }
 
@@ -272,7 +304,7 @@ class GridManager {
             }
         }
 
-        alert(`Export terminé : ${successCount} / ${selectedList.length} photo(s) enregistrée(s) !`);
+        alert("Export terminé : " + successCount + " / " + selectedList.length + " photo(s) enregistrée(s) !");
     }
 }
 

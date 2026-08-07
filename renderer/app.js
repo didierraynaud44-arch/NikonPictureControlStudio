@@ -138,12 +138,12 @@ function renderStudioFolderTree() {
     container.innerHTML = "";
 
     if (!studioFoldersList || studioFoldersList.length === 0) {
-        container.innerHTML = `<p style="color:#777; font-size:11px; font-style:italic; padding:8px; margin:0;">Aucun dossier importé</p>`;
+        container.innerHTML = `<p style="color:#777; font-size:11px; font-style:italic; padding:8px; margin:0;">Aucun dossier dans le catalogue</p>`;
         if (window.gridManager) window.gridManager.setImages([]);
         return;
     }
 
-    studioFoldersList.forEach((folderStructure, index) => {
+    studioFoldersList.forEach((folderStructure) => {
         const rootItem = document.createElement("div");
         rootItem.style.marginBottom = "8px";
         rootItem.style.borderBottom = "1px solid #2b2d31";
@@ -174,7 +174,7 @@ function renderStudioFolderTree() {
             rootTreeContainer.style.display = isHidden ? "block" : "none";
             rootTitle.innerHTML = `${isHidden ? "📂" : "📁"} ${folderStructure.name}`;
 
-            // 🔗 ENVOI DES FICHIERS RACINES ET SOUS-DOSSIERS À LA GALERIE
+            // 🔗 ENVOI DES FICHIERS A LA GALERIE
             if (window.gridManager) {
                 const allFolderFiles = collectAllFilesFromFolder(folderStructure);
                 window.gridManager.setImages(allFolderFiles);
@@ -183,13 +183,13 @@ function renderStudioFolderTree() {
 
         const btnRemove = document.createElement("button");
         btnRemove.className = "btn-remove-folder";
-        btnRemove.title = "Retirer ce dossier";
+        btnRemove.title = "Retirer du catalogue";
         btnRemove.innerHTML = "🗑️";
         btnRemove.style.cssText = "background: transparent; border: none; cursor: pointer; font-size: 11px; padding: 2px 4px; margin-left: 6px;";
         
         btnRemove.onclick = (e) => {
             e.stopPropagation();
-            removeStudioFolder(index);
+            removeStudioFolder(folderStructure.path);
         };
 
         rootHeader.appendChild(rootTitle);
@@ -202,28 +202,16 @@ function renderStudioFolderTree() {
         container.appendChild(rootItem);
     });
 
-    // Alimentation initiale de la galerie avec l'ensemble des dossiers si présents
+    // Alimentation initiale de la galerie avec le premier dossier et ses sous-dossiers
     if (studioFoldersList.length > 0 && window.gridManager) {
-        window.gridManager.setImages(studioFoldersList);
+        window.gridManager.setImages(collectAllFilesFromFolder(studioFoldersList[0]));
     }
 }
 
-function removeStudioFolder(index) {
-    studioFoldersList.splice(index, 1);
-    saveSavedStudioFoldersList();
-    renderStudioFolderTree();
-}
-
-/* =========================================================
-    PERSISTANCE DES DOSSIERS CATALOGUE (SÉCURISÉE)
-========================================================= */
-
-function saveSavedStudioFoldersList() {
-    try {
-        const paths = studioFoldersList.map(f => (f && typeof f === "object") ? f.path : f).filter(Boolean);
-        localStorage.setItem("nikon_studio_folders_paths", JSON.stringify(paths));
-    } catch (e) {
-        console.error("❌ Erreur lors de la sauvegarde des chemins :", e);
+async function removeStudioFolder(folderPath) {
+    if (window.electronAPI && typeof window.electronAPI.removeCatalogFolder === "function") {
+        studioFoldersList = await window.electronAPI.removeCatalogFolder(folderPath);
+        renderStudioFolderTree();
     }
 }
 
@@ -232,15 +220,11 @@ async function openStudioFolder() {
         if (window.electronAPI && typeof window.electronAPI.selectFolderRecursive === "function") {
             const folderData = await window.electronAPI.selectFolderRecursive();
             if (folderData && folderData.path) {
-                const exists = studioFoldersList.some(f => f.path === folderData.path);
-                if (!exists) {
-                    studioFoldersList.push(folderData);
-                    saveSavedStudioFoldersList();
+                if (typeof window.electronAPI.addCatalogFolder === "function") {
+                    studioFoldersList = await window.electronAPI.addCatalogFolder(folderData);
                     renderStudioFolderTree();
                 }
             }
-        } else {
-            console.error("❌ Méthode selectFolderRecursive indisponible dans electronAPI");
         }
     } catch (err) {
         console.error("❌ Erreur lors de l'ouverture du dossier :", err);
@@ -248,35 +232,14 @@ async function openStudioFolder() {
 }
 
 async function loadSavedStudioFolders() {
-    let savedPaths = [];
     try {
-        const rawData = localStorage.getItem("nikon_studio_folders_paths");
-        savedPaths = rawData ? JSON.parse(rawData) : [];
-    } catch (e) {
-        console.error("❌ Erreur de lecture de localStorage :", e);
-        savedPaths = [];
-    }
-
-    if (!Array.isArray(savedPaths) || savedPaths.length === 0) return;
-
-    studioFoldersList = [];
-
-    for (const folderPath of savedPaths) {
-        if (!folderPath) continue;
-        try {
-            if (window.electronAPI && typeof window.electronAPI.readFolderRecursive === "function") {
-                const folderData = await window.electronAPI.readFolderRecursive(folderPath);
-                if (folderData) {
-                    studioFoldersList.push(folderData);
-                }
-            }
-        } catch (err) {
-            console.error("❌ Impossible de recharger le dossier :", folderPath, err);
+        if (window.electronAPI && typeof window.electronAPI.getCatalog === "function") {
+            studioFoldersList = await window.electronAPI.getCatalog();
+            renderStudioFolderTree();
         }
+    } catch (e) {
+        console.error("❌ Erreur de chargement du catalogue SQLite :", e);
     }
-
-    saveSavedStudioFoldersList();
-    renderStudioFolderTree();
 }
 
 /* =========================================================
@@ -428,7 +391,7 @@ async function loadImageInStudio(filePath) {
 window.loadImageInStudio = loadImageInStudio;
 
 /* =========================================================
-    MODULE EXPORTATION (Corrigé Single & Galerie)
+    MODULE EXPORTATION
 ========================================================= */
 
 function initExportModal() {
@@ -723,7 +686,7 @@ if (window.electronAPI?.onMenuTriggerExport) {
     });
 }
 
-// Initialisation globale + Rechargement automatique des dossiers
+// Initialisation globale
 const initApp = async () => {
     initButtons();
     await loadSavedStudioFolders();
