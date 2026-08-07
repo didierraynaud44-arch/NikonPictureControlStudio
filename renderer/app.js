@@ -5,7 +5,7 @@
 let currentNefFileName = "image-editee";
 let profileImageProcessor = null;
 let activeProfilePC = null; // Picture Control actif dans le Gestionnaire
-let studioCurrentFolderStructure = null; // Structure d'arborescence chargée
+let studioFoldersList = []; // Liste de toutes les structures de dossiers importées
 
 // Stockage local de la bibliothèque NP3 / Profils
 let np3Library = [];
@@ -21,7 +21,7 @@ try {
 ========================================================= */
 
 /**
- * Construit récursivement l'arborescence HTML (Dossiers + Fichiers)
+ * Construit récursivement l'arborescence HTML (Fermée par défaut)
  */
 function buildTreeHTML(node) {
     if (!node) return document.createTextNode("");
@@ -45,10 +45,10 @@ function buildTreeHTML(node) {
             title.style.fontSize = "12px";
             title.style.padding = "2px 4px";
             title.style.borderRadius = "3px";
-            title.innerHTML = `📂 <span style="user-select:none;">${subFolder.name}</span>`;
+            title.innerHTML = `📁 <span style="user-select:none;">${subFolder.name}</span>`;
 
             const subTreeContainer = document.createElement("div");
-            subTreeContainer.style.display = "block"; // Déplié par défaut
+            subTreeContainer.style.display = "none"; // 🔒 FERMÉ PAR DÉFAUT
 
             title.onclick = (e) => {
                 e.stopPropagation();
@@ -106,7 +106,7 @@ function buildTreeHTML(node) {
 }
 
 /**
- * Rendu de l'arborescence dans le composant du Studio
+ * Rendu de la liste de tous les dossiers importés
  */
 function renderStudioFolderTree() {
     const container = document.getElementById("studioFolderTree");
@@ -114,25 +114,99 @@ function renderStudioFolderTree() {
 
     container.innerHTML = "";
 
-    if (!studioCurrentFolderStructure || (!studioCurrentFolderStructure.children.length && !studioCurrentFolderStructure.files.length)) {
+    if (!studioFoldersList || studioFoldersList.length === 0) {
         container.innerHTML = `<p style="color:#777; font-size:11px; font-style:italic; padding:8px; margin:0;">Aucun dossier importé</p>`;
         return;
     }
 
-    const treeHTML = buildTreeHTML(studioCurrentFolderStructure);
-    container.appendChild(treeHTML);
+    // Affichage de chaque dossier racine importé
+    studioFoldersList.forEach((folderStructure, index) => {
+        const rootItem = document.createElement("div");
+        rootItem.style.marginBottom = "8px";
+        rootItem.style.borderBottom = "1px solid #2b2d31";
+        rootItem.style.paddingBottom = "4px";
+
+        // En-tête du dossier racine avec bouton de suppression
+        const rootHeader = document.createElement("div");
+        rootHeader.style.cssText = `
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            padding: 4px;
+            background: #232428;
+            border-radius: 4px;
+            margin-bottom: 2px;
+        `;
+
+        const rootTitle = document.createElement("div");
+        rootTitle.style.cssText = "font-size: 12px; font-weight: bold; color: #5865f2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+        rootTitle.innerHTML = `📁 ${folderStructure.name}`;
+
+        const rootTreeContainer = document.createElement("div");
+        rootTreeContainer.style.display = "none"; // 🔒 FERMÉ PAR DÉFAUT
+
+        rootHeader.onclick = (e) => {
+            if (e.target.classList.contains("btn-remove-folder")) return;
+            const isHidden = rootTreeContainer.style.display === "none";
+            rootTreeContainer.style.display = isHidden ? "block" : "none";
+            rootTitle.innerHTML = `${isHidden ? "📂" : "📁"} ${folderStructure.name}`;
+        };
+
+        const btnRemove = document.createElement("button");
+        btnRemove.className = "btn-remove-folder";
+        btnRemove.title = "Retirer ce dossier";
+        btnRemove.innerHTML = "🗑️";
+        btnRemove.style.cssText = "background: transparent; border: none; cursor: pointer; font-size: 11px; padding: 2px 4px; margin-left: 6px;";
+        
+        btnRemove.onclick = (e) => {
+            e.stopPropagation();
+            removeStudioFolder(index);
+        };
+
+        rootHeader.appendChild(rootTitle);
+        rootHeader.appendChild(btnRemove);
+        rootItem.appendChild(rootHeader);
+
+        rootTreeContainer.appendChild(buildTreeHTML(folderStructure));
+        rootItem.appendChild(rootTreeContainer);
+
+        container.appendChild(rootItem);
+    });
 }
 
 /**
- * Ouvre la boîte de dialogue pour importer un répertoire dans le Studio
+ * Supprime un dossier de la liste et met à jour le stockage
+ */
+function removeStudioFolder(index) {
+    studioFoldersList.splice(index, 1);
+    saveSavedStudioFoldersList();
+    renderStudioFolderTree();
+}
+
+/**
+ * Sauvegarde la liste des chemins de dossiers dans le localStorage
+ */
+function saveSavedStudioFoldersList() {
+    const paths = studioFoldersList.map(f => f.path);
+    localStorage.setItem("nikon_studio_folders_paths", JSON.stringify(paths));
+}
+
+/**
+ * Ouvre la boîte de dialogue pour importer un nouveau répertoire
  */
 async function openStudioFolder() {
     try {
         if (window.electronAPI && typeof window.electronAPI.selectFolderRecursive === "function") {
             const folderData = await window.electronAPI.selectFolderRecursive();
-            if (folderData) {
-                studioCurrentFolderStructure = folderData;
-                renderStudioFolderTree();
+            if (folderData && folderData.path) {
+                // Évite d'ajouter des doublons
+                const exists = studioFoldersList.some(f => f.path === folderData.path);
+                if (!exists) {
+                    studioFoldersList.push(folderData);
+                    saveSavedStudioFoldersList();
+                    renderStudioFolderTree();
+                }
             }
         } else {
             console.error("❌ Méthode selectFolderRecursive indisponible dans electronAPI");
@@ -140,6 +214,45 @@ async function openStudioFolder() {
     } catch (err) {
         console.error("❌ Erreur lors de l'ouverture du dossier :", err);
     }
+}
+
+/**
+ * Recharge automatiquement tous les dossiers sauvegardés au lancement
+ */
+async function loadSavedStudioFolders() {
+    let savedPaths = [];
+    try {
+        savedPaths = JSON.parse(localStorage.getItem("nikon_studio_folders_paths") || "[]");
+    } catch (e) {
+        savedPaths = [];
+    }
+
+    // Rétro-compatibilité si un seul dossier était sauvegardé sous l'ancienne clé
+    const oldPath = localStorage.getItem("nikon_studio_last_folder");
+    if (oldPath && !savedPaths.includes(oldPath)) {
+        savedPaths.push(oldPath);
+        localStorage.removeItem("nikon_studio_last_folder");
+    }
+
+    if (!savedPaths.length) return;
+
+    studioFoldersList = [];
+
+    for (const folderPath of savedPaths) {
+        try {
+            if (window.electronAPI && typeof window.electronAPI.readFolderRecursive === "function") {
+                const folderData = await window.electronAPI.readFolderRecursive(folderPath);
+                if (folderData) {
+                    studioFoldersList.push(folderData);
+                }
+            }
+        } catch (err) {
+            console.error("❌ Impossible de recharger le dossier :", folderPath, err);
+        }
+    }
+
+    saveSavedStudioFoldersList();
+    renderStudioFolderTree();
 }
 
 
@@ -282,7 +395,6 @@ async function loadImageInStudio(filePath) {
             }, true);
         }
 
-        // Affiche le bouton d'exportation JPG dès qu'une photo est active
         const btnExportJpg = document.getElementById("exportJpg");
         if (btnExportJpg) {
             btnExportJpg.style.display = "inline-block";
@@ -311,7 +423,6 @@ function initButtons() {
     const btnExportNCP         = document.getElementById("exportNCP");
     const btnStudioOpenFolder  = document.getElementById("btnStudioOpenFolder");
 
-    // Éléments du menu déroulant d'importation de profils
     const btnImportMenu        = document.getElementById("btnImportProfileMenu");
     const dropdownContent      = document.getElementById("importDropdownContent");
     const btnNP3               = document.getElementById("openNP3");
@@ -343,7 +454,6 @@ function initButtons() {
 
     switchToView("view-studio");
 
-    // Instanciation ImageProcessor
     if (!window.imageProcessor && typeof ImageProcessor !== "undefined") {
         window.imageProcessor = new ImageProcessor("previewCanvas");
     }
@@ -352,12 +462,10 @@ function initButtons() {
         window.initMasksController(window.imageProcessor);
     }
 
-    /* 1. Bouton "＋ Ouvrir" du panneau Dossier Studio */
     if (btnStudioOpenFolder) {
         btnStudioOpenFolder.onclick = openStudioFolder;
     }
 
-    /* 2. Navigation entre Vues */
     if (btnOpenProfiles) {
         btnOpenProfiles.onclick = async () => {
             switchToView("view-profiles");
@@ -395,7 +503,6 @@ function initButtons() {
         };
     }
 
-    /* 3. Menu Déroulant & Importation NP3 / NCP */
     if (btnImportMenu && dropdownContent) {
         btnImportMenu.onclick = (e) => {
             e.stopPropagation();
@@ -432,7 +539,6 @@ function initButtons() {
     if (btnNP3) btnNP3.onclick = importProfileFile;
     if (btnNCP) btnNCP.onclick = importProfileFile;
 
-    /* 4. Exports NP3 / NCP / JPG */
     if (btnSaveNP3) {
         btnSaveNP3.onclick = async () => {
             const activePC = activeProfilePC || profileImageProcessor?.pictureControl;
@@ -460,7 +566,6 @@ function initButtons() {
         };
     }
 
-    /* 5. Module Rotation & Miroir */
     const btnRotateLeft   = document.getElementById("btnRotateLeft");
     const btnRotateRight  = document.getElementById("btnRotateRight");
     const btnFlipH        = document.getElementById("btnFlipH");
@@ -515,7 +620,6 @@ function initButtons() {
         };
     }
 
-    // Initialise le panneau de droite avec un profil par défaut dès l'ouverture
     if (typeof window.renderPictureControlPanel === "function") {
         window.renderPictureControlPanel("pictureControlStatus", null, {
             compact: false,
@@ -529,16 +633,20 @@ function initButtons() {
     if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
 }
 
-// Raccourci Menu Electron ("Fichier -> Ouvrir") redirigé vers l'ouverture de dossier
 if (window.electronAPI?.onMenuOpenNEF) {
     window.electronAPI.onMenuOpenNEF(() => {
         openStudioFolder();
     });
 }
 
-// Lancement au chargement du DOM
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initButtons);
-} else {
+// Initialisation globale + Rechargement automatique des dossiers
+const initApp = async () => {
     initButtons();
+    await loadSavedStudioFolders();
+};
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initApp);
+} else {
+    initApp();
 }

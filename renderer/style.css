@@ -702,3 +702,69 @@ canvas {
     background: #1a73e8;
     color: #ffffff;
 }
+
+/* Zone centrale d'aperçu */
+.preview-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+/* =========================================================
+   CONTENEUR ET SUPERPOSITION CANVAS (Studio & Profils)
+========================================================= */
+.preview-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+.canvas-container {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 200px;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    background-color: #141414;
+}
+
+.canvas-stack {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Superposition des deux Canvas : l'image et le masque */
+.canvas-stack canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: block;
+    /* On laisse le JS piloter la largeur/hauteur exacte */
+}
+
+/* Le masque laisse passer les événements de la souris vers le previewCanvas */
+#maskOverlayCanvas {
+    pointer-events: none !important;
+}
+.preview-panel {
+    display: flex;
+    flex-direction: column !important;
+    align-items: center;
+    justify-content: space-between;
+}

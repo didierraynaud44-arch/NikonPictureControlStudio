@@ -17,16 +17,6 @@ class ImageProcessor {
         this.overlayCanvas = document.getElementById("maskOverlayCanvas");
         this.overlayCtx = this.overlayCanvas ? this.overlayCanvas.getContext("2d") : null;
 
-        // 🔍 Zoom & Pan
-        this.zoom = 1;
-        this.minZoom = 0.5;
-        this.maxZoom = 5;
-        this.panX = 0;
-        this.panY = 0;
-        this.isDragging = false;
-        this.dragStartX = 0;
-        this.dragStartY = 0;
-
         // 🔄 Orientation & Rotation
         this.transform = {
             rotation: 0,   // Angle en degrés (ex: 90, -90, 12.5...)
@@ -70,8 +60,6 @@ class ImageProcessor {
         if (typeof LensCorrectionFilter !== "undefined") this.pipeline.add(new LensCorrectionFilter());
         if (typeof VignetteFilter !== "undefined") this.pipeline.add(new VignetteFilter());
         if (typeof DenoiseFilter !== "undefined") this.pipeline.add(new DenoiseFilter());
-
-        this.initZoomAndPanEvents();
     }
 
     /* --- Gestion des Transformations (Rotation & Miroir) --- */
@@ -85,60 +73,6 @@ class ImageProcessor {
 
     resetTransform() {
         this.transform = { rotation: 0, flipH: false, flipV: false };
-    }
-
-    initZoomAndPanEvents() {
-        const canvas = this.display?.canvas;
-        if (!canvas) return;
-
-        canvas.addEventListener("wheel", (e) => {
-            e.preventDefault();
-            const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-            const newZoom = Math.min(Math.max(this.zoom * zoomFactor, this.minZoom), this.maxZoom);
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-
-            this.panX = mouseX - (mouseX - this.panX) * (newZoom / this.zoom);
-            this.panY = mouseY - (mouseY - this.panY) * (newZoom / this.zoom);
-            this.zoom = newZoom;
-            this.render();
-        }, { passive: false });
-
-        canvas.addEventListener("mousedown", (e) => {
-            if (e.button !== 0) return;
-            if (this.maskController && typeof this.maskController.shouldInterceptMouseEvent === "function"
-                && this.maskController.shouldInterceptMouseEvent(e.clientX, e.clientY)) return;
-            this.isDragging = true;
-            this.dragStartX = e.clientX - this.panX;
-            this.dragStartY = e.clientY - this.panY;
-            canvas.style.cursor = "grabbing";
-        });
-
-        window.addEventListener("mousemove", (e) => {
-            if (!this.isDragging) return;
-            if (this.maskController && (this.maskController.isDrawing || this.maskController.editState)) return;
-            this.panX = e.clientX - this.dragStartX;
-            this.panY = e.clientY - this.dragStartY;
-            this.render();
-        });
-
-        window.addEventListener("mouseup", () => {
-            if (this.isDragging) {
-                this.isDragging = false;
-                if (canvas) canvas.style.cursor = "grab";
-            }
-        });
-
-        canvas.addEventListener("dblclick", () => this.resetZoom());
-        canvas.style.cursor = "grab";
-    }
-
-    resetZoom() {
-        this.zoom = 1;
-        this.panX = 0;
-        this.panY = 0;
-        this.render();
     }
 
     createRotatedCanvas(img, orientation = 1, targetWidth = null) {
@@ -194,10 +128,7 @@ class ImageProcessor {
                     aperture: metadata.aperture || 0
                 };
 
-                this.zoom = 1;
-                this.panX = 0;
-                this.panY = 0;
-                this.resetTransform(); // Réinitialise la rotation/miroir sur la nouvelle image
+                this.resetTransform();
 
                 const fullCanvas = this.createRotatedCanvas(img, this.currentOrientation);
                 const fullCtx = fullCanvas.getContext("2d");
@@ -207,17 +138,11 @@ class ImageProcessor {
                 const previewCtx = previewCanvas.getContext("2d");
                 this.previewBuffer = previewCtx.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
 
-                if (this.display && this.display.canvas) {
-                    this.display.canvas.width = previewCanvas.width;
-                    this.display.canvas.height = previewCanvas.height;
-                }
-
                 if (this.overlayCanvas) {
                     this.overlayCanvas.width = previewCanvas.width;
                     this.overlayCanvas.height = previewCanvas.height;
                 }
 
-                this.initZoomAndPanEvents();
                 console.log(`✅ Image chargée (${fullCanvas.width}x${fullCanvas.height}) | Objectif: ${this.currentLensInfo.model}`);
                 this.render();
                 resolve(this.originalRawBuffer);
@@ -314,9 +239,7 @@ class ImageProcessor {
 
     render() {
         const sourceBuffer = this.previewBuffer || this.originalRawBuffer;
-        if (!sourceBuffer || !this.display || !this.display.canvas) return;
-
-        const canvas = this.display.canvas;
+        if (!sourceBuffer || !this.display) return;
 
         let currentImageData = new ImageData(
             new Uint8ClampedArray(sourceBuffer.data),
@@ -344,37 +267,12 @@ class ImageProcessor {
             }
         }
 
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = currentImageData.width;
-        tempCanvas.height = currentImageData.height;
-        const tempCtx = tempCanvas.getContext("2d");
-        tempCtx.putImageData(currentImageData, 0, 0);
-
-        const ctx = canvas.getContext("2d");
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // --- Application des Transformations (Zoom / Pan / Rotation / Miroir) ---
-        ctx.save();
+        // Transmettre l'image traitée et les transformations à DisplayCanvas
+        if (typeof this.display.setTransform === "function") {
+            this.display.setTransform(this.transform);
+        }
         
-        // 1. Zoom & Pan
-        ctx.translate(this.panX, this.panY);
-        ctx.scale(this.zoom, this.zoom);
-
-        // 2. Rotation & Miroir autour du centre du Canvas
-        const centerX = canvas.width / 2;
-        const centerY = canvas.height / 2;
-
-        ctx.translate(centerX, centerY);
-        ctx.rotate((this.transform.rotation * Math.PI) / 180);
-        ctx.scale(
-            this.transform.flipH ? -1 : 1,
-            this.transform.flipV ? -1 : 1
-        );
-        ctx.translate(-centerX, -centerY);
-
-        // 3. Dessin de l'image
-        ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
-        ctx.restore();
+        this.display.draw(currentImageData);
 
         if (this.enableMasks) this.renderMaskOverlay();
     }
@@ -390,8 +288,9 @@ class ImageProcessor {
         if (!this.showMaskOverlay) return;
 
         ctx.save();
-        ctx.translate(this.panX, this.panY);
-        ctx.scale(this.zoom, this.zoom);
+        const zoom = this.display.scale || 1;
+        ctx.translate(this.display.offsetX || 0, this.display.offsetY || 0);
+        ctx.scale(zoom, zoom);
 
         const centerX = canvas.width / 2;
         const centerY = canvas.height / 2;
@@ -417,16 +316,16 @@ class ImageProcessor {
         }
 
         for (const { mask, live } of masksToDraw) {
-            this._drawMaskShape(ctx, canvas.width, canvas.height, mask, live);
+            this._drawMaskShape(ctx, canvas.width, canvas.height, mask, live, zoom);
         }
 
         ctx.restore();
     }
 
-    _drawMaskShape(ctx, width, height, mask, live) {
-        ctx.lineWidth = live ? 2 / this.zoom : 1.5 / this.zoom;
+    _drawMaskShape(ctx, width, height, mask, live, zoom = 1) {
+        ctx.lineWidth = live ? 2 / zoom : 1.5 / zoom;
         ctx.strokeStyle = live ? "#ffffff" : "#5865f2";
-        ctx.setLineDash(live ? [] : [6 / this.zoom, 4 / this.zoom]);
+        ctx.setLineDash(live ? [] : [6 / zoom, 4 / zoom]);
 
         if (mask.type === "linear") {
             const g = mask.geometry;
@@ -443,7 +342,7 @@ class ImageProcessor {
             const perpX = -dy / len, perpY = dx / len;
             const bandHalf = Math.max(width, height);
 
-            ctx.setLineDash([4 / this.zoom, 4 / this.zoom]);
+            ctx.setLineDash([4 / zoom, 4 / zoom]);
             [[ax, ay], [bx, by]].forEach(([px, py]) => {
                 ctx.beginPath();
                 ctx.moveTo(px - perpX * bandHalf, py - perpY * bandHalf);
@@ -464,14 +363,14 @@ class ImageProcessor {
 
             ctx.setLineDash([]);
             ctx.beginPath();
-            ctx.arc(cx, cy, 3 / this.zoom, 0, Math.PI * 2);
+            ctx.arc(cx, cy, 3 / zoom, 0, Math.PI * 2);
             ctx.fillStyle = ctx.strokeStyle;
             ctx.fill();
 
         } else if (mask.type === "brush") {
             const strokes = mask.geometry.strokes || [];
-            ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
-            ctx.lineWidth = (live ? 2 : 1.5) / this.zoom;
+            ctx.setLineDash([4 / zoom, 3 / zoom]);
+            ctx.lineWidth = (live ? 2 : 1.5) / zoom;
             ctx.strokeStyle = live ? "#ffffff" : "#5865f2";
             ctx.lineCap = "round";
             ctx.lineJoin = "round";
@@ -516,7 +415,6 @@ class ImageProcessor {
         const tempCtx = tempCanvas.getContext("2d");
         tempCtx.putImageData(fullResImageData, 0, 0);
 
-        // Canvas d'exportation avec application de la rotation et du miroir
         const exportCanvas = document.createElement("canvas");
         exportCanvas.width = fullResImageData.width;
         exportCanvas.height = fullResImageData.height;

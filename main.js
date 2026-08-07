@@ -1,5 +1,5 @@
 /* =======================================================
-   1. Imports des modules Node & Electron
+    1. Imports des modules Node & Electron
 ======================================================= */
 const {
     app,
@@ -14,7 +14,7 @@ const fs = require("fs");
 const os = require("os");
 
 /* =======================================================
-   2. Imports des moteurs applicatifs & services
+    2. Imports des moteurs applicatifs & services
 ======================================================= */
 const pictureControlEngine = require("./services/pictureControlEngine");
 const { readNEF } = require("./engine/nefReader");
@@ -34,7 +34,7 @@ const { loadNP3, saveNP3, saveNCP } = require("./services/np3Manager");
 let mainWindow = null;
 
 /* =======================================================
-   3. Création de la fenêtre principale
+    3. Création de la fenêtre principale
 ======================================================= */
 
 function createMainWindow() {
@@ -57,7 +57,7 @@ function createMainWindow() {
 }
 
 /* =======================================================
-   4. Menu supérieur de l'application
+    4. Menu supérieur de l'application
 ======================================================= */
 
 function createAppMenu() {
@@ -90,7 +90,7 @@ function createAppMenu() {
 }
 
 /* =======================================================
-   5. Handlers IPC : Ouverture des fichiers & Arborescence
+    5. Handlers IPC : Ouverture des fichiers & Arborescence
 ======================================================= */
 
 const ALL_IMAGE_EXTENSIONS = [
@@ -138,7 +138,13 @@ ipcMain.handle("select-folder-recursive", async () => {
     return scanDirectoryRecursive(result.filePaths[0]);
 });
 
-// --- Ouverture d'un fichier Image ou RAW via boite de dialogue ---
+// Handler pour recharger directement un dossier sauvegardé sans boîte de dialogue
+ipcMain.handle("read-folder-recursive", async (event, folderPath) => {
+    if (!folderPath || !fs.existsSync(folderPath)) return null;
+    return scanDirectoryRecursive(folderPath);
+});
+
+// --- Ouverture d'un fichier Image ou RAW via boîte de dialogue ---
 ipcMain.handle("open-nef", async () => {
     const result = await dialog.showOpenDialog({
         title: "Choisir un fichier Image ou RAW",
@@ -207,7 +213,7 @@ ipcMain.handle("open-nef", async () => {
     }
 });
 
-// --- Decodage direct RAW ---
+// --- Décodage direct RAW ---
 ipcMain.handle("decode-raw", async (event, filePath) => {
     try {
         const ext = path.extname(filePath).toLowerCase();
@@ -247,7 +253,7 @@ ipcMain.handle("loadNP3", async () => {
     }
 });
 
-// --- Lecture directe d'un fichier sans boite de dialogue ---
+// --- Lecture directe d'un fichier sans boîte de dialogue ---
 ipcMain.handle("read-file-direct", async (event, filePath) => {
     if (!filePath || !fs.existsSync(filePath)) return null;
 
@@ -295,7 +301,7 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
 });
 
 /* =======================================================
-   6. Handlers IPC : Moteur Picture Control Engine
+    6. Handlers IPC : Moteur Picture Control Engine
 ======================================================= */
 
 ipcMain.handle("pc-get", () => {
@@ -313,7 +319,7 @@ ipcMain.handle("pc-reset", () => {
 });
 
 /* =======================================================
-   7. Handlers IPC : Exportation & Sauvegarde (NP3, NCP, JPEG)
+    7. Handlers IPC : Exportation & Sauvegarde (NP3, NCP, JPEG)
 ======================================================= */
 
 ipcMain.handle("dialog:saveNP3", async (event, pcData) => {
@@ -405,7 +411,7 @@ ipcMain.handle("export-ncp", async (event, pcData) => {
 });
 
 /* =======================================================
-   8. Handlers IPC : Catalogue Photos
+    8. Handlers IPC : Catalogue Photos
 ======================================================= */
 
 ipcMain.handle("catalog:select-folder", async () => {
@@ -470,8 +476,14 @@ ipcMain.handle("catalog:get-photos", async (event, folderPath) => {
     }
 });
 
+// Forcer l'utilisation de la carte graphique haute performance
+app.commandLine.appendSwitch("ignore-gpu-blocklist");
+app.commandLine.appendSwitch("enable-gpu-rasterization");
+app.commandLine.appendSwitch("enable-zero-copy");
+app.commandLine.appendSwitch("force_high_performance_gpu");
+
 /* =======================================================
-   9. Cycle de vie de l'application Electron
+    9. Cycle de vie de l'application Electron
 ======================================================= */
 
 app.whenReady().then(() => {

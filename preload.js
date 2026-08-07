@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     readFileDirect: (filePath) => ipcRenderer.invoke("read-file-direct", filePath),
     loadNP3: () => ipcRenderer.invoke("loadNP3"),
     selectFolderRecursive: () => ipcRenderer.invoke("select-folder-recursive"),
+    readFolderRecursive: (folderPath) => ipcRenderer.invoke("read-folder-recursive", folderPath), // 👈 Canal d'ouverture auto
 
     // 2. Gestion du Picture Control Engine
     updatePC: (key, value) => ipcRenderer.invoke("pc-update", key, value),

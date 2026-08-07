@@ -1,6 +1,6 @@
 {
   "name": "nikon-picture-control-studio",
-  "version": "0.2.9",
+  "version": "0.2.11",
   "description": "Éditeur Nikon Picture Control",
   "main": "main.js",
   "scripts": {
