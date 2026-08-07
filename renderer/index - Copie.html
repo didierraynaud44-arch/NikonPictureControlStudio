@@ -40,37 +40,14 @@
             </div>
         </aside>
 
-        <!-- Colonne Centre : Canvas & EXIF & Grille Batch -->
+        <!-- Colonne Centre : Canvas & EXIF -->
         <section class="preview-panel">
-            <!-- Barre de mode d'affichage -->
-        <div class="view-mode-toolbar">
-                <div class="view-mode-switch">
-                    <button id="btnViewSingle" class="btn-tool active" title="Affichage unique">🖼️ Photo</button>
-                    <button id="btnViewGrid" class="btn-tool" title="Affichage galerie">⣿ Galerie (<span id="selectedCount">0</span>)</button>
-                </div>
-                <div class="view-mode-actions">
-                    <button id="btnBatchExport" class="btn-tool btn-primary" style="display: none;">
-                        💾 Exporter la sélection
-                    </button>
-                </div>
-            </div>
-
-            <!-- Mode Photo Seule (Actuel) -->
-            <div id="singleImageContainer" class="canvas-container">
+            <div class="canvas-container">
                 <div class="canvas-stack">
                     <canvas id="previewCanvas"></canvas>
                     <canvas id="maskOverlayCanvas"></canvas>
                 </div>
             </div>
-
-            <!-- Mode Galerie Grille (Nouveau) -->
-            <div id="gridImageContainer" class="grid-container" style="display: none;">
-                <div class="grid-scroll-area" id="gridItemsWrapper">
-                    <!-- Les cartes images seront générées dynamiquement ici -->
-                </div>
-            </div>
-
-            <!-- Barre EXIF (Conservée sous le conteneur) -->
             <div id="exifInfo" class="exif-bar">
                 <span id="exifCamera">-</span> | 
                 <span id="exifLens">-</span> | 
@@ -138,11 +115,7 @@
 
     <!-- MODALE D'EXPORTATION CONFIGURABLE -->
     <div id="exportModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
-        <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:460px; color:#e8eaed; font-family:sans-serif;">
-            
-            <!-- Bouton Croix Fermer Modale -->
-            <button id="btnCloseExportModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer">✕</button>
-
+        <div style="background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:460px; color:#e8eaed; font-family:sans-serif;">
             <h3 style="margin-top:0; color:#5865f2; font-size:16px;">📤 Exporter l'image</h3>
 
             <!-- 1. Dossier de destination -->
@@ -243,7 +216,6 @@
     <script src="core/ImageProcessor.js"></script>
     <script src="components/exifPanel.js"></script>
     <script src="components/pictureControlPanel.js"></script>
-    <script src="components/GridManager.js"></script>
 
     <!-- Masques locaux (Studio uniquement) -->
     <script src="core/MaskEngine.js"></script>

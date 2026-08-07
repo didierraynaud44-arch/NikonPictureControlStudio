@@ -21,7 +21,6 @@ try {
  */
 function collectAllFilesFromFolder(node) {
     let files = [];
-    if (!node) return files;
     if (node.files && node.files.length > 0) {
         files = files.concat(node.files);
     }
@@ -202,9 +201,9 @@ function renderStudioFolderTree() {
         container.appendChild(rootItem);
     });
 
-    // Alimentation initiale de la galerie avec l'ensemble des dossiers si présents
+    // Alimentation initiale de la galerie avec le premier dossier si présent
     if (studioFoldersList.length > 0 && window.gridManager) {
-        window.gridManager.setImages(studioFoldersList);
+        window.gridManager.setImages(collectAllFilesFromFolder(studioFoldersList[0]));
     }
 }
 
@@ -214,17 +213,9 @@ function removeStudioFolder(index) {
     renderStudioFolderTree();
 }
 
-/* =========================================================
-    PERSISTANCE DES DOSSIERS CATALOGUE (SÉCURISÉE)
-========================================================= */
-
 function saveSavedStudioFoldersList() {
-    try {
-        const paths = studioFoldersList.map(f => (f && typeof f === "object") ? f.path : f).filter(Boolean);
-        localStorage.setItem("nikon_studio_folders_paths", JSON.stringify(paths));
-    } catch (e) {
-        console.error("❌ Erreur lors de la sauvegarde des chemins :", e);
-    }
+    const paths = studioFoldersList.map(f => f.path);
+    localStorage.setItem("nikon_studio_folders_paths", JSON.stringify(paths));
 }
 
 async function openStudioFolder() {
@@ -250,19 +241,22 @@ async function openStudioFolder() {
 async function loadSavedStudioFolders() {
     let savedPaths = [];
     try {
-        const rawData = localStorage.getItem("nikon_studio_folders_paths");
-        savedPaths = rawData ? JSON.parse(rawData) : [];
+        savedPaths = JSON.parse(localStorage.getItem("nikon_studio_folders_paths") || "[]");
     } catch (e) {
-        console.error("❌ Erreur de lecture de localStorage :", e);
         savedPaths = [];
     }
 
-    if (!Array.isArray(savedPaths) || savedPaths.length === 0) return;
+    const oldPath = localStorage.getItem("nikon_studio_last_folder");
+    if (oldPath && !savedPaths.includes(oldPath)) {
+        savedPaths.push(oldPath);
+        localStorage.removeItem("nikon_studio_last_folder");
+    }
+
+    if (!savedPaths.length) return;
 
     studioFoldersList = [];
 
     for (const folderPath of savedPaths) {
-        if (!folderPath) continue;
         try {
             if (window.electronAPI && typeof window.electronAPI.readFolderRecursive === "function") {
                 const folderData = await window.electronAPI.readFolderRecursive(folderPath);
@@ -278,6 +272,7 @@ async function loadSavedStudioFolders() {
     saveSavedStudioFoldersList();
     renderStudioFolderTree();
 }
+
 
 /* =========================================================
     MODULE PROFILE MANAGER (NP3 / NCP)
@@ -348,6 +343,7 @@ function renderNp3Library() {
 function pathFileName(filePath) {
     return filePath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, "");
 }
+
 
 /* =========================================================
     CHARGEMENT STUDIO & RENDERER
@@ -427,6 +423,11 @@ async function loadImageInStudio(filePath) {
 }
 window.loadImageInStudio = loadImageInStudio;
 
+
+/* =========================================================
+    MODULE EXPORTATION
+========================================================= */
+
 /* =========================================================
     MODULE EXPORTATION (Corrigé Single & Galerie)
 ========================================================= */
@@ -485,15 +486,15 @@ function initExportModal() {
 
             try {
                 if (isSingleMode) {
+                    // Export Unique (Mode Photo)
                     const canvas = document.getElementById("previewCanvas");
                     if (!canvas) return;
 
                     const dataUrl = canvas.toDataURL(config.format, config.quality);
                     const base64Data = dataUrl.split(",")[1];
 
-                    const saveFunc = window.electronAPI?.saveImageFile || window.electronAPI?.saveJPEG;
-                    if (saveFunc) {
-                        const res = await saveFunc({
+                    if (window.electronAPI && typeof window.electronAPI.saveImageFile === "function") {
+                        const res = await window.electronAPI.saveImageFile({
                             defaultName: currentNefFileName || "export-photo",
                             base64Data: base64Data,
                             exportConfig: config
@@ -501,6 +502,7 @@ function initExportModal() {
                         alert(res?.success ? " Export réussi !" : ` Erreur d'export : ${res?.error || "Échec inconnu"}`);
                     }
                 } else if (window.gridManager && window.gridManager.selectedIds.size > 0) {
+                    // Export Multiple (Mode Galerie)
                     await window.gridManager.exportSelectedImages(config);
                 }
             } catch (err) {
@@ -510,7 +512,6 @@ function initExportModal() {
         };
     }
 }
-
 /* =========================================================
     INITIALISATION ET EVENEMENTS IHM
 ========================================================= */

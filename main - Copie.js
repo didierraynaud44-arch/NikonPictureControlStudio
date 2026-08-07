@@ -165,12 +165,7 @@ ipcMain.handle("select-folder-recursive", async () => {
 // Recharger un dossier sauvegardé sans boîte de dialogue
 ipcMain.handle("read-folder-recursive", async (event, folderPath) => {
     if (!folderPath || !fs.existsSync(folderPath)) return null;
-    try {
-        return scanDirectoryRecursive(folderPath);
-    } catch (err) {
-        console.error("❌ Erreur lecture dossier sauvegardé :", folderPath, err);
-        return null;
-    }
+    return scanDirectoryRecursive(folderPath);
 });
 
 // Sélectionner le dossier de destination pour l'exportation
