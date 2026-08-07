@@ -182,6 +182,7 @@ class DisplayCanvas {
             const controller = window.imageProcessor?.maskController || window.masksController;
             if (controller && typeof controller.shouldInterceptMouseEvent === "function") {
                 if (controller.shouldInterceptMouseEvent(e.clientX, e.clientY)) {
+                    e.stopImmediatePropagation();
                     return;
                 }
             }
@@ -190,7 +191,7 @@ class DisplayCanvas {
             this.startX = e.clientX - this.panX;
             this.startY = e.clientY - this.panY;
             this.canvas.style.cursor = "grabbing";
-        });
+        }, true);
 
         window.addEventListener("mousemove", (e) => {
             if (!this.isDragging) return;

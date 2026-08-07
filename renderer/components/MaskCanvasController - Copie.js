@@ -2,7 +2,7 @@
     Nikon Picture Control Studio - Mask Canvas Controller
 =========================================================*/
 
-const HIT_TOLERANCE_PX = 24;
+const HIT_TOLERANCE_PX = 24; // Zone de tolérance élargie pour attraper facilement les masques
 
 class MaskCanvasController {
     constructor(imageProcessor) {
@@ -10,24 +10,20 @@ class MaskCanvasController {
         this.mode = null;        // null | "linear" | "radial" | "brush"
         this.isDrawing = false;
         this.pendingMask = null;
+
         this.editState = null;
 
         this.brushSize = 0.05;
         this.brushHardness = 0.5;
-        this.onMaskChange = null;
 
-        this._boundMouseDown = null;
-        this._boundMouseMove = null;
-        this._boundMouseUp = null;
+        this.onMaskChange = null;
 
         this._bindEvents();
     }
 
     startNewMask(type) {
         this.mode = type;
-        this.isDrawing = false;
-        this.pendingMask = null;
-        this._setCursor("crosshair");
+        this._setCursor();
     }
 
     cancelMode() {
@@ -44,6 +40,10 @@ class MaskCanvasController {
         canvas.style.cursor = cursor || (this.mode ? "crosshair" : "grab");
     }
 
+    /**
+     * Convertit une position souris (écran) en coordonnées normalisées (0..1)
+     * parfaitement alignées avec le repère de la photo dans DisplayCanvas.
+     */
     _canvasToNormalized(clientX, clientY) {
         const display = this.imageProcessor?.display;
         if (!display || !display.canvas || !display.offscreenCanvas.width) {
@@ -53,15 +53,18 @@ class MaskCanvasController {
         const canvas = display.canvas;
         const rect = canvas.getBoundingClientRect();
 
+        // 1. Position du clic relative à la taille affichée du canvas HTML
         const mouseX = clientX - rect.left;
         const mouseY = clientY - rect.top;
 
+        // Ratio entre la résolution réelle du canvas HTML et sa taille CSS affichée
         const cssScaleX = canvas.width / rect.width;
         const cssScaleY = canvas.height / rect.height;
 
         const canvasX = mouseX * cssScaleX;
         const canvasY = mouseY * cssScaleY;
 
+        // 2. Paramètres d'affichage réels de DisplayCanvas
         const w = canvas.width;
         const h = canvas.height;
         const imgW = display.offscreenCanvas.width;
@@ -70,12 +73,15 @@ class MaskCanvasController {
         const panX = display.panX || 0;
         const panY = display.panY || 0;
 
+        // 3. Calcul de l'origine exacte (Coin haut-gauche de la photo dessinée)
         const drawX = (w - imgW * scale) / 2 + panX;
         const drawY = (h - imgH * scale) / 2 + panY;
 
+        // 4. Coordonnées en pixels sur l'image source brute
         const imgX = (canvasX - drawX) / scale;
         const imgY = (canvasY - drawY) / scale;
 
+        // 5. Normalisation entre 0 et 1
         return {
             x: Math.min(1, Math.max(0, imgX / imgW)),
             y: Math.min(1, Math.max(0, imgY / imgH))
@@ -105,6 +111,7 @@ class MaskCanvasController {
             const ry = Math.max(0.001, g.radiusY);
             const d = Math.sqrt(((pos.x - g.cx) / rx) ** 2 + ((pos.y - g.cy) / ry) ** 2);
 
+            // Zone élargie pour attraper facilement le bord ou le centre du masque radial
             if (d >= 0.75 && d <= 1.25) return { type: "resize" };
             if (d < 0.75) return { type: "move" };
             return null;
@@ -129,8 +136,8 @@ class MaskCanvasController {
     }
 
     _applyEdit(clientX, clientY) {
-        const mask = window.MasksManager?.getActiveMask?.();
-        if (!mask || !this.editState) return;
+        const mask = window.MasksManager?.getMask(this.editState.maskId);
+        if (!mask) return;
         const pos = this._canvasToNormalized(clientX, clientY);
         const hit = this.editState.hit;
 
@@ -181,24 +188,13 @@ class MaskCanvasController {
     }
 
     _bindEvents() {
-        // Nettoyage des anciens écouteurs pour éviter les doublons
-        if (this._boundMouseDown) window.removeEventListener("mousedown", this._boundMouseDown, true);
-        if (this._boundMouseMove) window.removeEventListener("mousemove", this._boundMouseMove);
-        if (this._boundMouseUp) window.removeEventListener("mouseup", this._boundMouseUp);
+        const canvas = this.imageProcessor?.display?.canvas;
+        if (!canvas) return;
 
-        this._boundMouseDown = (e) => {
+        canvas.addEventListener("mousedown", (e) => {
             if (e.button !== 0) return;
 
-            const canvas = this.imageProcessor?.display?.canvas;
-            if (!canvas) return;
-
-            const rect = canvas.getBoundingClientRect();
-            const insideCanvas = (
-                e.clientX >= rect.left && e.clientX <= rect.right &&
-                e.clientY >= rect.top && e.clientY <= rect.bottom
-            );
-
-            if (this.mode && insideCanvas) {
+            if (this.mode) {
                 e.preventDefault();
                 e.stopPropagation();
 
@@ -227,7 +223,7 @@ class MaskCanvasController {
             }
 
             const activeMask = window.MasksManager?.getActiveMask?.();
-            if (activeMask && insideCanvas) {
+            if (activeMask) {
                 const hit = this._hitTest(activeMask, e.clientX, e.clientY);
                 if (hit) {
                     e.preventDefault();
@@ -238,9 +234,9 @@ class MaskCanvasController {
                     return;
                 }
             }
-        };
+        });
 
-        this._boundMouseMove = (e) => {
+        canvas.addEventListener("mousemove", (e) => {
             if (this.editState) {
                 e.preventDefault();
                 this._applyEdit(e.clientX, e.clientY);
@@ -262,13 +258,11 @@ class MaskCanvasController {
                     window.MasksManager.updateMaskGeometry(this.pendingMask.id, { radiusX: r, radiusY: r });
                 } else if (this.pendingMask.type === "brush") {
                     const mask = window.MasksManager.getMask(this.pendingMask.id);
-                    if (mask && mask.geometry.strokes) {
-                        const strokes = mask.geometry.strokes;
-                        strokes[strokes.length - 1].push({
-                            x: pos.x, y: pos.y, radius: this.brushSize, hardness: this.brushHardness
-                        });
-                        window.MasksManager.updateMaskGeometry(this.pendingMask.id, { strokes });
-                    }
+                    const strokes = mask.geometry.strokes;
+                    strokes[strokes.length - 1].push({
+                        x: pos.x, y: pos.y, radius: this.brushSize, hardness: this.brushHardness
+                    });
+                    window.MasksManager.updateMaskGeometry(this.pendingMask.id, { strokes });
                 }
 
                 this._notify();
@@ -281,11 +275,13 @@ class MaskCanvasController {
                 if (activeMask) {
                     const hit = this._hitTest(activeMask, e.clientX, e.clientY);
                     this._setCursor(this._cursorForHit(hit));
+                } else {
+                    this._setCursor("grab");
                 }
             }
-        };
+        });
 
-        this._boundMouseUp = () => {
+        window.addEventListener("mouseup", () => {
             if (this.editState) {
                 this.editState = null;
                 this._setCursor();
@@ -301,11 +297,7 @@ class MaskCanvasController {
             this._setCursor();
             this._notify();
             this._render();
-        };
-
-        window.addEventListener("mousedown", this._boundMouseDown, true);
-        window.addEventListener("mousemove", this._boundMouseMove);
-        window.addEventListener("mouseup", this._boundMouseUp);
+        });
     }
 
     _renderOverlayOnly() {

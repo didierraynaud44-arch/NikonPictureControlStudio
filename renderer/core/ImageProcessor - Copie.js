@@ -1,5 +1,5 @@
 /*=========================================================
-    Nikon Picture Control Studio - Image Processor (Fix Overlay)
+    Nikon Picture Control Studio - Image Processor (complet)
 =========================================================*/
 
 class ImageProcessor {
@@ -13,32 +13,55 @@ class ImageProcessor {
         this.currentLensInfo = null;
         this.display = new DisplayCanvas(canvasId);
 
+        // Calque de contour des masques (superposé, uniquement pour le Studio)
         this.overlayCanvas = document.getElementById("maskOverlayCanvas");
         this.overlayCtx = this.overlayCanvas ? this.overlayCanvas.getContext("2d") : null;
 
-        this.transform = { rotation: 0, flipH: false, flipV: false };
+        // 🔄 Orientation & Rotation
+        this.transform = {
+            rotation: 0,   // Angle en degrés (ex: 90, -90, 12.5...)
+            flipH: false,  // Miroir Horizontal
+            flipV: false   // Miroir Vertical
+        };
+
         this.pictureControl = null;
         this.pipeline = new RenderPipeline();
 
-        this.enableMasks = true;
+        // Masques locaux (Studio uniquement)
+        this.enableMasks = false;
         this.maskController = null;
         this.showMaskOverlay = true;
 
+        // ---------------------------------------------------------
+        // PIPELINE PICTURE CONTROL NIKON (Ordre d'exécution)
+        // ---------------------------------------------------------
+        // 1. Balance des Blancs (En tout premier)
         if (typeof WhiteBalanceFilter !== "undefined") this.pipeline.add(new WhiteBalanceFilter());
+
+        // 2. Filtres de détails
         if (typeof SharpenFilter !== "undefined") this.pipeline.add(new SharpenFilter());
         if (typeof MidRangeSharpenFilter !== "undefined") this.pipeline.add(new MidRangeSharpenFilter());
         if (typeof ClarityFilter !== "undefined") this.pipeline.add(new ClarityFilter());
+
+        // 3. Exposition et points
         if (typeof ExposureFilter !== "undefined") this.pipeline.add(new ExposureFilter());
         if (typeof BlackWhitePointFilter !== "undefined") this.pipeline.add(new BlackWhitePointFilter());
+
+        // 4. Courbe de ton et contraste
         if (typeof ToneCurveFilter !== "undefined") this.pipeline.add(new ToneCurveFilter());
         if (typeof ContrastFilter !== "undefined") this.pipeline.add(new ContrastFilter());
         if (typeof BrightnessFilter !== "undefined") this.pipeline.add(new BrightnessFilter());
         if (typeof HighlightsFilter !== "undefined") this.pipeline.add(new HighlightsFilter());
         if (typeof ShadowsFilter !== "undefined") this.pipeline.add(new ShadowsFilter());
+
+        // 5. Couleur
         if (typeof SaturationFilter !== "undefined") this.pipeline.add(new SaturationFilter());
         if (typeof ColorBlenderFilter !== "undefined") this.pipeline.add(new ColorBlenderFilter());
         if (typeof ColorGradingFilter !== "undefined") this.pipeline.add(new ColorGradingFilter());
+
         if (typeof MonochromeFilter !== "undefined") this.pipeline.add(new MonochromeFilter());
+
+        // 6. Effets secondaires et corrections
         if (typeof DehazeFilter !== "undefined") this.pipeline.add(new DehazeFilter());
         if (typeof VibranceFilter !== "undefined") this.pipeline.add(new VibranceFilter());
         if (typeof SCurveFilter !== "undefined") this.pipeline.add(new SCurveFilter());
@@ -47,10 +70,12 @@ class ImageProcessor {
         if (typeof DenoiseFilter !== "undefined") this.pipeline.add(new DenoiseFilter());
     }
 
+    /* --- Gestion des Transformations (Rotation & Miroir) --- */
     setTransform({ rotation, flipH, flipV }) {
         if (rotation !== undefined) this.transform.rotation = rotation;
         if (flipH !== undefined) this.transform.flipH = flipH;
         if (flipV !== undefined) this.transform.flipV = flipV;
+
         this.render();
     }
 
@@ -126,27 +151,39 @@ class ImageProcessor {
                     this.overlayCanvas.height = previewCanvas.height;
                 }
 
+                console.log(`✅ Image chargée (${fullCanvas.width}x${fullCanvas.height}) | Objectif: ${this.currentLensInfo.model}`);
                 this.render();
                 resolve(this.originalRawBuffer);
             };
 
-            img.onerror = (err) => reject(err);
+            img.onerror = (err) => {
+                console.error("❌ Erreur de chargement :", err);
+                reject(err);
+            };
+
             img.src = imageSrc;
         });
     }
 
     cleanPictureControl(pcData) {
         if (!pcData || typeof pcData !== "object") return {};
+
         const clean = { ...pcData };
+
         const parseVal = (val, defaultVal = 0) => {
-            if (typeof val === "number" && !isNaN(val)) return val === -128 ? 0 : val;
+            if (typeof val === "number" && !isNaN(val)) {
+                return val === -128 ? 0 : val;
+            }
             if (val === "Normal" || val === null || val === undefined) return defaultVal;
             const p = parseFloat(val);
-            return isNaN(p) || p === -128 ? defaultVal : p;
+            if (isNaN(p) || p === -128) return defaultVal;
+            return p;
         };
 
+        // Balance des Blancs
         clean.wbTemperature = parseVal(pcData.wbTemperature, 0);
         clean.wbTint        = parseVal(pcData.wbTint, 0);
+
         clean.sharpening = parseVal(pcData.sharpening ?? pcData.sharpning ?? pcData.sharpness, 0);
         clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRangeSharpning, 0);
         clean.clarity            = parseVal(clean.clarity, 0);
@@ -154,40 +191,62 @@ class ImageProcessor {
         clean.brightness         = parseVal(clean.brightness, 0);
         clean.saturation         = parseVal(clean.saturation, 0);
         clean.hue                = parseVal(clean.hue, 0);
+
         clean.highlights = parseVal(clean.highlights, 0);
         clean.shadows    = parseVal(clean.shadows, 0);
         clean.dehaze     = parseVal(clean.dehaze, 0);
         clean.vibrance   = parseVal(clean.vibrance, 0);
         clean.vignette   = parseVal(clean.vignette, 0);
         clean.denoise    = parseVal(clean.denoise, 0);
+
         clean.exposure   = parseVal(clean.exposure, 0);
         clean.blackPoint = parseVal(clean.blackPoint, 0);
-        clean.whitePoint = clean.whitePoint === undefined || clean.whitePoint === null ? 255 : parseVal(clean.whitePoint, 255);
+        clean.whitePoint = clean.whitePoint === undefined || clean.whitePoint === null
+            ? 255
+            : parseVal(clean.whitePoint, 255);
+
         clean.isMonochrome = clean.isMonochrome === true || clean.baseProfile === "MONOCHROME";
         clean.monoFilter   = clean.monoFilter || "None";
         clean.monoToning   = clean.monoToning || "None";
 
-        if (clean.isMonochrome) clean.saturation = -100;
+        if (clean.isMonochrome) {
+            clean.saturation = -100;
+        }
+
         return clean;
     }
 
     setPictureControl(pcData) {
         this.pictureControl = this.cleanPictureControl(pcData);
-        if (this.originalRawBuffer) this.render();
+        if (this.originalRawBuffer) {
+            this.render();
+        }
     }
 
     updateFilter(filterType, value) {
-        if (!this.pictureControl) this.pictureControl = {};
+        if (!this.pictureControl) {
+            this.pictureControl = {};
+        }
+
         if (filterType === "monochrome") {
             this.pictureControl.isMonochrome = Boolean(value);
-            this.pictureControl.saturation = value ? -100 : 0;
+            if (value) {
+                this.pictureControl.saturation = -100;
+            } else {
+                this.pictureControl.saturation = 0;
+                this.pictureControl.monoFilter = "None";
+                this.pictureControl.monoToning = "None";
+            }
         } else if (typeof value === "boolean") {
             this.pictureControl[filterType] = value;
         } else {
             const parsed = parseFloat(value);
             this.pictureControl[filterType] = isNaN(parsed) ? value : parsed;
         }
-        if (this.originalRawBuffer) this.render();
+
+        if (this.originalRawBuffer) {
+            this.render();
+        }
     }
 
     render() {
@@ -200,15 +259,18 @@ class ImageProcessor {
             sourceBuffer.height
         );
 
-        if (this.pictureControl && this.pipeline) {
+        if (this.pictureControl && this.pipeline && typeof this.pipeline.process === "function") {
             try {
                 const result = this.pipeline.process(currentImageData, this.pictureControl);
-                if (result && result.data) currentImageData = result;
+                if (result && result.data) {
+                    currentImageData = result;
+                }
             } catch (err) {
                 console.error("❌ Erreur pipeline :", err);
             }
         }
 
+        // Masques locaux (Studio uniquement)
         if (this.enableMasks && typeof MaskEngine !== "undefined" && typeof MasksManager !== "undefined") {
             try {
                 currentImageData = MaskEngine.applyAllMasks(currentImageData, MasksManager.getMasks(), this.pipeline);
@@ -217,26 +279,41 @@ class ImageProcessor {
             }
         }
 
+        // Transmettre l'image traitée et les transformations à DisplayCanvas
         if (typeof this.display.setTransform === "function") {
             this.display.setTransform(this.transform);
         }
         
         this.display.draw(currentImageData);
+
         if (this.enableMasks) this.renderMaskOverlay();
     }
 
     renderMaskOverlay() {
-        if (!this.overlayCanvas || !this.display || !this.display.offscreenCanvas.width) return;
+        if (!this.overlayCtx || !this.overlayCanvas) return;
         if (typeof MasksManager === "undefined") return;
 
+        const ctx = this.overlayCtx;
         const canvas = this.overlayCanvas;
-        const ctx = this.overlayCtx || canvas.getContext("2d");
-
-        canvas.width = this.display.canvas.width;
-        canvas.height = this.display.canvas.height;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         if (!this.showMaskOverlay) return;
+
+        ctx.save();
+        const zoom = this.display.scale || 1;
+        ctx.translate(this.display.offsetX || 0, this.display.offsetY || 0);
+        ctx.scale(zoom, zoom);
+
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+
+        ctx.translate(centerX, centerY);
+        ctx.rotate((this.transform.rotation * Math.PI) / 180);
+        ctx.scale(
+            this.transform.flipH ? -1 : 1,
+            this.transform.flipV ? -1 : 1
+        );
+        ctx.translate(-centerX, -centerY);
 
         const masksToDraw = [];
         const activeMask = MasksManager.getActiveMask();
@@ -250,37 +327,17 @@ class ImageProcessor {
             }
         }
 
-        if (masksToDraw.length === 0) return;
-
-        ctx.save();
-
-        // Synchronisation du repère visuel avec le centrage et le zoom de DisplayCanvas
-        const w = canvas.width;
-        const h = canvas.height;
-        const imgW = this.display.offscreenCanvas.width;
-        const imgH = this.display.offscreenCanvas.height;
-        const scale = this.display.scale || 1;
-        const panX = this.display.panX || 0;
-        const panY = this.display.panY || 0;
-
-        const drawX = (w - imgW * scale) / 2 + panX;
-        const drawY = (h - imgH * scale) / 2 + panY;
-
-        ctx.translate(drawX, drawY);
-        ctx.scale(scale, scale);
-
         for (const { mask, live } of masksToDraw) {
-            this._drawMaskShape(ctx, imgW, imgH, mask, live, scale);
+            this._drawMaskShape(ctx, canvas.width, canvas.height, mask, live, zoom);
         }
 
         ctx.restore();
     }
 
-    _drawMaskShape(ctx, width, height, mask, live, scale = 1) {
-        ctx.save();
-        ctx.lineWidth = live ? 2 / scale : 1.5 / scale;
-        ctx.strokeStyle = live ? "#ffffff" : "#00aaff";
-        ctx.fillStyle = live ? "#ffffff" : "#00aaff";
+    _drawMaskShape(ctx, width, height, mask, live, zoom = 1) {
+        ctx.lineWidth = live ? 2 / zoom : 1.5 / zoom;
+        ctx.strokeStyle = live ? "#ffffff" : "#5865f2";
+        ctx.setLineDash(live ? [] : [6 / zoom, 4 / zoom]);
 
         if (mask.type === "linear") {
             const g = mask.geometry;
@@ -297,7 +354,7 @@ class ImageProcessor {
             const perpX = -dy / len, perpY = dx / len;
             const bandHalf = Math.max(width, height);
 
-            ctx.setLineDash([4 / scale, 4 / scale]);
+            ctx.setLineDash([4 / zoom, 4 / zoom]);
             [[ax, ay], [bx, by]].forEach(([px, py]) => {
                 ctx.beginPath();
                 ctx.moveTo(px - perpX * bandHalf, py - perpY * bandHalf);
@@ -305,31 +362,30 @@ class ImageProcessor {
                 ctx.stroke();
             });
 
-            ctx.setLineDash([]);
-            [[ax, ay], [bx, by]].forEach(([px, py]) => {
-                ctx.beginPath();
-                ctx.arc(px, py, 5 / scale, 0, Math.PI * 2);
-                ctx.fill();
-            });
-
         } else if (mask.type === "radial") {
             const g = mask.geometry;
             const cx = g.cx * width, cy = g.cy * height;
             const rx = Math.max(1, g.radiusX * width);
             const ry = Math.max(1, g.radiusY * height);
-            const angleRad = ((g.angle || 0) * Math.PI) / 180;
+            const angleRad = (g.angle || 0) * Math.PI / 180;
 
             ctx.beginPath();
             ctx.ellipse(cx, cy, rx, ry, angleRad, 0, Math.PI * 2);
             ctx.stroke();
 
+            ctx.setLineDash([]);
             ctx.beginPath();
-            ctx.arc(cx, cy, 4 / scale, 0, Math.PI * 2);
+            ctx.arc(cx, cy, 3 / zoom, 0, Math.PI * 2);
+            ctx.fillStyle = ctx.strokeStyle;
             ctx.fill();
 
         } else if (mask.type === "brush") {
             const strokes = mask.geometry.strokes || [];
-            ctx.setLineDash([4 / scale, 3 / scale]);
+            ctx.setLineDash([4 / zoom, 3 / zoom]);
+            ctx.lineWidth = (live ? 2 : 1.5) / zoom;
+            ctx.strokeStyle = live ? "#ffffff" : "#5865f2";
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
             for (const stroke of strokes) {
                 if (!stroke.length) continue;
                 ctx.beginPath();
@@ -341,8 +397,62 @@ class ImageProcessor {
             }
         }
 
+        ctx.setLineDash([]);
+    }
+
+    async exportImage(format = "image/jpeg", quality = 0.95) {
+        if (!this.originalRawBuffer) return null;
+
+        let fullResImageData = new ImageData(
+            new Uint8ClampedArray(this.originalRawBuffer.data),
+            this.originalRawBuffer.width,
+            this.originalRawBuffer.height
+        );
+
+        if (this.pictureControl && this.pipeline) {
+            fullResImageData = this.pipeline.process(fullResImageData, this.pictureControl);
+        }
+
+        if (this.enableMasks && typeof MaskEngine !== "undefined" && typeof MasksManager !== "undefined") {
+            try {
+                fullResImageData = MaskEngine.applyAllMasks(fullResImageData, MasksManager.getMasks(), this.pipeline);
+            } catch (err) {
+                console.error("❌ Erreur application des masques (export) :", err);
+            }
+        }
+
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = fullResImageData.width;
+        tempCanvas.height = fullResImageData.height;
+        const tempCtx = tempCanvas.getContext("2d");
+        tempCtx.putImageData(fullResImageData, 0, 0);
+
+        const exportCanvas = document.createElement("canvas");
+        exportCanvas.width = fullResImageData.width;
+        exportCanvas.height = fullResImageData.height;
+        const ctx = exportCanvas.getContext("2d");
+
+        ctx.save();
+        const centerX = exportCanvas.width / 2;
+        const centerY = exportCanvas.height / 2;
+
+        ctx.translate(centerX, centerY);
+        ctx.rotate((this.transform.rotation * Math.PI) / 180);
+        ctx.scale(
+            this.transform.flipH ? -1 : 1,
+            this.transform.flipV ? -1 : 1
+        );
+        ctx.translate(-centerX, -centerY);
+
+        ctx.drawImage(tempCanvas, 0, 0);
         ctx.restore();
+
+        if (format === "image/tiff") {
+            return exportCanvas.toDataURL("image/png");
+        }
+        return exportCanvas.toDataURL(format, quality);
     }
 }
 
+// Instanciation globale
 window.imageProcessor = new ImageProcessor("previewCanvas");
