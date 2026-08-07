@@ -145,6 +145,16 @@ function buildPanelHtml(pc, compact, extendedNP3) {
             </select>
         </div>
 
+        ${compact ? "" : `
+        <div style="margin-bottom: 15px; background: #1e1f22; padding: 10px; border-radius: 6px; border: 1px solid #35373c;">
+            <h4 style="color: #5865f2; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">
+                🌡️ Balance des Blancs
+            </h4>
+            ${createSlider("Température", "wbTemperature", pc.wbTemperature ?? 0, -100, 100, 1)}
+            ${createSlider("Teinte (Tint)", "wbTint", pc.wbTint ?? 0, -100, 100, 1)}
+        </div>
+        `}
+
         <div data-block="monochrome" style="display: ${isMono ? 'block' : 'none'}; background: #2a2a2a; padding: 10px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #444;">
             <h4 style="margin-top:0; color: #e0e0e0;">📷 Options Monochrome</h4>
 
@@ -178,18 +188,18 @@ function buildPanelHtml(pc, compact, extendedNP3) {
             </div>
         </div>
 
-        ${createSlider("Accentuation", "sharpening", pc.sharpening ?? 0, -3, 9, 0.25)}
-        ${createSlider("Accentuation moyenne", "midRangeSharpening", pc.midRangeSharpening ?? 0, -5, 5, 0.25)}
-        ${createSlider("Clarté", "clarity", pc.clarity ?? 0, -5, 5, 0.25)}
-        ${createSlider("Contraste", "contrast", pc.contrast ?? 0, -3, 3, 0.25)}
-        ${createSlider("Luminosité", "brightness", pc.brightness ?? 0, -1.5, 1.5, 0.1)}
-        ${createSlider("Saturation", "saturation", pc.saturation ?? 0, -3, 3, 0.25)}
-        ${createSlider("Teinte", "hue", pc.hue ?? 0, -3, 3, 0.25)}
+        ${createSlider("Accentuation", "sharpening", pc.sharpening ?? 0, -3, 9, 0.1)}
+        ${createSlider("Accentuation moyenne", "midRangeSharpening", pc.midRangeSharpening ?? 0, -5, 5, 0.1)}
+        ${createSlider("Clarté", "clarity", pc.clarity ?? 0, -5, 5, 0.1)}
+        ${createSlider("Contraste", "contrast", pc.contrast ?? 0, -3, 3, 0.1)}
+        ${createSlider("Luminosité", "brightness", pc.brightness ?? 0, -1.5, 1.5, 0.05)}
+        ${createSlider("Saturation", "saturation", pc.saturation ?? 0, -3, 3, 0.1)}
+        ${createSlider("Teinte", "hue", pc.hue ?? 0, -3, 3, 0.1)}
 
         ${compact ? "" : `
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
         <h3 style="margin-bottom: 10px;">Exposition</h3>
-        ${createSlider("Exposition (EV)", "exposure", pc.exposure ?? 0, -3, 3, 0.1)}
+        ${createSlider("Exposition (EV)", "exposure", pc.exposure ?? 0, -3, 3, 0.05)}
 
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
         <h3 style="margin-bottom: 10px;">Point noir &amp; Point blanc</h3>
@@ -198,18 +208,18 @@ function buildPanelHtml(pc, compact, extendedNP3) {
 
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
         <h3 style="margin-bottom: 10px;">Traitement de l'image</h3>
-        ${createSlider("Hautes lumières", "highlights", pc.highlights ?? 0, -5, 5, 0.25)}
-        ${createSlider("Ombres", "shadows", pc.shadows ?? 0, -5, 5, 0.25)}
-        ${createSlider("Correction du voile", "dehaze", pc.dehaze ?? 0, 0, 10, 0.5)}
-        ${createSlider("Vibrance", "vibrance", pc.vibrance ?? 0, -5, 5, 0.25)}
+        ${createSlider("Hautes lumières", "highlights", pc.highlights ?? 0, -5, 5, 0.1)}
+        ${createSlider("Ombres", "shadows", pc.shadows ?? 0, -5, 5, 0.1)}
+        ${createSlider("Correction du voile", "dehaze", pc.dehaze ?? 0, 0, 10, 0.1)}
+        ${createSlider("Vibrance", "vibrance", pc.vibrance ?? 0, -5, 5, 0.1)}
 
         <div style="margin: 12px 0;">
             <label style="font-weight: bold; color: #00aaff; font-size: 13px;">Courbe de tonalité :</label>
             <div data-tonecurve-container></div>
         </div>
 
-        ${createSlider("Vignettage", "vignette", pc.vignette ?? 0, -5, 5, 0.25)}
-        ${createSlider("Réduction du bruit", "denoise", pc.denoise ?? 0, 0, 5, 0.5)}
+        ${createSlider("Vignettage", "vignette", pc.vignette ?? 0, -5, 5, 0.1)}
+        ${createSlider("Réduction du bruit", "denoise", pc.denoise ?? 0, 0, 5, 0.1)}
 
         <div class="pc-row" style="margin-top: 10px;">
             <label>Correction de l'objectif :</label>
@@ -226,13 +236,6 @@ function buildPanelHtml(pc, compact, extendedNP3) {
 
 /**
  * Rend le panneau de réglages dans un conteneur donné.
- * @param {string} containerId  id du <div> cible (ex: "pictureControlStatus", "profileControlStatus")
- * @param {object|null} pc      Picture Control à afficher (null => profil Standard par défaut)
- * @param {object} options
- *   - compact {boolean}       masque la section "Traitement de l'image"
- *   - isNewInstance {boolean} force la mémorisation d'un nouvel état "original" pour le Reset
- *   - onChange {function}     appelé avec le state courant à chaque modification
- *   - onReset {async function} optionnel, doit renvoyer un Picture Control ou rien
  */
 function renderPictureControlPanel(containerId, pc, options = {}) {
     const { compact = false, extendedNP3 = false, isNewInstance = false, onChange = null, onReset = null } = options;
@@ -242,11 +245,12 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         return;
     }
 
-    // Profil Standard par défaut pour alimenter l'interface au démarrage
     const defaultPC = {
         name: "Standard",
         pictureControlName: "Standard",
         baseProfile: "STANDARD",
+        wbTemperature: 0,
+        wbTint: 0,
         sharpening: 3,
         midRangeSharpening: 2,
         clarity: 1,
@@ -268,7 +272,8 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
 
     const currentPC = pc || defaultPC;
 
-    // Normalisation des clés de netteté
+    currentPC.wbTemperature = currentPC.wbTemperature ?? 0;
+    currentPC.wbTint = currentPC.wbTint ?? 0;
     currentPC.sharpening = currentPC.sharpening ?? currentPC.sharpning ?? currentPC.sharpness ?? 3;
     currentPC.midRangeSharpening = currentPC.midRangeSharpening ?? currentPC.midRangeSharpning ?? 2;
 
@@ -284,7 +289,6 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
     if (satRow) satRow.style.display = isMono ? "none" : "flex";
     if (hueRow) hueRow.style.display = isMono ? "none" : "flex";
 
-    // Courbe de tonalité : uniquement en mode complet
     let toneCurveWidget = null;
     if (!compact && window.ToneCurveWidget) {
         const curveContainer = container.querySelector('[data-tonecurve-container]');
@@ -324,6 +328,9 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             baseProfile: profileName.toUpperCase(),
             basePictureControl: profileName.toUpperCase(),
             isMonochrome: isMonoNow,
+
+            wbTemperature: compact ? (currentPC.wbTemperature ?? 0) : getVal("wbTemperature"),
+            wbTint: compact ? (currentPC.wbTint ?? 0) : getVal("wbTint"),
 
             sharpening: sharpVal,
             sharpning: sharpVal,
@@ -387,7 +394,6 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         if (typeof onChange === "function") onChange(state);
     }
 
-    // Sliders
     let renderTimer = null;
     container.querySelectorAll(".pc-slider").forEach(slider => {
         slider.addEventListener("input", () => {
@@ -399,12 +405,10 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         });
     });
 
-    // Selects / checkbox
     container.querySelectorAll(".pc-select, .pc-checkbox").forEach(el => {
         el.addEventListener("change", trigger);
     });
 
-    // Sélecteur de profil -> applique les presets
     const profileSelect = container.querySelector('[data-field="pcProfileSelect"]');
     if (profileSelect) {
         profileSelect.addEventListener("change", () => {
@@ -437,6 +441,8 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             setSlider("hue", vals.hue);
 
             if (!compact) {
+                setSlider("wbTemperature", 0);
+                setSlider("wbTint", 0);
                 setSlider("exposure", 0);
                 setSlider("blackPoint", 0);
                 setSlider("whitePoint", 255);
@@ -459,7 +465,6 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         });
     }
 
-    // Réinitialiser
     const resetBtn = container.querySelector('[data-action="reset"]');
     if (resetBtn) {
         resetBtn.addEventListener("click", async () => {
@@ -481,7 +486,6 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
 window.renderPictureControlPanel = renderPictureControlPanel;
 window.createSlider = createSlider;
 
-// --- Compatibilité rétroactive : panneau complet du Studio ---
 window.updatePictureControl = function (info, isNewPhoto = false) {
     const pc = info && info.pictureControl ? info.pictureControl : null;
     renderPictureControlPanel("pictureControlStatus", pc, {

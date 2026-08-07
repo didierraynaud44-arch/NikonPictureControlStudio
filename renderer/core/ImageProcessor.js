@@ -35,25 +35,33 @@ class ImageProcessor {
         // ---------------------------------------------------------
         // PIPELINE PICTURE CONTROL NIKON (Ordre d'exécution)
         // ---------------------------------------------------------
+        // 1. Balance des Blancs (En tout premier)
+        if (typeof WhiteBalanceFilter !== "undefined") this.pipeline.add(new WhiteBalanceFilter());
+
+        // 2. Filtres de détails
         if (typeof SharpenFilter !== "undefined") this.pipeline.add(new SharpenFilter());
         if (typeof MidRangeSharpenFilter !== "undefined") this.pipeline.add(new MidRangeSharpenFilter());
         if (typeof ClarityFilter !== "undefined") this.pipeline.add(new ClarityFilter());
 
+        // 3. Exposition et points
         if (typeof ExposureFilter !== "undefined") this.pipeline.add(new ExposureFilter());
         if (typeof BlackWhitePointFilter !== "undefined") this.pipeline.add(new BlackWhitePointFilter());
 
+        // 4. Courbe de ton et contraste
         if (typeof ToneCurveFilter !== "undefined") this.pipeline.add(new ToneCurveFilter());
         if (typeof ContrastFilter !== "undefined") this.pipeline.add(new ContrastFilter());
         if (typeof BrightnessFilter !== "undefined") this.pipeline.add(new BrightnessFilter());
         if (typeof HighlightsFilter !== "undefined") this.pipeline.add(new HighlightsFilter());
         if (typeof ShadowsFilter !== "undefined") this.pipeline.add(new ShadowsFilter());
 
+        // 5. Couleur
         if (typeof SaturationFilter !== "undefined") this.pipeline.add(new SaturationFilter());
         if (typeof ColorBlenderFilter !== "undefined") this.pipeline.add(new ColorBlenderFilter());
         if (typeof ColorGradingFilter !== "undefined") this.pipeline.add(new ColorGradingFilter());
 
         if (typeof MonochromeFilter !== "undefined") this.pipeline.add(new MonochromeFilter());
 
+        // 6. Effets secondaires et corrections
         if (typeof DehazeFilter !== "undefined") this.pipeline.add(new DehazeFilter());
         if (typeof VibranceFilter !== "undefined") this.pipeline.add(new VibranceFilter());
         if (typeof SCurveFilter !== "undefined") this.pipeline.add(new SCurveFilter());
@@ -171,6 +179,10 @@ class ImageProcessor {
             if (isNaN(p) || p === -128) return defaultVal;
             return p;
         };
+
+        // Balance des Blancs
+        clean.wbTemperature = parseVal(pcData.wbTemperature, 0);
+        clean.wbTint        = parseVal(pcData.wbTint, 0);
 
         clean.sharpening = parseVal(pcData.sharpening ?? pcData.sharpning ?? pcData.sharpness, 0);
         clean.midRangeSharpening = parseVal(pcData.midRangeSharpening ?? pcData.midRangeSharpning, 0);
