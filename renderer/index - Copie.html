@@ -40,21 +40,14 @@
             </div>
         </aside>
 
-<!-- Colonne Centre : Canvas & EXIF & Grille Batch -->
+        <!-- Colonne Centre : Canvas & EXIF & Grille Batch -->
         <section class="preview-panel">
-            <!-- Barre de mode d'affichage unique avec le curseur de taille -->
-            <div class="view-mode-toolbar">
+            <!-- Barre de mode d'affichage -->
+        <div class="view-mode-toolbar">
                 <div class="view-mode-switch">
                     <button id="btnViewSingle" class="btn-tool active" title="Affichage unique">🖼️ Photo</button>
                     <button id="btnViewGrid" class="btn-tool" title="Affichage galerie">⣿ Galerie (<span id="selectedCount">0</span>)</button>
                 </div>
-
-                <!-- 🔍 Curseur de taille des vignettes -->
-                <div class="grid-zoom-control" style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: #aaa;">
-                    <span>Taille :</span>
-                    <input type="range" id="gridZoomSlider" min="100" max="300" value="140" step="10" style="width: 100px; cursor: pointer;" title="Ajuster la taille des vignettes">
-                </div>
-
                 <div class="view-mode-actions">
                     <button id="btnBatchExport" class="btn-tool btn-primary" style="display: none;">
                         💾 Exporter la sélection
@@ -62,7 +55,8 @@
                 </div>
             </div>
 
-            <!-- Mode Photo Seule (Actuel) -->
+      
+       <!-- Mode Photo Seule (Actuel) -->
             <div id="singleImageContainer" class="canvas-container" style="position: relative;">
                 <!-- Flèche Gauche -->
                 <button class="studio-nav-btn studio-prev-btn" onclick="navigateStudioPhoto(-1)" title="Photo précédente (Flèche gauche)">❮</button>
@@ -75,15 +69,16 @@
                 <!-- Flèche Droite -->
                 <button class="studio-nav-btn studio-next-btn" onclick="navigateStudioPhoto(1)" title="Photo suivante (Flèche droite)">❯</button>
             </div>
+	   
 
-            <!-- Mode Galerie Grille -->
+            <!-- Mode Galerie Grille (Nouveau) -->
             <div id="gridImageContainer" class="grid-container" style="display: none;">
                 <div class="grid-scroll-area" id="gridItemsWrapper">
                     <!-- Les cartes images seront générées dynamiquement ici -->
                 </div>
             </div>
 
-            <!-- Barre EXIF -->
+            <!-- Barre EXIF (Conservée sous le conteneur) -->
             <div id="exifInfo" class="exif-bar">
                 <span id="exifCamera">-</span> | 
                 <span id="exifLens">-</span> | 
