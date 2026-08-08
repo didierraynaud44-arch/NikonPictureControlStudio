@@ -15,8 +15,10 @@ try {
     console.error("❌ Erreur de lecture de la bibliothèque NP3 :", e);
     np3Library = [];
 }
+
 // Cache mémoire pour accélérer le passage d'une photo à l'autre
 const studioImageCache = new Map();
+
 /**
  * Extrait tous les fichiers d'un nœud de dossier pour alimenter la grille
  */
@@ -39,7 +41,7 @@ function collectAllFilesFromFolder(node) {
 ========================================================= */
 
 /**
- * Construit récursivement l'arborescence HTML (Fermée par défaut)
+ * Construit récursivement l'arborescence HTML (Fermée par défaut avec tri naturel)
  */
 function buildTreeHTML(node) {
     if (!node) return document.createTextNode("");
@@ -49,9 +51,13 @@ function buildTreeHTML(node) {
     ul.style.paddingLeft = "10px";
     ul.style.margin = "0";
 
-    // 1. Sous-dossiers
     if (node.children && node.children.length > 0) {
-        node.children.forEach(subFolder => {
+        // 🔹 Tri strict et naturel (type Windows) des sous-dossiers dans l'interface
+        const sortedChildren = [...node.children].sort((a, b) => {
+            return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        });
+
+        sortedChildren.forEach(subFolder => {
             const li = document.createElement("li");
             li.style.margin = "2px 0";
 
@@ -66,7 +72,7 @@ function buildTreeHTML(node) {
             title.innerHTML = `📁 <span style="user-select:none;">${subFolder.name}</span>`;
 
             const subTreeContainer = document.createElement("div");
-            subTreeContainer.style.display = "none"; // 🔒 FERMÉ PAR DÉFAUT
+            subTreeContainer.style.display = "none";
 
             title.onclick = (e) => {
                 e.stopPropagation();
@@ -74,7 +80,6 @@ function buildTreeHTML(node) {
                 subTreeContainer.style.display = isHidden ? "block" : "none";
                 title.firstChild.textContent = isHidden ? "📂 " : "📁 ";
 
-                // 🔗 TRANSMISSION DES FICHIERS À LA GALERIE
                 if (window.gridManager) {
                     const subFiles = collectAllFilesFromFolder(subFolder);
                     window.gridManager.setImages(subFiles);
@@ -88,9 +93,13 @@ function buildTreeHTML(node) {
         });
     }
 
-    // 2. Fichiers image du dossier
     if (node.files && node.files.length > 0) {
-        node.files.forEach(file => {
+        // 🔹 Tri strict et naturel des fichiers images
+        const sortedFiles = [...node.files].sort((a, b) => {
+            return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        });
+
+        sortedFiles.forEach(file => {
             const li = document.createElement("li");
             li.className = "tree-file-item";
             li.style.cursor = "pointer";
@@ -118,7 +127,6 @@ function buildTreeHTML(node) {
                 }
             };
 
-            // Effet survol
             li.onmouseenter = () => { if (li.style.background !== "rgb(26, 115, 232)") li.style.background = "#2a2d32"; };
             li.onmouseleave = () => { if (li.style.background !== "rgb(26, 115, 232)") li.style.background = "transparent"; };
 
@@ -129,12 +137,11 @@ function buildTreeHTML(node) {
     return ul;
 }
 
-// 🔹 Navigation photo précédente / suivante dans le Studio
+// Navigation photo précédente / suivante dans le Studio
 function navigateStudioPhoto(direction) {
     if (!window.gridManager || !window.gridManager.images || window.gridManager.images.length === 0) return;
     
     const images = window.gridManager.images;
-    
     let currentIndex = images.findIndex(img => img.path === window.currentStudioFilePath);
     
     if (currentIndex === -1 && window.currentStudioFilePath) {
@@ -155,7 +162,6 @@ function navigateStudioPhoto(direction) {
 }
 window.navigateStudioPhoto = navigateStudioPhoto;
 
-// Écoute des flèches clavier (Gauche / Droite) dans le Studio
 document.addEventListener("keydown", (e) => {
     const singleContainer = document.getElementById("singleImageContainer");
     if (!singleContainer || getComputedStyle(singleContainer).display === "none") return;
@@ -169,9 +175,6 @@ document.addEventListener("keydown", (e) => {
     }
 });
 
-/**
- * Assure la présence des flèches de navigation graphiques dans le conteneur Studio
- */
 function ensureStudioNavigationArrows() {
     const container = document.getElementById("singleImageContainer");
     if (!container) return;
@@ -196,9 +199,6 @@ function ensureStudioNavigationArrows() {
     container.appendChild(nextBtn);
 }
 
-/**
- * Rendu de la liste de tous les dossiers importés
- */
 function renderStudioFolderTree() {
     const container = document.getElementById("studioFolderTree");
     if (!container) return;
@@ -211,7 +211,12 @@ function renderStudioFolderTree() {
         return;
     }
 
-    studioFoldersList.forEach((folderStructure) => {
+    // 🔹 Tri des dossiers racines importés
+    const sortedFoldersList = [...studioFoldersList].sort((a, b) => {
+        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    sortedFoldersList.forEach((folderStructure) => {
         const rootItem = document.createElement("div");
         rootItem.style.marginBottom = "8px";
         rootItem.style.borderBottom = "1px solid #2b2d31";
@@ -234,7 +239,7 @@ function renderStudioFolderTree() {
         rootTitle.innerHTML = `📁 ${folderStructure.name}`;
 
         const rootTreeContainer = document.createElement("div");
-        rootTreeContainer.style.display = "none"; // 🔒 FERMÉ PAR DÉFAUT
+        rootTreeContainer.style.display = "none";
 
         rootHeader.onclick = (e) => {
             if (e.target.classList.contains("btn-remove-folder")) return;
@@ -242,7 +247,6 @@ function renderStudioFolderTree() {
             rootTreeContainer.style.display = isHidden ? "block" : "none";
             rootTitle.innerHTML = `${isHidden ? "📂" : "📁"} ${folderStructure.name}`;
 
-            // 🔗 ENVOI DES FICHIERS A LA GALERIE
             if (window.gridManager) {
                 const allFolderFiles = collectAllFilesFromFolder(folderStructure);
                 window.gridManager.setImages(allFolderFiles);
@@ -270,9 +274,8 @@ function renderStudioFolderTree() {
         container.appendChild(rootItem);
     });
 
-    // Alimentation initiale de la galerie avec le premier dossier et ses sous-dossiers
-    if (studioFoldersList.length > 0 && window.gridManager) {
-        window.gridManager.setImages(collectAllFilesFromFolder(studioFoldersList[0]));
+    if (sortedFoldersList.length > 0 && window.gridManager) {
+        window.gridManager.setImages(collectAllFilesFromFolder(sortedFoldersList[0]));
     }
 }
 
@@ -393,11 +396,9 @@ async function loadImageInStudio(filePath) {
 
         let fileInfo = null;
 
-        // 1. Vérifie si les données sont déjà dans le cache
         if (studioImageCache.has(filePath)) {
             fileInfo = studioImageCache.get(filePath);
         } else {
-            // Sinon, lecture normale via Electron
             if (window.electronAPI && typeof window.electronAPI.readFileDirect === "function") {
                 fileInfo = await window.electronAPI.readFileDirect(filePath);
             }
@@ -463,7 +464,6 @@ async function loadImageInStudio(filePath) {
             window.switchToView("view-studio");
         }
 
-        // 🔹 2. Préchargement en arrière-plan (Prefetch) des photos adjacentes
         prefetchAdjacentImages(filePath);
 
     } catch (err) {
@@ -471,9 +471,7 @@ async function loadImageInStudio(filePath) {
     }
 }
 window.loadImageInStudio = loadImageInStudio;
-/**
- * Charge en arrière-plan la photo précédente et suivante pour fluidifier la navigation
- */
+
 function prefetchAdjacentImages(currentPath) {
     if (!window.gridManager || !window.gridManager.images || window.gridManager.images.length === 0) return;
     const images = window.gridManager.images;
@@ -481,7 +479,6 @@ function prefetchAdjacentImages(currentPath) {
     let currentIndex = images.findIndex(img => img.path === currentPath);
     if (currentIndex === -1) return;
 
-    // Index de la photo précédente et suivante (avec boucle)
     const prevIndex = (currentIndex - 1 + images.length) % images.length;
     const nextIndex = (currentIndex + 1) % images.length;
 
@@ -494,12 +491,11 @@ function prefetchAdjacentImages(currentPath) {
                         studioImageCache.set(path, info);
                     }
                 }
-            } catch (e) {
-                // Ignore les erreurs de préchargement discret en arrière-plan
-            }
+            } catch (e) {}
         }
     });
 }
+
 /* =========================================================
     MODULE EXPORTATION
 ========================================================= */
@@ -589,7 +585,7 @@ function initExportModal() {
 ========================================================= */
 
 async function switchToView(targetViewId) {
-    const ALL_VIEW_IDS = ["view-studio", "view-profiles"];
+    const ALL_VIEW_IDS = ["view-studio", "view-profiles", "view-print"];
 
     ALL_VIEW_IDS.forEach((id) => {
         const el = document.getElementById(id);
@@ -607,9 +603,17 @@ async function switchToView(targetViewId) {
 
     const headerStudio = document.getElementById("header-studio-actions");
     const headerProfiles = document.getElementById("header-profile-actions");
+    const headerPrint = document.getElementById("header-print-actions");
 
     if (headerStudio) headerStudio.style.display = (targetViewId === "view-studio") ? "flex" : "none";
     if (headerProfiles) headerProfiles.style.display = (targetViewId === "view-profiles") ? "flex" : "none";
+    if (headerPrint) headerPrint.style.display = (targetViewId === "view-print") ? "flex" : "none";
+
+    if (targetViewId === "view-print") {
+        if (typeof window.renderPrintPreview === "function") {
+            window.renderPrintPreview();
+        }
+    }
 
     if (targetViewId === "view-profiles") {
         if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
@@ -639,8 +643,21 @@ function initButtons() {
     const btnExportNCP         = document.getElementById("exportNCP");
     const btnStudioOpenFolder  = document.getElementById("btnStudioOpenFolder");
     const btnNP3               = document.getElementById("openNP3");
+    const btnViewPrint         = document.getElementById("btnViewPrint");
+    const btnViewPrintFromProfile = document.getElementById("btnViewPrintFromProfile");
+    const btnBackToStudio      = document.getElementById("btnBackToStudio");
 
     switchToView("view-studio");
+
+    if (btnViewPrint) {
+        btnViewPrint.onclick = () => switchToView("view-print");
+    }
+    if (btnViewPrintFromProfile) {
+        btnViewPrintFromProfile.onclick = () => switchToView("view-print");
+    }
+    if (btnBackToStudio) {
+        btnBackToStudio.onclick = () => switchToView("view-studio");
+    }
 
     if (!window.imageProcessor && typeof ImageProcessor !== "undefined") {
         window.imageProcessor = new ImageProcessor("previewCanvas");
@@ -757,11 +774,9 @@ function initButtons() {
 
     if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
 
-    // 🔹 Assure l'affichage permanent des flèches graphiques dans le Studio
     ensureStudioNavigationArrows();
 }
 
-// 🔹 Écouteurs IPC du Menu Electron
 if (window.electronAPI?.onMenuOpenNEF) {
     window.electronAPI.onMenuOpenNEF(async () => {
         try {
@@ -799,7 +814,6 @@ if (window.electronAPI?.onMenuTriggerExport) {
     });
 }
 
-// Initialisation globale
 const initApp = async () => {
     initButtons();
     await loadSavedStudioFolders();
@@ -810,12 +824,11 @@ if (document.readyState === "loading") {
 } else {
     initApp();
 }
-// Gestion du zoom / taille des vignettes de la grille
+
 const gridZoomSlider = document.getElementById("gridZoomSlider");
 if (gridZoomSlider) {
     gridZoomSlider.oninput = (e) => {
         const size = e.target.value + "px";
-        // Met à jour la variable CSS globale sur le document
         document.documentElement.style.setProperty("--grid-item-size", size);
     };
 }

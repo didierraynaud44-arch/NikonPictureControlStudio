@@ -130,15 +130,24 @@ const ALL_IMAGE_EXTENSIONS = [
     "jpg", "jpeg", "png", "webp", "tif", "tiff"
 ];
 
-// Scanner récursif de répertoire
+// Scanner récursif de répertoire avec tri forcé et immédiat dès la lecture du disque
 function scanDirectoryRecursive(dirPath) {
     const name = path.basename(dirPath);
     const item = { name, path: dirPath, children: [], files: [] };
 
+    let entries;
     try {
-        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        // On récupère et on trie immédiatement les entrées brutes par ordre naturel (type Windows)
+        entries = fs.readdirSync(dirPath, { withFileTypes: true }).sort((a, b) => {
+            return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        });
+    } catch (err) {
+        console.error("⚠️ Impossible de lire le dossier :", dirPath, err.message);
+        return item;
+    }
 
-        for (const entry of entries) {
+    for (const entry of entries) {
+        try {
             const fullPath = path.join(dirPath, entry.name);
             if (entry.isDirectory()) {
                 if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
@@ -150,9 +159,9 @@ function scanDirectoryRecursive(dirPath) {
                     item.files.push({ name: entry.name, path: fullPath });
                 }
             }
+        } catch (entryErr) {
+            console.warn(`⚠️ Erreur sur l'entrée ${entry.name}:`, entryErr.message);
         }
-    } catch (err) {
-        console.error("❌ Erreur de lecture récursive du dossier :", dirPath, err);
     }
 
     return item;
@@ -222,7 +231,6 @@ ipcMain.handle("open-nef", async () => {
     const ext = path.extname(filePath).toLowerCase();
 
     try {
-        // 🔹 Gestion TIFF / TIF / JPG / PNG / WEBP
         if ([".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
             const fileBuffer = fs.readFileSync(filePath);
             const base64 = fileBuffer.toString("base64");
@@ -337,17 +345,14 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
     const ext = path.extname(filePath).toLowerCase();
 
     try {
-   // 🔹 1. Gestion spécifique pour les TIFF, TIF, JPG, PNG et WEBP avec Sharp
-   // 🔹 1. Gestion spécifique pour les TIFF, TIF, JPG, PNG et WEBP avec Sharp
         if ([".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
             let imageBuffer;
             let mimeType = "image/jpeg";
 
             try {
                 if (ext === ".tif" || ext === ".tiff") {
-                    // Conversion automatique du TIFF en JPEG via Sharp avec tolérance accrue
                     imageBuffer = await sharp(filePath, { failOnError: false })
-                        .rotate() // Respecte l'orientation EXIF si présente
+                        .rotate()
                         .jpeg({ quality: 95 })
                         .toBuffer();
                     mimeType = "image/jpeg";
@@ -373,7 +378,6 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
             };
         }
 
-        // 🔹 2. Gestion des fichiers Nikon NEF
         if (ext === ".nef") {
             const info = await readNEF(filePath);
             info.preview = await getPreview(filePath);
@@ -389,7 +393,6 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
             return info;
         }
 
-        // 🔹 3. Autres fichiers RAW multi-marques
         if (SUPPORTED_EXTENSIONS.includes(ext)) {
             const previewDataUrl = await decodeRAWImage(filePath);
             return {
@@ -505,7 +508,7 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
                 { name: "Image WebP (*.webp)", extensions: ["webp"] },
                 { name: "Image TIFF (*.tif)", extensions: ["tif", "tiff"] }
             ]
-        });onclick
+        });
 
         if (canceled || !filePath) return { success: false };
 

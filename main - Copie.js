@@ -1,6 +1,14 @@
 /* =======================================================
     1. Imports des modules Node & Electron
 ======================================================= */
+const sharp = require('sharp');
+const {
+    initCatalogDB,
+    addFolderToCatalog,
+    getFullCatalog,
+    removeFolderFromCatalog,
+    savePhotoSettings
+} = require("./services/catalogService");
 const {
     app,
     BrowserWindow,
@@ -165,7 +173,12 @@ ipcMain.handle("select-folder-recursive", async () => {
 // Recharger un dossier sauvegardé sans boîte de dialogue
 ipcMain.handle("read-folder-recursive", async (event, folderPath) => {
     if (!folderPath || !fs.existsSync(folderPath)) return null;
-    return scanDirectoryRecursive(folderPath);
+    try {
+        return scanDirectoryRecursive(folderPath);
+    } catch (err) {
+        console.error("❌ Erreur lecture dossier sauvegardé :", folderPath, err);
+        return null;
+    }
 });
 
 // Sélectionner le dossier de destination pour l'exportation
@@ -177,13 +190,11 @@ ipcMain.handle("dialog:selectExportFolder", async () => {
     return result.canceled ? null : result.filePaths[0];
 });
 
-// Ouverture d'un fichier Image ou RAW (Filtrage Tolérant Majuscules/Minuscules)
-
 // Ouverture d'un fichier Image ou RAW
 ipcMain.handle("open-nef", async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         title: "Sélectionner une photo / fichier RAW",
-        properties: ["openFile"], // 👈 Forcer l'ouverture de FICHIER uniquement
+        properties: ["openFile"],
         filters: [
             {
                 name: "Fichiers Images & RAW",
@@ -211,6 +222,26 @@ ipcMain.handle("open-nef", async () => {
     const ext = path.extname(filePath).toLowerCase();
 
     try {
+        // 🔹 Gestion TIFF / TIF / JPG / PNG / WEBP
+        if ([".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
+            const fileBuffer = fs.readFileSync(filePath);
+            const base64 = fileBuffer.toString("base64");
+            let mimeType = "image/jpeg";
+            if (ext === ".png") mimeType = "image/png";
+            if (ext === ".webp") mimeType = "image/webp";
+            if (ext === ".tif" || ext === ".tiff") mimeType = "image/tiff";
+
+            return {
+                filePath: filePath,
+                path: filePath,
+                fileName: path.basename(filePath),
+                preview: `data:${mimeType};base64,${base64}`,
+                isStandardImage: true,
+                orientation: 1,
+                pictureControl: pictureControlEngine.get()
+            };
+        }
+
         if (ext === ".nef") {
             const info = await readNEF(filePath);
             info.preview = await getPreview(filePath);
@@ -233,6 +264,7 @@ ipcMain.handle("open-nef", async () => {
             return {
                 filePath: filePath,
                 fileName: path.basename(filePath),
+                path: filePath,
                 preview: previewDataUrl,
                 isRaw: true,
                 pictureControl: pictureControlEngine.get()
@@ -242,6 +274,7 @@ ipcMain.handle("open-nef", async () => {
         return {
             filePath: filePath,
             fileName: path.basename(filePath),
+            path: filePath,
             preview: filePath,
             isStandardImage: true,
             pictureControl: pictureControlEngine.get()
@@ -252,6 +285,7 @@ ipcMain.handle("open-nef", async () => {
         throw err;
     }
 });
+
 // Décodage direct RAW
 ipcMain.handle("decode-raw", async (event, filePath) => {
     try {
@@ -303,6 +337,43 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
     const ext = path.extname(filePath).toLowerCase();
 
     try {
+   // 🔹 1. Gestion spécifique pour les TIFF, TIF, JPG, PNG et WEBP avec Sharp
+   // 🔹 1. Gestion spécifique pour les TIFF, TIF, JPG, PNG et WEBP avec Sharp
+        if ([".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
+            let imageBuffer;
+            let mimeType = "image/jpeg";
+
+            try {
+                if (ext === ".tif" || ext === ".tiff") {
+                    // Conversion automatique du TIFF en JPEG via Sharp avec tolérance accrue
+                    imageBuffer = await sharp(filePath, { failOnError: false })
+                        .rotate() // Respecte l'orientation EXIF si présente
+                        .jpeg({ quality: 95 })
+                        .toBuffer();
+                    mimeType = "image/jpeg";
+                } else {
+                    imageBuffer = fs.readFileSync(filePath);
+                    if (ext === ".png") mimeType = "image/png";
+                    if (ext === ".webp") mimeType = "image/webp";
+                }
+           } catch (sharpErr) {
+                console.error(`❌ ERREUR SHARP DÉTAILLÉE sur ${filePath} :`, sharpErr.message, sharpErr);
+                return null;
+            }
+            const base64 = imageBuffer.toString("base64");
+
+            return {
+                filePath: filePath,
+                path: filePath,
+                preview: `data:${mimeType};base64,${base64}`,
+                name: path.basename(filePath),
+                fileName: path.basename(filePath),
+                orientation: 1,
+                pictureControl: pictureControlEngine.get()
+            };
+        }
+
+        // 🔹 2. Gestion des fichiers Nikon NEF
         if (ext === ".nef") {
             const info = await readNEF(filePath);
             info.preview = await getPreview(filePath);
@@ -318,11 +389,13 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
             return info;
         }
 
+        // 🔹 3. Autres fichiers RAW multi-marques
         if (SUPPORTED_EXTENSIONS.includes(ext)) {
             const previewDataUrl = await decodeRAWImage(filePath);
             return {
                 filePath: filePath,
                 fileName: path.basename(filePath),
+                path: filePath,
                 preview: previewDataUrl,
                 isRaw: true,
                 pictureControl: pictureControlEngine.get()
@@ -332,6 +405,7 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
         return {
             filePath: filePath,
             fileName: path.basename(filePath),
+            path: filePath,
             preview: filePath,
             isStandardImage: true,
             pictureControl: pictureControlEngine.get()
@@ -409,7 +483,6 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
         const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, "");
         const imageBuffer = Buffer.from(cleanBase64, "base64");
 
-        // Détermination de l'extension
         let ext = ".jpg";
         if (exportConfig && exportConfig.format) {
             if (exportConfig.format === "image/png") ext = ".png";
@@ -417,14 +490,12 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
             else if (exportConfig.format === "image/webp") ext = ".webp";
         }
 
-        // 🟢 EXPORT EN LOT (SILENCIEUX) : Écriture directe si un dossier est renseigné
         if (exportConfig && exportConfig.folder && (silent || exportConfig.folder)) {
             const destPath = path.join(exportConfig.folder, `${defaultName}${ext}`);
             fs.writeFileSync(destPath, imageBuffer);
             return { success: true, filePath: destPath };
         }
 
-        // 🟡 EXPORT UNIQUE : Ouverture de la boîte de dialogue standard
         const { filePath, canceled } = await dialog.showSaveDialog(win, {
             title: "Exporter la photo",
             defaultPath: `${defaultName}${ext}`,
@@ -434,7 +505,7 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
                 { name: "Image WebP (*.webp)", extensions: ["webp"] },
                 { name: "Image TIFF (*.tif)", extensions: ["tif", "tiff"] }
             ]
-        });
+        });onclick
 
         if (canceled || !filePath) return { success: false };
 
@@ -446,6 +517,7 @@ ipcMain.handle("dialog:saveJPEG", async (event, data) => {
         return { success: false, error: err.message };
     }
 });
+
 ipcMain.handle("export-ncp", async (event, pcData) => {
     try {
         const { filePath, canceled } = await dialog.showSaveDialog({
@@ -542,9 +614,8 @@ app.commandLine.appendSwitch("force_high_performance_gpu");
     9. Cycle de vie de l'application Electron
 ======================================================= */
 
-app.whenReady().then(() => {
-    const dbPath = path.join(app.getPath("userData"), "catalog.db");
-    initDatabase(dbPath);
+app.whenReady().then(async () => {
+    await initCatalogDB();
     createMainWindow();
     createAppMenu();
 });
@@ -563,4 +634,24 @@ app.on("activate", () => {
 
 app.on('will-quit', async () => {
     await shutdownExiftool();
+});
+
+/* =======================================================
+    IPC HANDLERS : CATALOGUE SQLITE
+======================================================= */
+
+ipcMain.handle("catalog:add-folder", async (event, folderData) => {
+    return await addFolderToCatalog(folderData);
+});
+
+ipcMain.handle("catalog:get-all", async () => {
+    return await getFullCatalog();
+});
+
+ipcMain.handle("catalog:remove-folder", async (event, folderPath) => {
+    return await removeFolderFromCatalog(folderPath);
+});
+
+ipcMain.handle("catalog:save-photo-pc", async (event, filePath, pcData) => {
+    return await savePhotoSettings(filePath, pcData);
 });

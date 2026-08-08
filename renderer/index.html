@@ -9,9 +9,14 @@
 
     <!-- En-tête Dynamique -->
     <header class="app-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <h1>Nikon Picture Control Studio</h1>
+        </div>
+
         <!-- Actions Vue 1 (Studio) -->
         <div id="header-studio-actions" class="header-buttons">
             <button id="exportJpg" class="btn-action btn-success" style="display: none;">📸 Exporter JPG</button>
+            <button id="btnViewPrint" class="btn-tool" title="Module d'impression">🖨️ Impression</button>
         </div>
 
         <!-- Actions Vue 2 (Gestionnaire) -->
@@ -19,6 +24,13 @@
             <button id="openNP3" class="btn-primary">📂 Importer un NP3</button>
             <button id="saveNP3" class="btn-action">💾 Exporter pour Z50 II (.NP3)</button>
             <button id="exportNCP" class="btn-action">💾 Exporter pour Z6 II (.NCP)</button>
+            <button id="btnViewPrintFromProfile" class="btn-tool" title="Module d'impression">🖨️ Impression</button>
+        </div>
+
+        <!-- Actions Vue 3 (Impression) -->
+        <div id="header-print-actions" class="header-buttons" style="display: none;">
+            <button id="btnPrintExecute" class="btn-primary">🖨️ Lancer l'impression</button>
+            <button id="btnBackToStudio" class="btn-tool">🖼️ Retour Studio</button>
         </div>
     </header>
 
@@ -40,7 +52,7 @@
             </div>
         </aside>
 
-<!-- Colonne Centre : Canvas & EXIF & Grille Batch -->
+        <!-- Colonne Centre : Canvas & EXIF & Grille Batch -->
         <section class="preview-panel">
             <!-- Barre de mode d'affichage unique avec le curseur de taille -->
             <div class="view-mode-toolbar">
@@ -149,16 +161,124 @@
 
     </main>
 
+    <!-- VUE 3 : MODULE D'IMPRESSION -->
+    <main id="view-print" class="app-main view-hidden" style="display: none; flex-direction: row;">
+        
+        <!-- Colonne Gauche : Aperçu visuel de la feuille et de la photo -->
+        <section class="preview-panel" style="background-color: #1e1e1e; display: flex; align-items: center; justify-content: center; position: relative;">
+            <div id="printPreviewCanvasContainer" style="background: #fff; box-shadow: 0 4px 20px rgba(0,0,0,0.6); position: relative; overflow: hidden;">
+                <canvas id="printPreviewCanvas"></canvas>
+            </div>
+        </section>
+
+        <!-- Colonne Droite : Paramètres d'impression -->
+        <aside class="sidebar-panel" style="width: 400px; min-width: 400px;">
+            <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 15px; color: #5865f2; border-bottom: 1px solid #333; padding-bottom: 6px;">🖨️ Paramètres d'Impression</h3>
+
+            <div class="control-group" style="margin-bottom: 14px;">
+                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px; color: #aaa;">Format de papier :</label>
+                <select id="printPaperFormat" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 6px; border-radius: 4px; font-size: 12px;">
+                    <option value="10x15">10 x 15 cm</option>
+                    <option value="A4" selected>A4 (21 x 29.7 cm)</option>
+                    <option value="A3">A3 (29.7 x 42 cm)</option>
+                    <option value="A3+">A3+ (32.9 x 48.3 cm)</option>
+                    <option value="A2">A2 (42 x 59.4 cm)</option>
+                    <option value="panoramic">Panoramique (Personnalisé)</option>
+                </select>
+            </div>
+
+            <div id="printCustomSizeGroup" style="display: none; margin-bottom: 14px; background: #222; padding: 8px; border-radius: 4px; border: 1px solid #333;">
+                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 6px; color: #8ab4f8;">Format Panoramique / Personnalisé :</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div>
+                        <span style="font-size: 10px; color: #aaa;">Largeur max (cm) [ex: 32.9]</span>
+                        <input type="number" id="printCustomWidth" value="32.9" step="0.1" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 4px; border-radius: 4px; font-size: 11px;">
+                    </div>
+                    <div>
+                        <span style="font-size: 10px; color: #aaa;">Longueur (cm) [ex: 90]</span>
+                        <input type="number" id="printCustomHeight" value="90.0" step="0.1" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 4px; border-radius: 4px; font-size: 11px;">
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-group" style="margin-bottom: 14px;">
+                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px; color: #aaa;">Orientation :</label>
+                <select id="printOrientation" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 6px; border-radius: 4px; font-size: 12px;">
+                    <option value="portrait">Portrait</option>
+                    <option value="landscape">Paysage</option>
+                </select>
+            </div>
+
+            <div style="border-top: 1px solid #333; padding-top: 10px; margin-bottom: 14px;">
+                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 6px; color: #aaa;">Mise en page :</label>
+                <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="printZoomFill"> Zoom pour remplissage (Crop)
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="printAutoRotate" checked> Adaptation par rotation auto
+                    </label>
+                </div>
+            </div>
+
+            <div class="control-group" style="margin-bottom: 14px;">
+                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px; color: #aaa;">Marge (mm) :</label>
+                <input type="number" id="printMargin" value="10" min="0" max="50" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 6px; border-radius: 4px; font-size: 12px;">
+            </div>
+
+            <div style="border-top: 1px solid #333; padding-top: 10px; margin-bottom: 14px;">
+                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 6px; color: #aaa;">Cadre / Filet :</label>
+                <div style="display: flex; flex-direction: column; gap: 8px; font-size: 12px;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="printEnableBorder"> Activer le contour du cadre
+                    </label>
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 11px; color: #ccc;">Épaisseur du filet (px) :</span>
+                        <input type="number" id="printBorderWidth" value="2" min="1" max="20" style="width: 60px; background: #171717; border: 1px solid #444; color: #fff; padding: 4px; border-radius: 4px; font-size: 11px; text-align: right;">
+                    </div>
+                </div>
+            </div>
+
+            <div style="border-top: 1px solid #333; padding-top: 10px; margin-bottom: 14px;">
+                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 6px; color: #aaa;">Informations textuelles :</label>
+                <select id="printInfoType" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 6px; border-radius: 4px; font-size: 12px; margin-bottom: 6px;">
+                    <option value="none">Aucune information</option>
+                    <option value="filename">Nom du fichier</option>
+                    <option value="title">Titre</option>
+                    <option value="caption">Légende</option>
+                    <option value="date">Date de prise de vue</option>
+                    <option value="custom">Texte personnalisé</option>
+                </select>
+                <input type="text" id="printCustomText" placeholder="Votre texte personnalisé..." style="display: none; width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 6px; border-radius: 4px; font-size: 11px;">
+            </div>
+
+            <div style="border-top: 1px solid #333; padding-top: 10px; margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 11px; font-weight: bold; color: #aaa;">Résolution (DPI) :</span>
+                    <input type="number" id="printDpi" value="300" step="50" style="width: 70px; background: #171717; border: 1px solid #444; color: #fff; padding: 4px; border-radius: 4px; font-size: 11px; text-align: right;">
+                </div>
+
+                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px; color: #aaa;">Filigrane (Watermark) :</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+                    <input type="text" id="printWatermarkText" placeholder="Texte filigrane..." style="background: #171717; border: 1px solid #444; color: #fff; padding: 4px; border-radius: 4px; font-size: 11px;">
+                    <select id="printWatermarkPos" style="background: #171717; border: 1px solid #444; color: #fff; padding: 4px; border-radius: 4px; font-size: 11px;">
+                        <option value="bottom-right">Bas-Droite</option>
+                        <option value="bottom-left">Bas-Gauche</option>
+                        <option value="top-right">Haut-Droite</option>
+                        <option value="top-left">Haut-Gauche</option>
+                        <option value="center">Centre</option>
+                    </select>
+                </div>
+            </div>
+
+        </aside>
+    </main>
+
     <!-- MODALE D'EXPORTATION CONFIGURABLE -->
     <div id="exportModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
         <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:460px; color:#e8eaed; font-family:sans-serif;">
-            
-            <!-- Bouton Croix Fermer Modale -->
             <button id="btnCloseExportModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer">✕</button>
-
             <h3 style="margin-top:0; color:#5865f2; font-size:16px;">📤 Exporter l'image</h3>
-
-            <!-- 1. Dossier de destination -->
             <div style="margin-bottom:12px;">
                 <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:4px;">1. Dossier de destination :</label>
                 <div style="display:flex; gap:6px;">
@@ -166,8 +286,6 @@
                     <button id="btnBrowseExpFolder" style="background:#3c4043; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">Parcourir</button>
                 </div>
             </div>
-
-            <!-- 2. Format de sortie -->
             <div style="margin-bottom:12px;">
                 <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:4px;">2. Format de sortie :</label>
                 <select id="expFormat" style="width:100%; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px;">
@@ -178,8 +296,6 @@
                     <option value="application/pdf">PDF (.pdf)</option>
                 </select>
             </div>
-
-            <!-- 3. Taux de compression -->
             <div style="margin-bottom:12px;">
                 <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:bold; margin-bottom:4px;">
                     <span>3. Qualité / Compression :</span>
@@ -187,8 +303,6 @@
                 </div>
                 <input type="range" id="expQuality" min="10" max="100" value="90" style="width:100%;">
             </div>
-
-            <!-- 4. Dimensions et Résolution -->
             <div style="margin-bottom:12px; border-top:1px solid #333; padding-top:10px;">
                 <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">4. Dimensions &amp; Résolution :</label>
                 <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
@@ -206,16 +320,12 @@
                     </div>
                 </div>
             </div>
-
-            <!-- 5. Métadonnées -->
             <div style="margin-bottom:18px; border-top:1px solid #333; padding-top:10px;">
                 <label style="font-size:12px; cursor:pointer; display:flex; align-items:center; gap:8px;">
                     <input type="checkbox" id="expStripExif">
                     <span>5. Supprimer les métadonnées (EXIF)</span>
                 </label>
             </div>
-
-            <!-- Boutons d'action -->
             <div style="display:flex; justify-content:flex-end; gap:8px;">
                 <button id="btnCancelExport" style="background:transparent; border:1px solid #555; color:#fff; padding:6px 14px; border-radius:4px; cursor:pointer;">Annuler</button>
                 <button id="btnConfirmExport" style="background:#5865f2; border:none; color:#fff; padding:6px 16px; border-radius:4px; cursor:pointer; font-weight:bold;">Lancer l'export</button>
@@ -263,6 +373,7 @@
     <script src="core/MasksManager.js"></script>
     <script src="components/MaskCanvasController.js"></script>
     <script src="components/masksPanel.js"></script>
+	<script src="components/PrintManager.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

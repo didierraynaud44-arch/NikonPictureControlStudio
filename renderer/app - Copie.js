@@ -810,3 +810,12 @@ if (document.readyState === "loading") {
 } else {
     initApp();
 }
+// Gestion du zoom / taille des vignettes de la grille
+const gridZoomSlider = document.getElementById("gridZoomSlider");
+if (gridZoomSlider) {
+    gridZoomSlider.oninput = (e) => {
+        const size = e.target.value + "px";
+        // Met à jour la variable CSS globale sur le document
+        document.documentElement.style.setProperty("--grid-item-size", size);
+    };
+}
