@@ -55,13 +55,21 @@
                 </div>
             </div>
 
-            <!-- Mode Photo Seule (Actuel) -->
-            <div id="singleImageContainer" class="canvas-container">
+      
+       <!-- Mode Photo Seule (Actuel) -->
+            <div id="singleImageContainer" class="canvas-container" style="position: relative;">
+                <!-- Flèche Gauche -->
+                <button class="studio-nav-btn studio-prev-btn" onclick="navigateStudioPhoto(-1)" title="Photo précédente (Flèche gauche)">❮</button>
+                
                 <div class="canvas-stack">
                     <canvas id="previewCanvas"></canvas>
                     <canvas id="maskOverlayCanvas"></canvas>
                 </div>
+
+                <!-- Flèche Droite -->
+                <button class="studio-nav-btn studio-next-btn" onclick="navigateStudioPhoto(1)" title="Photo suivante (Flèche droite)">❯</button>
             </div>
+	   
 
             <!-- Mode Galerie Grille (Nouveau) -->
             <div id="gridImageContainer" class="grid-container" style="display: none;">

@@ -128,6 +128,73 @@ function buildTreeHTML(node) {
     return ul;
 }
 
+// 🔹 Navigation photo précédente / suivante dans le Studio
+function navigateStudioPhoto(direction) {
+    if (!window.gridManager || !window.gridManager.images || window.gridManager.images.length === 0) return;
+    
+    const images = window.gridManager.images;
+    
+    let currentIndex = images.findIndex(img => img.path === window.currentStudioFilePath);
+    
+    if (currentIndex === -1 && window.currentStudioFilePath) {
+        const normalizedCurrent = window.currentStudioFilePath.replace(/\\/g, "/").toLowerCase();
+        currentIndex = images.findIndex(img => (img.path || "").replace(/\\/g, "/").toLowerCase() === normalizedCurrent);
+    }
+    
+    if (currentIndex === -1) currentIndex = 0;
+
+    let newIndex = currentIndex + direction;
+    if (newIndex < 0) newIndex = images.length - 1;
+    if (newIndex >= images.length) newIndex = 0;
+
+    const targetImage = images[newIndex];
+    if (targetImage && targetImage.path && typeof window.loadImageInStudio === "function") {
+        window.loadImageInStudio(targetImage.path);
+    }
+}
+window.navigateStudioPhoto = navigateStudioPhoto;
+
+// Écoute des flèches clavier (Gauche / Droite) dans le Studio
+document.addEventListener("keydown", (e) => {
+    const singleContainer = document.getElementById("singleImageContainer");
+    if (!singleContainer || getComputedStyle(singleContainer).display === "none") return;
+
+    if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        navigateStudioPhoto(-1);
+    } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        navigateStudioPhoto(1);
+    }
+});
+
+/**
+ * Assure la présence des flèches de navigation graphiques dans le conteneur Studio
+ */
+function ensureStudioNavigationArrows() {
+    const container = document.getElementById("singleImageContainer");
+    if (!container) return;
+
+    if (container.querySelector(".studio-prev-btn")) return;
+
+    container.style.position = "relative";
+
+    const prevBtn = document.createElement("button");
+    prevBtn.className = "studio-nav-btn studio-prev-btn";
+    prevBtn.title = "Photo précédente (Flèche gauche)";
+    prevBtn.innerHTML = "❮";
+    prevBtn.onclick = () => navigateStudioPhoto(-1);
+
+    const nextBtn = document.createElement("button");
+    nextBtn.className = "studio-nav-btn studio-next-btn";
+    nextBtn.title = "Photo suivante (Flèche droite)";
+    nextBtn.innerHTML = "❯";
+    nextBtn.onclick = () => navigateStudioPhoto(1);
+
+    container.appendChild(prevBtn);
+    container.appendChild(nextBtn);
+}
+
 /**
  * Rendu de la liste de tous les dossiers importés
  */
@@ -318,6 +385,8 @@ function pathFileName(filePath) {
 
 async function loadImageInStudio(filePath) {
     if (!filePath) return;
+
+    window.currentStudioFilePath = filePath;
 
     try {
         currentNefFileName = pathFileName(filePath);
@@ -646,6 +715,9 @@ function initButtons() {
     initExportModal();
 
     if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
+
+    // 🔹 Assure l'affichage permanent des flèches graphiques dans le Studio
+    ensureStudioNavigationArrows();
 }
 
 // 🔹 Écouteurs IPC du Menu Electron

@@ -21,6 +21,7 @@ try {
  */
 function collectAllFilesFromFolder(node) {
     let files = [];
+    if (!node) return files;
     if (node.files && node.files.length > 0) {
         files = files.concat(node.files);
     }
@@ -137,12 +138,12 @@ function renderStudioFolderTree() {
     container.innerHTML = "";
 
     if (!studioFoldersList || studioFoldersList.length === 0) {
-        container.innerHTML = `<p style="color:#777; font-size:11px; font-style:italic; padding:8px; margin:0;">Aucun dossier importé</p>`;
+        container.innerHTML = `<p style="color:#777; font-size:11px; font-style:italic; padding:8px; margin:0;">Aucun dossier dans le catalogue</p>`;
         if (window.gridManager) window.gridManager.setImages([]);
         return;
     }
 
-    studioFoldersList.forEach((folderStructure, index) => {
+    studioFoldersList.forEach((folderStructure) => {
         const rootItem = document.createElement("div");
         rootItem.style.marginBottom = "8px";
         rootItem.style.borderBottom = "1px solid #2b2d31";
@@ -173,7 +174,7 @@ function renderStudioFolderTree() {
             rootTreeContainer.style.display = isHidden ? "block" : "none";
             rootTitle.innerHTML = `${isHidden ? "📂" : "📁"} ${folderStructure.name}`;
 
-            // 🔗 ENVOI DES FICHIERS RACINES ET SOUS-DOSSIERS À LA GALERIE
+            // 🔗 ENVOI DES FICHIERS A LA GALERIE
             if (window.gridManager) {
                 const allFolderFiles = collectAllFilesFromFolder(folderStructure);
                 window.gridManager.setImages(allFolderFiles);
@@ -182,13 +183,13 @@ function renderStudioFolderTree() {
 
         const btnRemove = document.createElement("button");
         btnRemove.className = "btn-remove-folder";
-        btnRemove.title = "Retirer ce dossier";
+        btnRemove.title = "Retirer du catalogue";
         btnRemove.innerHTML = "🗑️";
         btnRemove.style.cssText = "background: transparent; border: none; cursor: pointer; font-size: 11px; padding: 2px 4px; margin-left: 6px;";
         
         btnRemove.onclick = (e) => {
             e.stopPropagation();
-            removeStudioFolder(index);
+            removeStudioFolder(folderStructure.path);
         };
 
         rootHeader.appendChild(rootTitle);
@@ -201,21 +202,17 @@ function renderStudioFolderTree() {
         container.appendChild(rootItem);
     });
 
-    // Alimentation initiale de la galerie avec le premier dossier si présent
+    // Alimentation initiale de la galerie avec le premier dossier et ses sous-dossiers
     if (studioFoldersList.length > 0 && window.gridManager) {
         window.gridManager.setImages(collectAllFilesFromFolder(studioFoldersList[0]));
     }
 }
 
-function removeStudioFolder(index) {
-    studioFoldersList.splice(index, 1);
-    saveSavedStudioFoldersList();
-    renderStudioFolderTree();
-}
-
-function saveSavedStudioFoldersList() {
-    const paths = studioFoldersList.map(f => f.path);
-    localStorage.setItem("nikon_studio_folders_paths", JSON.stringify(paths));
+async function removeStudioFolder(folderPath) {
+    if (window.electronAPI && typeof window.electronAPI.removeCatalogFolder === "function") {
+        studioFoldersList = await window.electronAPI.removeCatalogFolder(folderPath);
+        renderStudioFolderTree();
+    }
 }
 
 async function openStudioFolder() {
@@ -223,15 +220,11 @@ async function openStudioFolder() {
         if (window.electronAPI && typeof window.electronAPI.selectFolderRecursive === "function") {
             const folderData = await window.electronAPI.selectFolderRecursive();
             if (folderData && folderData.path) {
-                const exists = studioFoldersList.some(f => f.path === folderData.path);
-                if (!exists) {
-                    studioFoldersList.push(folderData);
-                    saveSavedStudioFoldersList();
+                if (typeof window.electronAPI.addCatalogFolder === "function") {
+                    studioFoldersList = await window.electronAPI.addCatalogFolder(folderData);
                     renderStudioFolderTree();
                 }
             }
-        } else {
-            console.error("❌ Méthode selectFolderRecursive indisponible dans electronAPI");
         }
     } catch (err) {
         console.error("❌ Erreur lors de l'ouverture du dossier :", err);
@@ -239,40 +232,15 @@ async function openStudioFolder() {
 }
 
 async function loadSavedStudioFolders() {
-    let savedPaths = [];
     try {
-        savedPaths = JSON.parse(localStorage.getItem("nikon_studio_folders_paths") || "[]");
-    } catch (e) {
-        savedPaths = [];
-    }
-
-    const oldPath = localStorage.getItem("nikon_studio_last_folder");
-    if (oldPath && !savedPaths.includes(oldPath)) {
-        savedPaths.push(oldPath);
-        localStorage.removeItem("nikon_studio_last_folder");
-    }
-
-    if (!savedPaths.length) return;
-
-    studioFoldersList = [];
-
-    for (const folderPath of savedPaths) {
-        try {
-            if (window.electronAPI && typeof window.electronAPI.readFolderRecursive === "function") {
-                const folderData = await window.electronAPI.readFolderRecursive(folderPath);
-                if (folderData) {
-                    studioFoldersList.push(folderData);
-                }
-            }
-        } catch (err) {
-            console.error("❌ Impossible de recharger le dossier :", folderPath, err);
+        if (window.electronAPI && typeof window.electronAPI.getCatalog === "function") {
+            studioFoldersList = await window.electronAPI.getCatalog();
+            renderStudioFolderTree();
         }
+    } catch (e) {
+        console.error("❌ Erreur de chargement du catalogue SQLite :", e);
     }
-
-    saveSavedStudioFoldersList();
-    renderStudioFolderTree();
 }
-
 
 /* =========================================================
     MODULE PROFILE MANAGER (NP3 / NCP)
@@ -343,7 +311,6 @@ function renderNp3Library() {
 function pathFileName(filePath) {
     return filePath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, "");
 }
-
 
 /* =========================================================
     CHARGEMENT STUDIO & RENDERER
@@ -423,13 +390,8 @@ async function loadImageInStudio(filePath) {
 }
 window.loadImageInStudio = loadImageInStudio;
 
-
 /* =========================================================
     MODULE EXPORTATION
-========================================================= */
-
-/* =========================================================
-    MODULE EXPORTATION (Corrigé Single & Galerie)
 ========================================================= */
 
 function initExportModal() {
@@ -486,15 +448,15 @@ function initExportModal() {
 
             try {
                 if (isSingleMode) {
-                    // Export Unique (Mode Photo)
                     const canvas = document.getElementById("previewCanvas");
                     if (!canvas) return;
 
                     const dataUrl = canvas.toDataURL(config.format, config.quality);
                     const base64Data = dataUrl.split(",")[1];
 
-                    if (window.electronAPI && typeof window.electronAPI.saveImageFile === "function") {
-                        const res = await window.electronAPI.saveImageFile({
+                    const saveFunc = window.electronAPI?.saveImageFile || window.electronAPI?.saveJPEG;
+                    if (saveFunc) {
+                        const res = await saveFunc({
                             defaultName: currentNefFileName || "export-photo",
                             base64Data: base64Data,
                             exportConfig: config
@@ -502,7 +464,6 @@ function initExportModal() {
                         alert(res?.success ? " Export réussi !" : ` Erreur d'export : ${res?.error || "Échec inconnu"}`);
                     }
                 } else if (window.gridManager && window.gridManager.selectedIds.size > 0) {
-                    // Export Multiple (Mode Galerie)
                     await window.gridManager.exportSelectedImages(config);
                 }
             } catch (err) {
@@ -512,6 +473,7 @@ function initExportModal() {
         };
     }
 }
+
 /* =========================================================
     INITIALISATION ET EVENEMENTS IHM
 ========================================================= */
@@ -724,7 +686,7 @@ if (window.electronAPI?.onMenuTriggerExport) {
     });
 }
 
-// Initialisation globale + Rechargement automatique des dossiers
+// Initialisation globale
 const initApp = async () => {
     initButtons();
     await loadSavedStudioFolders();

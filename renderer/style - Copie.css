@@ -718,27 +718,18 @@ canvas {
 /* =========================================================
    CONTENEUR ET SUPERPOSITION CANVAS (Studio & Profils)
 ========================================================= */
-.preview-panel {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    height: 100%;
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-    position: relative;
-}
-
+/* =========================================================
+   CONTENEUR & SUPERPOSITION DES CANVAS (Studio)
+========================================================= */
 .canvas-container {
     flex: 1;
     width: 100%;
     height: 100%;
-    min-height: 200px;
-    position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
     overflow: hidden;
+    position: relative;
     background-color: #141414;
 }
 
@@ -746,25 +737,132 @@ canvas {
     position: relative;
     width: 100%;
     height: 100%;
-    overflow: hidden;
-}
-
-/* Superposition des deux Canvas : l'image et le masque */
-.canvas-stack canvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-    display: block;
-    /* On laisse le JS piloter la largeur/hauteur exacte */
-}
-
-/* Le masque laisse passer les événements de la souris vers le previewCanvas */
-#maskOverlayCanvas {
-    pointer-events: none !important;
-}
-.preview-panel {
     display: flex;
-    flex-direction: column !important;
+    justify-content: center;
     align-items: center;
+}
+
+/* Le canvas de la photo */
+#previewCanvas {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+/* Le calque transparent du masque superposé */
+#maskOverlayCanvas {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    pointer-events: none !important; /* Laisse passer le clic vers la photo */
+    z-index: 100 !important;         /* Affiche TOUJOURS le masque au-dessus */
+}
+/* Barre supérieure de contrôle d'affichage */
+.view-mode-toolbar {
+    display: flex;
     justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px;
+    background: #181818;
+    border-bottom: 1px solid #2a2a2a;
+    user-select: none;
+}
+
+.view-mode-switch {
+    display: flex;
+    gap: 6px;
+}
+
+/* Zone Galerie avec défilement fluide */
+.grid-container {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    background-color: #121212;
+    overflow: hidden;
+    position: relative;
+}
+
+.grid-scroll-area {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    grid-auto-rows: 140px;
+    gap: 12px;
+    padding: 12px;
+    box-sizing: border-box;
+    overflow-y: auto; /* Active la barre de défilement */
+}
+
+/* Vignette d'image dans la grille */
+.grid-card {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    background: #1a1a1a;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    overflow: hidden;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.grid-card:hover {
+    border-color: #444;
+}
+
+.grid-card.selected {
+    border-color: #00aaff;
+}
+
+.grid-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.grid-card .grid-checkbox {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 5;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+.view-mode-switch .btn-tool {
+    white-space: nowrap !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+}
+
+/* Cache le titre par défaut */
+.grid-card .grid-card-overlay-title {
+    display: none;
+}
+
+/* Affiche le titre uniquement quand la souris est sur la carte */
+.grid-card:hover .grid-card-overlay-title {
+    display: block;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.85);
+    color: #ffffff;
+    font-size: 11px;
+    padding: 6px 8px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 10;
+    pointer-events: none;
+    border-bottom-left-radius: 4px;
+    border-bottom-right-radius: 4px;
 }

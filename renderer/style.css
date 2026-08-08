@@ -866,3 +866,34 @@ canvas {
     border-bottom-left-radius: 4px;
     border-bottom-right-radius: 4px;
 }
+/* Boutons de navigation sur les côtés de l'image en mode Studio */
+.studio-nav-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: rgba(0, 0, 0, 0.5);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 20px;
+    padding: 12px 10px;
+    cursor: pointer;
+    z-index: 200;
+    border-radius: 4px;
+    transition: background-color 0.2s, transform 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.studio-nav-btn:hover {
+    background-color: rgba(88, 101, 242, 0.8); /* Couleur accentuée au survol */
+    border-color: #5865f2;
+}
+
+.studio-prev-btn {
+    left: 20px;
+}
+
+.studio-next-btn {
+    right: 20px;
+}
