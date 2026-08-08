@@ -540,7 +540,40 @@ ipcMain.handle("export-ncp", async (event, pcData) => {
         throw err;
     }
 });
+// Charger un profil ICC / ICM
+ipcMain.handle("loadICC", async () => {
+    const result = await dialog.showOpenDialog({
+        title: "Importer un profil ICC / ICM",
+        properties: ["openFile"],
+        filters: [
+            {
+                name: "Profils ICC/ICM",
+                extensions: ["icc", "icm", "ICC", "ICM"]
+            },
+            {
+                name: "Tous les fichiers (*.*)",
+                extensions: ["*"]
+            }
+        ]
+    });
 
+    if (result.canceled || !result.filePaths.length) return null;
+
+    try {
+        const filePath = result.filePaths[0];
+        const fileName = path.basename(filePath);
+        const fileBuffer = fs.readFileSync(filePath);
+
+        return {
+            fileName: fileName,
+            filePath: filePath,
+            data: fileBuffer.toString("base64") // Permet de le stocker ou de le manipuler proprement
+        };
+    } catch (err) {
+        console.error("❌ Erreur chargement profil ICC :", err);
+        throw err;
+    }
+});
 /* =======================================================
     8. Handlers IPC : Catalogue Photos
 ======================================================= */

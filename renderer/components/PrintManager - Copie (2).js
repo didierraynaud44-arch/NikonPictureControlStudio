@@ -166,17 +166,13 @@ class PrintManager {
         let userImgW = parseFloat(document.getElementById("printImgWidth")?.value) || 30.0;
         let userImgH = parseFloat(document.getElementById("printImgHeight")?.value) || 20.0;
 
-        // Sécurité : La taille demandée ne peut pas dépasser les dimensions physiques de la feuille
-        if (userImgW > widthCm) userImgW = widthCm;
-        if (userImgH > heightCm) userImgH = heightCm;
-
-        // 1. LE CADRE ROUGE (Cellule cible exacte demandée par l'utilisateur en cm)
+        // 1. Le cadre rouge représente la cellule cible exacte demandée par l'utilisateur (en pixels)
         const targetW = Math.round(userImgW * cmToInch * dpi);
         const targetH = Math.round(userImgH * cmToInch * dpi);
         const frameX = Math.round((canvasWidth - targetW) / 2);
         const frameY = Math.round((canvasHeight - targetH) / 2);
 
-        // 2. CALCUL PROPORTIONNEL DE LA PHOTO A L'INTERIEUR DE LA CELLULE CIBLE
+        // 2. Calcul proportionnel de la photo à l'intérieur de la cellule cible (sans déformation)
         const srcW = sourceImage.width || 1;
         const srcH = sourceImage.height || 1;
         const imgAspect = srcW / srcH;
@@ -185,26 +181,12 @@ class PrintManager {
         let drawW = targetW;
         let drawH = targetH;
 
-        const zoomFill = document.getElementById("printZoomFill")?.checked || false;
-
-        if (zoomFill) {
-            // Mode Remplissage (Crop si les ratios diffèrent)
-            if (imgAspect > targetAspect) {
-                drawH = targetH;
-                drawW = drawH * imgAspect;
-            } else {
-                drawW = targetW;
-                drawH = drawW / imgAspect;
-            }
+        if (imgAspect > targetAspect) {
+            drawW = targetW;
+            drawH = drawW / imgAspect;
         } else {
-            // Mode Ajusté proportionnel (la photo tient dans le cadre rouge en entier, laissant voir la zone non imprimée)
-            if (imgAspect > targetAspect) {
-                drawW = targetW;
-                drawH = drawW / imgAspect;
-            } else {
-                drawH = targetH;
-                drawW = drawH * imgAspect;
-            }
+            drawH = targetH;
+            drawW = drawH * imgAspect;
         }
 
         // Centrage de la photo à l'intérieur de sa cellule rouge
@@ -212,12 +194,6 @@ class PrintManager {
         const drawY = frameY + Math.round((targetH - drawH) / 2);
 
         this.ctx.save();
-
-        if (zoomFill) {
-            this.ctx.beginPath();
-            this.ctx.rect(frameX, frameY, targetW, targetH);
-            this.ctx.clip();
-        }
 
         let imageToDraw = sourceImage;
         if (selectedIccPath !== "none") {
@@ -229,16 +205,16 @@ class PrintManager {
             this.ctx.fillText(`📄 Simulation ICC active`, frameX + 10, frameY + 30);
         }
 
-        // Dessin de la photo à l'intérieur
+        // Dessin de la photo proportionnelle à l'intérieur de sa cellule
         this.ctx.drawImage(imageToDraw, 0, 0, srcW, srcH, drawX, drawY, drawW, drawH);
         this.ctx.restore();
 
-        // 🔹 LE CADRE ROUGE RESTE TOUJOURS VISIBLE ET FIXE SUR LA TAILLE DEMANDEE (ex: 30x19)
+        // 🔹 Le cadre rouge (cellule cible) s'affiche en entier pour matérialiser la zone demandée
         this.ctx.strokeStyle = "rgba(255, 0, 0, 0.8)";
         this.ctx.lineWidth = Math.max(2, Math.round(2 * (dpi / 300)));
         this.ctx.strokeRect(frameX, frameY, targetW, targetH);
 
-        // Cadre / Filet optionnel paramétrable autour de la photo
+        // Cadre / Filet optionnel paramétrable
         const enableBorder = document.getElementById("printEnableBorder")?.checked || false;
         const borderWidth = parseInt(document.getElementById("printBorderWidth")?.value) || 2;
         if (enableBorder) {
@@ -260,7 +236,7 @@ class PrintManager {
                 this.ctx.fillStyle = "#333333";
                 this.ctx.font = `${Math.round(dpi / 25)}px sans-serif`;
                 this.ctx.textAlign = "center";
-                this.ctx.fillText(textToPrint, canvasWidth / 2, frameY + targetH + Math.round(dpi / 15));
+                this.ctx.fillText(textToPrint, canvasWidth / 2, drawY + drawH + Math.round(dpi / 15));
             }
         }
 

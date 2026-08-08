@@ -187,6 +187,18 @@
                 </select>
             </div>
 
+            <!-- Profil ICC Papier (Fine Art) -->
+            <div style="border-top: 1px solid #333; padding-top: 10px; margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <label style="font-size: 11px; font-weight: bold; color: #aaa;">Profil ICC Papier (Fine Art) :</label>
+                    <button id="btnImportIcc" class="btn-tool" style="padding: 2px 6px; font-size: 10px;" title="Importer un fichier .icc ou .icm">＋ Importer</button>
+                </div>
+                <select id="printIccProfile" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 6px; border-radius: 4px; font-size: 12px;">
+                    <option value="none">Aucun (Standard sRGB)</option>
+                    <!-- Les profils importés s'ajouteront ici dynamiquement -->
+                </select>
+            </div>
+
             <div id="printCustomSizeGroup" style="display: none; margin-bottom: 14px; background: #222; padding: 8px; border-radius: 4px; border: 1px solid #333;">
                 <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 6px; color: #8ab4f8;">Format Panoramique / Personnalisé :</label>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
@@ -221,9 +233,24 @@
                 </div>
             </div>
 
-            <div class="control-group" style="margin-bottom: 14px;">
-                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px; color: #aaa;">Marge (mm) :</label>
-                <input type="number" id="printMargin" value="10" min="0" max="50" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 6px; border-radius: 4px; font-size: 12px;">
+            <!-- 🔹 Nouvelle Section : Taille de l'image sur le papier en cm -->
+            <div style="border-top: 1px solid #333; padding-top: 10px; margin-bottom: 14px;">
+                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 6px; color: #aaa;">Taille de l'image sur le papier :</label>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">
+                    <div>
+                        <span style="font-size: 10px; color: #ccc;">Largeur (cm) :</span>
+                        <input type="number" id="printImgWidth" value="18.0" step="0.1" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 4px; border-radius: 4px; font-size: 11px;">
+                    </div>
+                    <div>
+                        <span style="font-size: 10px; color: #ccc;">Hauteur (cm) :</span>
+                        <input type="number" id="printImgHeight" value="12.0" step="0.1" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 4px; border-radius: 4px; font-size: 11px;">
+                    </div>
+                </div>
+
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; color: #ccc;">
+                    <input type="checkbox" id="printLockAspect" checked> Conserver le ratio Hauteur / Largeur
+                </label>
             </div>
 
             <div style="border-top: 1px solid #333; padding-top: 10px; margin-bottom: 14px;">

@@ -775,6 +775,9 @@ function initButtons() {
     if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
 
     ensureStudioNavigationArrows();
+    
+    // 🔹 Initialisation du gestionnaire ICC pour le module d'impression
+    initIccManager();
 }
 
 if (window.electronAPI?.onMenuOpenNEF) {
@@ -831,4 +834,59 @@ if (gridZoomSlider) {
         const size = e.target.value + "px";
         document.documentElement.style.setProperty("--grid-item-size", size);
     };
+}
+
+function initIccManager() {
+    const btnImportIcc = document.getElementById("btnImportIcc");
+    const selectElem = document.getElementById("printIccProfile");
+
+    // Charger les profils sauvegardés dans le localStorage au démarrage
+    try {
+        const savedIccList = JSON.parse(localStorage.getItem("nikon_icc_library") || "[]");
+        if (selectElem && savedIccList.length > 0) {
+            savedIccList.forEach(icc => {
+                let existingOption = Array.from(selectElem.options).find(opt => opt.value === icc.filePath);
+                if (!existingOption) {
+                    const option = document.createElement("option");
+                    option.value = icc.filePath;
+                    option.textContent = icc.fileName;
+                    selectElem.appendChild(option);
+                }
+            });
+        }
+    } catch (e) {
+        console.error("❌ Erreur lecture bibliothèque ICC :", e);
+    }
+
+    if (btnImportIcc) {
+        btnImportIcc.onclick = async () => {
+            try {
+                if (window.electronAPI && typeof window.electronAPI.loadICC === "function") {
+                    const iccResult = await window.electronAPI.loadICC();
+                    if (iccResult && selectElem) {
+                        let existingOption = Array.from(selectElem.options).find(opt => opt.value === iccResult.filePath);
+                        if (!existingOption) {
+                            const option = document.createElement("option");
+                            option.value = iccResult.filePath;
+                            option.textContent = iccResult.fileName;
+                            selectElem.appendChild(option);
+                        }
+                        selectElem.value = iccResult.filePath;
+
+                        // Sauvegarde dans le localStorage
+                        let savedIccList = JSON.parse(localStorage.getItem("nikon_icc_library") || "[]");
+                        if (!savedIccList.some(item => item.filePath === iccResult.filePath)) {
+                            savedIccList.push(iccResult);
+                            localStorage.setItem("nikon_icc_library", JSON.stringify(savedIccList));
+                        }
+
+                        // Déclencher le rendu de l'impression
+                        if (window.printManager) window.printManager.render();
+                    }
+                }
+            } catch (err) {
+                console.error("❌ Erreur lors de l'import du profil ICC :", err);
+            }
+        };
+    }
 }

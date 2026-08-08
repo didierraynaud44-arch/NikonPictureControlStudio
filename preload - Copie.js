@@ -2,8 +2,6 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
 
-loadICC: () => ipcRenderer.invoke("loadICC"),
-
     // Passerelle Catalogue SQLite
     addCatalogFolder: (folderData) => ipcRenderer.invoke("catalog:add-folder", folderData),
     getCatalog: () => ipcRenderer.invoke("catalog:get-all"),
