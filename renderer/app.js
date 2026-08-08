@@ -15,7 +15,8 @@ try {
     console.error("❌ Erreur de lecture de la bibliothèque NP3 :", e);
     np3Library = [];
 }
-
+// Cache mémoire pour accélérer le passage d'une photo à l'autre
+const studioImageCache = new Map();
 /**
  * Extrait tous les fichiers d'un nœud de dossier pour alimenter la grille
  */
@@ -382,7 +383,6 @@ function pathFileName(filePath) {
 /* =========================================================
     CHARGEMENT STUDIO & RENDERER
 ========================================================= */
-
 async function loadImageInStudio(filePath) {
     if (!filePath) return;
 
@@ -392,8 +392,18 @@ async function loadImageInStudio(filePath) {
         currentNefFileName = pathFileName(filePath);
 
         let fileInfo = null;
-        if (window.electronAPI && typeof window.electronAPI.readFileDirect === "function") {
-            fileInfo = await window.electronAPI.readFileDirect(filePath);
+
+        // 1. Vérifie si les données sont déjà dans le cache
+        if (studioImageCache.has(filePath)) {
+            fileInfo = studioImageCache.get(filePath);
+        } else {
+            // Sinon, lecture normale via Electron
+            if (window.electronAPI && typeof window.electronAPI.readFileDirect === "function") {
+                fileInfo = await window.electronAPI.readFileDirect(filePath);
+            }
+            if (fileInfo) {
+                studioImageCache.set(filePath, fileInfo);
+            }
         }
 
         if (!fileInfo) {
@@ -453,12 +463,43 @@ async function loadImageInStudio(filePath) {
             window.switchToView("view-studio");
         }
 
+        // 🔹 2. Préchargement en arrière-plan (Prefetch) des photos adjacentes
+        prefetchAdjacentImages(filePath);
+
     } catch (err) {
         console.error("❌ Erreur lors du chargement dans le Studio :", err);
     }
 }
 window.loadImageInStudio = loadImageInStudio;
+/**
+ * Charge en arrière-plan la photo précédente et suivante pour fluidifier la navigation
+ */
+function prefetchAdjacentImages(currentPath) {
+    if (!window.gridManager || !window.gridManager.images || window.gridManager.images.length === 0) return;
+    const images = window.gridManager.images;
+    
+    let currentIndex = images.findIndex(img => img.path === currentPath);
+    if (currentIndex === -1) return;
 
+    // Index de la photo précédente et suivante (avec boucle)
+    const prevIndex = (currentIndex - 1 + images.length) % images.length;
+    const nextIndex = (currentIndex + 1) % images.length;
+
+    [images[prevIndex].path, images[nextIndex].path].forEach(async (path) => {
+        if (path && !studioImageCache.has(path)) {
+            try {
+                if (window.electronAPI && typeof window.electronAPI.readFileDirect === "function") {
+                    const info = await window.electronAPI.readFileDirect(path);
+                    if (info) {
+                        studioImageCache.set(path, info);
+                    }
+                }
+            } catch (e) {
+                // Ignore les erreurs de préchargement discret en arrière-plan
+            }
+        }
+    });
+}
 /* =========================================================
     MODULE EXPORTATION
 ========================================================= */
