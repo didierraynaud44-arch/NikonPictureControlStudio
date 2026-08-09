@@ -511,6 +511,10 @@ function prefetchAdjacentImages(currentPath) {
     MODULE EXPORTATION
 ========================================================= */
 
+/* =========================================================
+    MODULE EXPORTATION
+========================================================= */
+
 function initExportModal() {
     const modal = document.getElementById("exportModal");
     const btnBrowse = document.getElementById("btnBrowseExpFolder");
@@ -565,10 +569,23 @@ function initExportModal() {
 
             try {
                 if (isSingleMode) {
-                    const canvas = document.getElementById("previewCanvas");
-                    if (!canvas) return;
+                    // ===== NOUVELLE VERSION : Export en pleine résolution avec modifications =====
+                    if (!window.imageProcessor) {
+                        alert("❌ Aucune image chargée à exporter");
+                        return;
+                    }
 
-                    const dataUrl = canvas.toDataURL(config.format, config.quality);
+                    // Utiliser la nouvelle méthode exportFullResolution
+                    const dataUrl = window.imageProcessor.exportFullResolution(
+                        config.quality,
+                        config.format
+                    );
+
+                    if (!dataUrl) {
+                        alert("❌ Impossible de générer l'export. Aucune image chargée ou erreur de traitement.");
+                        return;
+                    }
+
                     const base64Data = dataUrl.split(",")[1];
 
                     const saveFunc = window.electronAPI?.saveImageFile || window.electronAPI?.saveJPEG;
@@ -578,14 +595,14 @@ function initExportModal() {
                             base64Data: base64Data,
                             exportConfig: config
                         });
-                        alert(res?.success ? " Export réussi !" : ` Erreur d'export : ${res?.error || "Échec inconnu"}`);
+                        alert(res?.success ? "✅ Export réussi !" : `❌ Erreur d'export : ${res?.error || "Échec inconnu"}`);
                     }
                 } else if (window.gridManager && window.gridManager.selectedIds.size > 0) {
                     await window.gridManager.exportSelectedImages(config);
                 }
             } catch (err) {
-                console.error(" Erreur globale lors de l'export :", err);
-                alert(` Erreur lors de l'export : ${err.message || err}`);
+                console.error("❌ Erreur globale lors de l'export :", err);
+                alert(`❌ Erreur lors de l'export : ${err.message || err}`);
             }
         };
     }

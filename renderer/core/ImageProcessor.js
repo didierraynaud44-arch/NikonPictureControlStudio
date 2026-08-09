@@ -220,9 +220,122 @@ class ImageProcessor {
         if (typeof this.display.setTransform === "function") {
             this.display.setTransform(this.transform);
         }
-        
+
         this.display.draw(currentImageData);
         if (this.enableMasks) this.renderMaskOverlay();
+    }
+
+    /**
+     * 🔹 Exporte l'image pure traitée (sans le fond ni le conteneur du DisplayCanvas)
+     */
+    getProcessedImageBlobUrl(quality = 0.95) {
+        const sourceBuffer = this.previewBuffer || this.originalRawBuffer;
+        if (!sourceBuffer) return null;
+
+        let currentImageData = new ImageData(
+            new Uint8ClampedArray(sourceBuffer.data),
+            sourceBuffer.width,
+            sourceBuffer.height
+        );
+
+        if (this.pictureControl && this.pipeline) {
+            try {
+                const result = this.pipeline.process(currentImageData, this.pictureControl);
+                if (result && result.data) currentImageData = result;
+            } catch (err) {
+                console.error("❌ Erreur pipeline export :", err);
+            }
+        }
+
+        if (this.enableMasks && typeof MaskEngine !== "undefined" && typeof MasksManager !== "undefined") {
+            try {
+                currentImageData = MaskEngine.applyAllMasks(currentImageData, MasksManager.getMasks(), this.pipeline);
+            } catch (err) {
+                console.error("❌ Erreur masques export :", err);
+            }
+        }
+
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = currentImageData.width;
+        tempCanvas.height = currentImageData.height;
+        const tempCtx = tempCanvas.getContext("2d");
+        tempCtx.putImageData(currentImageData, 0, 0);
+
+        return tempCanvas.toDataURL("image/jpeg", quality);
+    }
+
+    /**
+     * 🔹 NOUVELLE MÉTHODE : Exporte en PLEINE RÉSOLUTION avec toutes les modifications
+     * @param {number} quality - Qualité JPEG (0.0 à 1.0)
+     * @param {string} format - Format de sortie ("image/jpeg" ou "image/png")
+     * @returns {string|null} - DataURL de l'image exportée
+     */
+    exportFullResolution(quality = 0.95, format = "image/jpeg") {
+        if (!this.originalRawBuffer) {
+            console.error("❌ Pas de buffer original pour l'export full res");
+            return null;
+        }
+
+        // Créer une copie des données originales en pleine résolution
+        let currentImageData = new ImageData(
+            new Uint8ClampedArray(this.originalRawBuffer.data),
+            this.originalRawBuffer.width,
+            this.originalRawBuffer.height
+        );
+
+        // Appliquer le pipeline de traitement (Picture Control, etc.)
+        if (this.pictureControl && this.pipeline) {
+            try {
+                const result = this.pipeline.process(currentImageData, this.pictureControl);
+                if (result && result.data) currentImageData = result;
+            } catch (err) {
+                console.error("❌ Erreur pipeline export full res :", err);
+            }
+        }
+
+        // Appliquer les masques si activés
+        if (this.enableMasks && typeof MaskEngine !== "undefined" && typeof MasksManager !== "undefined") {
+            try {
+                currentImageData = MaskEngine.applyAllMasks(currentImageData, MasksManager.getMasks(), this.pipeline);
+            } catch (err) {
+                console.error("❌ Erreur masques export full res :", err);
+            }
+        }
+
+        // Créer un canvas temporaire en pleine résolution
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = currentImageData.width;
+        tempCanvas.height = currentImageData.height;
+        const tempCtx = tempCanvas.getContext("2d");
+
+        // Appliquer les transformations (rotation, flip)
+        this._applyTransformations(tempCtx, tempCanvas.width, tempCanvas.height);
+
+        // Dessiner l'image traitée
+        tempCtx.putImageData(currentImageData, 0, 0);
+
+        // Retourner le DataURL
+        return tempCanvas.toDataURL(format, quality);
+    }
+
+    /**
+     * Applique les transformations (rotation, flip) au contexte
+     * @private
+     */
+    _applyTransformations(ctx, width, height) {
+        const rotation = this.transform.rotation % 360;
+        const flipH = this.transform.flipH;
+        const flipV = this.transform.flipV;
+
+        if (rotation !== 0 || flipH || flipV) {
+            ctx.translate(width / 2, height / 2);
+
+            if (flipH) ctx.scale(-1, 1);
+            if (flipV) ctx.scale(1, -1);
+
+            ctx.rotate((rotation * Math.PI) / 180);
+            ctx.translate(-width / 2, -height / 2);
+        }
     }
 
     renderMaskOverlay() {
@@ -254,7 +367,6 @@ class ImageProcessor {
 
         ctx.save();
 
-        // Synchronisation du repère visuel avec le centrage et le zoom de DisplayCanvas
         const w = canvas.width;
         const h = canvas.height;
         const imgW = this.display.offscreenCanvas.width;
