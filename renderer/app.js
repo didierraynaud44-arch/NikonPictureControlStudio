@@ -464,6 +464,17 @@ async function loadImageInStudio(filePath) {
             window.switchToView("view-studio");
         }
 
+        // 🔹 AJOUT : Partager l'image avec le PrintManager
+        if (window.printManager && fileInfo) {
+            const pcForPrint = fileInfo.pictureControl || fileInfo.pc || {};
+            try {
+                window.printManager.setImage(filePath, pcForPrint);
+                console.log("✅ Image partagée avec PrintManager:", filePath);
+            } catch (pmErr) {
+                console.warn("⚠️ Erreur partage avec PrintManager:", pmErr);
+            }
+        }
+
         prefetchAdjacentImages(filePath);
 
     } catch (err) {

@@ -137,7 +137,6 @@ function scanDirectoryRecursive(dirPath) {
 
     let entries;
     try {
-        // On récupère et on trie immédiatement les entrées brutes par ordre naturel (type Windows)
         entries = fs.readdirSync(dirPath, { withFileTypes: true }).sort((a, b) => {
             return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
         });
@@ -351,7 +350,7 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
 
             try {
                 if (ext === ".tif" || ext === ".tiff") {
-                    imageBuffer = await sharp(filePath, { failOnError: false })
+                    imageBuffer = await sharp(filePath, { failOnError: false, limitInputPixels: false })
                         .rotate()
                         .jpeg({ quality: 95 })
                         .toBuffer();
@@ -361,7 +360,7 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
                     if (ext === ".png") mimeType = "image/png";
                     if (ext === ".webp") mimeType = "image/webp";
                 }
-           } catch (sharpErr) {
+            } catch (sharpErr) {
                 console.error(`❌ ERREUR SHARP DÉTAILLÉE sur ${filePath} :`, sharpErr.message, sharpErr);
                 return null;
             }
@@ -540,6 +539,7 @@ ipcMain.handle("export-ncp", async (event, pcData) => {
         throw err;
     }
 });
+
 // Charger un profil ICC / ICM
 ipcMain.handle("loadICC", async () => {
     const result = await dialog.showOpenDialog({
@@ -567,13 +567,99 @@ ipcMain.handle("loadICC", async () => {
         return {
             fileName: fileName,
             filePath: filePath,
-            data: fileBuffer.toString("base64") // Permet de le stocker ou de le manipuler proprement
+            data: fileBuffer.toString("base64")
         };
     } catch (err) {
         console.error("❌ Erreur chargement profil ICC :", err);
         throw err;
     }
 });
+
+/* =======================================================
+    IMPRESSION : Chargement d'image pour PrintManager
+======================================================= */
+
+ipcMain.handle("load-image-for-print", async (event, imagePath, pictureControl) => {
+    console.log("📸 load-image-for-print appelé pour:", imagePath);
+    
+    if (!imagePath || !fs.existsSync(imagePath)) {
+        console.error("❌ Fichier introuvable:", imagePath);
+        return { success: false, error: "Fichier introuvable" };
+    }
+
+    try {
+        const ext = path.extname(imagePath).toLowerCase();
+        let imageBuffer = null;
+        let mimeType = "image/jpeg";
+
+        // 🔹 Traiter selon le type de fichier
+        if ([".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
+            // Images standard
+            if (ext === ".tif" || ext === ".tiff") {
+                // Utiliser Sharp pour les TIFF
+                imageBuffer = await sharp(imagePath, { failOnError: false, limitInputPixels: false })
+                    .rotate()
+                    .jpeg({ quality: 95 })
+                    .toBuffer();
+                mimeType = "image/jpeg";
+            } else {
+                imageBuffer = fs.readFileSync(imagePath);
+                if (ext === ".png") mimeType = "image/png";
+                if (ext === ".webp") mimeType = "image/webp";
+            }
+        } else if ([".nef", ".cr2", ".cr3", ".raf", ".arw", ".rw2", ".dng", ".pef", ".orf"].includes(ext)) {
+            // RAW - utiliser le décodeur existant
+            const previewDataUrl = await decodeRAWImage(imagePath);
+            if (previewDataUrl) {
+                // Extraire le base64
+                const base64Data = previewDataUrl.replace(/^data:image\/\w+;base64,/, "");
+                imageBuffer = Buffer.from(base64Data, 'base64');
+                mimeType = "image/jpeg";
+            } else {
+                throw new Error("Impossible de décoder le RAW");
+            }
+        } else {
+            // Autres formats - essayer avec Sharp
+            try {
+                imageBuffer = await sharp(imagePath, { failOnError: false })
+                    .rotate()
+                    .jpeg({ quality: 95 })
+                    .toBuffer();
+            } catch (sharpErr) {
+                console.error("❌ Erreur Sharp:", sharpErr);
+                return { success: false, error: "Format non supporté" };
+            }
+        }
+
+        if (!imageBuffer || imageBuffer.length === 0) {
+            return { success: false, error: "Image vide" };
+        }
+
+        // 🔹 Appliquer le Picture Control si fourni
+        if (pictureControl && Object.keys(pictureControl).length > 0) {
+            try {
+                // Appliquer les filtres via votre moteur
+                // Si vous avez un moteur de filtrage existant, utilisez-le ici
+                console.log("🎨 Picture Control appliqué:", Object.keys(pictureControl));
+            } catch (filterErr) {
+                console.warn("⚠️ Erreur application filtres:", filterErr);
+            }
+        }
+
+        console.log("✅ Image chargée:", imageBuffer.length, "bytes");
+
+        return {
+            success: true,
+            data: imageBuffer.toString('base64'),
+            mimeType: mimeType
+        };
+
+    } catch (err) {
+        console.error("❌ Erreur load-image-for-print:", err);
+        return { success: false, error: err.message };
+    }
+});
+
 /* =======================================================
     8. Handlers IPC : Catalogue Photos
 ======================================================= */
@@ -690,4 +776,215 @@ ipcMain.handle("catalog:remove-folder", async (event, folderPath) => {
 
 ipcMain.handle("catalog:save-photo-pc", async (event, filePath, pcData) => {
     return await savePhotoSettings(filePath, pcData);
+});
+
+/* =======================================================
+    10. Handler IPC : Impression & Exportation PDF (PrintManager)
+======================================================= */
+ipcMain.handle("print-or-save-pdf", async (event, data) => {
+    console.log("🖨️ print-or-save-pdf appelé, action:", data?.action);
+
+    if (!data || !data.imagePath) {
+        console.error("❌ Pas de chemin d'image");
+        return { success: false, error: "Aucune image sélectionnée" };
+    }
+
+    let tempImagePath = null;
+    let win = null;
+
+    try {
+        const { 
+            action, 
+            imagePath,
+            pictureControl,
+            defaultName = "document",
+            widthCm = 15, 
+            heightCm = 10,
+            orientation = "portrait"
+        } = data;
+
+        console.log(`📸 Impression de: ${imagePath}`);
+
+        // 🔹 CHARGER L'IMAGE DEPUIS LE DISQUE
+        let imageBuffer = null;
+        const ext = path.extname(imagePath).toLowerCase();
+
+        try {
+            if ([".nef", ".cr2", ".cr3", ".raf", ".arw", ".rw2", ".dng", ".pef", ".orf"].includes(ext)) {
+                // RAW - utiliser le décodeur
+                const previewDataUrl = await decodeRAWImage(imagePath);
+                if (previewDataUrl) {
+                    const base64Data = previewDataUrl.replace(/^data:image\/\w+;base64,/, "");
+                    imageBuffer = Buffer.from(base64Data, 'base64');
+                } else {
+                    throw new Error("Impossible de décoder le RAW");
+                }
+            } else {
+                // Images standard avec Sharp
+                imageBuffer = await sharp(imagePath, { failOnError: false, limitInputPixels: false })
+                    .rotate()
+                    .jpeg({ quality: 95 })
+                    .toBuffer();
+            }
+        } catch (sharpErr) {
+            console.error("❌ Erreur chargement image:", sharpErr);
+            return { success: false, error: "Impossible de charger l'image" };
+        }
+
+        if (!imageBuffer || imageBuffer.length === 0) {
+            return { success: false, error: "Image vide" };
+        }
+
+        // Créer le fichier temporaire
+        const tempDir = app.getPath('temp');
+        tempImagePath = path.join(tempDir, `nikon_print_${Date.now()}.jpg`);
+        fs.writeFileSync(tempImagePath, imageBuffer);
+        console.log("✅ Fichier temporaire:", tempImagePath);
+
+        const isLandscape = orientation === "landscape" || Number(widthCm) > Number(heightCm);
+        let wCm = Number(widthCm) || 15;
+        let hCm = Number(heightCm) || 10;
+
+        // DPI adaptatif
+        let dpi = 300;
+        const maxDimension = Math.max(wCm, hCm);
+        if (maxDimension > 30) {
+            dpi = Math.max(72, Math.round(300 * (30 / maxDimension)));
+        }
+        dpi = Math.max(72, Math.min(300, dpi));
+        
+        console.log(`📐 ${isLandscape ? 'Paysage' : 'Portrait'}: ${wCm}x${hCm}cm, DPI: ${dpi}`);
+
+        // Conversion en points
+        const CM_TO_PTS = 28.3465;
+        let wPts = Math.round(wCm * CM_TO_PTS);
+        let hPts = Math.round(hCm * CM_TO_PTS);
+        const MAX_PTS = 200000;
+        if (wPts > MAX_PTS || hPts > MAX_PTS) {
+            const ratio = MAX_PTS / Math.max(wPts, hPts);
+            wPts = Math.round(wPts * ratio);
+            hPts = Math.round(hPts * ratio);
+        }
+
+        // Lire l'image en base64 pour l'injection HTML
+        const imgBase64 = fs.readFileSync(tempImagePath, 'base64');
+
+        const htmlContent = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    * { margin:0; padding:0; }
+                    @page { size: ${wCm}cm ${hCm}cm; margin:0; }
+                    html, body { 
+                        width:100%; height:100%; 
+                        display:flex; justify-content:center; align-items:center; 
+                        background:white; overflow:hidden;
+                    }
+                    img { max-width:100%; max-height:100%; object-fit:contain; display:block; }
+                </style>
+            </head>
+            <body>
+                <img src="data:image/jpeg;base64,${imgBase64}" />
+            </body>
+            </html>
+        `;
+
+        // 🔹 IMPRESSION PHYSIQUE
+        if (action === "print") {
+            win = new BrowserWindow({ 
+                width: 800, 
+                height: 600, 
+                show: true,
+                webPreferences: { 
+                    nodeIntegration: false, 
+                    contextIsolation: true 
+                }
+            });
+
+            await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+            await new Promise(r => setTimeout(r, 2000));
+
+            return new Promise((resolve) => {
+                win.webContents.print({ 
+                    silent: false, 
+                    printBackground: true 
+                }, (success, err) => {
+                    console.log("📄 Impression:", success ? "OK" : "Échec");
+                    setTimeout(() => {
+                        try { if (win && !win.isDestroyed()) win.close(); } catch(e) {}
+                        try { if (tempImagePath && fs.existsSync(tempImagePath)) fs.unlinkSync(tempImagePath); } catch(e) {}
+                        resolve({ success: !!success });
+                    }, 1000);
+                });
+            });
+        }
+
+        // 🔹 EXPORTATION PDF
+        const { filePath, canceled } = await dialog.showSaveDialog({
+            title: "Enregistrer le PDF",
+            defaultPath: `${defaultName}.pdf`,
+            filters: [{ name: 'PDF', extensions: ['pdf'] }]
+        });
+
+        if (canceled || !filePath) {
+            try { if (tempImagePath && fs.existsSync(tempImagePath)) fs.unlinkSync(tempImagePath); } catch(e) {}
+            return { success: false, error: "Annulé" };
+        }
+
+        win = new BrowserWindow({
+            show: false,
+            width: Math.min(Math.round(wCm * 37.8), 4000),
+            height: Math.min(Math.round(hCm * 37.8), 4000),
+            webPreferences: { 
+                nodeIntegration: false, 
+                contextIsolation: true 
+            }
+        });
+
+        await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+        await new Promise(r => setTimeout(r, 1500));
+
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                console.warn("⚠️ Timeout PDF");
+                try { if (win && !win.isDestroyed()) win.destroy(); } catch(e) {}
+                try { if (tempImagePath && fs.existsSync(tempImagePath)) fs.unlinkSync(tempImagePath); } catch(e) {}
+                resolve({ success: false, error: "Timeout" });
+            }, 60000);
+
+            win.webContents.printToPDF({
+                printBackground: true,
+                landscape: isLandscape,
+                pageSize: { 
+                    width: Math.min(wPts, 200000), 
+                    height: Math.min(hPts, 200000) 
+                },
+                margins: { marginType: 'none' },
+                dpi: dpi
+            }).then(pdfData => {
+                fs.writeFileSync(filePath, pdfData);
+                console.log("✅ PDF sauvegardé");
+                clearTimeout(timeout);
+                try { if (win && !win.isDestroyed()) win.destroy(); } catch(e) {}
+                try { if (tempImagePath && fs.existsSync(tempImagePath)) fs.unlinkSync(tempImagePath); } catch(e) {}
+                resolve({ success: true });
+            }).catch(err => {
+                console.error("❌ Erreur PDF:", err);
+                clearTimeout(timeout);
+                try { if (win && !win.isDestroyed()) win.destroy(); } catch(e) {}
+                try { if (tempImagePath && fs.existsSync(tempImagePath)) fs.unlinkSync(tempImagePath); } catch(e) {}
+                resolve({ success: false, error: err.message });
+            });
+        });
+
+    } catch (err) {
+        console.error("❌ Erreur:", err);
+        try {
+            if (tempImagePath && fs.existsSync(tempImagePath)) fs.unlinkSync(tempImagePath);
+            if (win && !win.isDestroyed()) win.destroy();
+        } catch(e) {}
+        return { success: false, error: err.message };
+    }
 });

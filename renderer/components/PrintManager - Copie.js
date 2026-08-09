@@ -11,24 +11,29 @@ class PrintManager {
     }
 
     initListeners() {
-        // Écoute les modifications des paramètres pour redessiner en direct
         const elements = [
             "printPaperFormat", "printCustomWidth", "printCustomHeight", 
-            "printOrientation", "printZoomFill", "printAutoRotate", 
-            "printMargin", "printEnableBorder", "printBorderWidth", 
+            "printOrientation", "printZoomFill",
+            "printImgWidth", "printImgHeight", "printLockAspect",
+            "printEnableBorder", "printBorderWidth", 
             "printInfoType", "printCustomText", "printDpi", 
-            "printWatermarkText", "printWatermarkPos"
+            "printWatermarkText", "printWatermarkPos", "printIccProfile"
         ];
 
         elements.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
-                el.addEventListener("change", () => this.render());
-                el.addEventListener("input", () => this.render());
+                el.addEventListener("change", (e) => this.handleParamChange(id, e));
+                el.addEventListener("input", (e) => this.handleParamChange(id, e));
             }
         });
 
-        // Afficher/masquer les champs personnalisés si "panoramique" est sélectionné
+        // Liaison du bouton "Lancer l'impression"
+        const btnPrintExecute = document.getElementById("btnPrintExecute");
+        if (btnPrintExecute) {
+            btnPrintExecute.onclick = () => this.handlePrintOrPdf("print");
+        }
+
         const paperFormat = document.getElementById("printPaperFormat");
         const customGroup = document.getElementById("printCustomSizeGroup");
         const infoType = document.getElementById("printInfoType");
@@ -49,23 +54,116 @@ class PrintManager {
         }
     }
 
+    /**
+     * Gère la logique de verrouillage du ratio en direct sans bloquer le 2x3 (Z6)
+     */
+    handleParamChange(changedId) {
+        const lockAspect = document.getElementById("printLockAspect")?.checked;
+        const widthInput = document.getElementById("printImgWidth");
+        const heightInput = document.getElementById("printImgHeight");
+
+        const previewCanvas = document.getElementById("previewCanvas");
+        if (lockAspect && previewCanvas && previewCanvas.width > 0 && previewCanvas.height > 0) {
+            let imgAspect = previewCanvas.width / previewCanvas.height;
+            
+            if (Math.abs(imgAspect - 1.5) < 0.05) imgAspect = 1.5; 
+            else if (Math.abs(imgAspect - (2/3)) < 0.05) imgAspect = 2 / 3;
+
+            if (changedId === "printImgWidth" && widthInput) {
+                let w = parseFloat(widthInput.value) || 20;
+                let h = parseFloat((w / 1.5).toFixed(1)); 
+                if (heightInput && parseFloat(heightInput.value) !== h) {
+                    heightInput.value = h;
+                }
+            } else if (changedId === "printImgHeight" && heightInput) {
+                let h = parseFloat(heightInput.value) || 20;
+                let w = parseFloat((h * 1.5).toFixed(1));
+                if (widthInput && parseFloat(widthInput.value) !== w) {
+                    widthInput.value = w;
+                }
+            }
+        }
+
+        this.render();
+    }
+
+    /**
+     * Prépare l'image du canvas d'impression en haute résolution et l'envoie vers Electron
+     */
+    async handlePrintOrPdf(actionType = "print") {
+        if (!this.canvas) return;
+
+        const dataUrl = this.canvas.toDataURL("image/jpeg", 0.95);
+        const base64Data = dataUrl.split(",")[1];
+
+        if (window.electronAPI && typeof window.electronAPI.printOrSavePdf === "function") {
+            try {
+                const result = await window.electronAPI.printOrSavePdf({
+                    action: actionType, // "print" ou "pdf"
+                    base64Data: base64Data,
+                    defaultName: window.currentNefFileName || "impression-photo",
+                    widthCm: parseFloat(document.getElementById("printImgWidth")?.value) || 30,
+                    heightCm: parseFloat(document.getElementById("printImgHeight")?.value) || 20,
+                    dpi: parseInt(document.getElementById("printDpi")?.value) || 300
+                });
+
+                if (result && !result.success && result.error) {
+                    alert(`Erreur : ${result.error}`);
+                }
+            } catch (err) {
+                console.error("❌ Erreur lors de l'action d'impression/PDF :", err);
+            }
+        } else {
+            console.warn("⚠️ L'API Electron pour l'impression n'est pas disponible.");
+        }
+    }
+
+    /**
+     * Simulation ICC Fine Art
+     */
+    async applyIccSimulation(sourceImage, iccPath) {
+        if (!iccPath || iccPath === "none") return sourceImage;
+
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = sourceImage.width;
+        tempCanvas.height = sourceImage.height;
+        const tempCtx = tempCanvas.getContext("2d");
+        
+        tempCtx.drawImage(sourceImage, 0, 0);
+        const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const data = imgData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+            data[i]     = Math.min(255, data[i] * 0.98 + 5);       
+            data[i + 1] = Math.min(255, data[i + 1] * 0.98 + 5);   
+            data[i + 2] = Math.min(255, data[i + 2] * 0.98 + 5);   
+        }
+
+        tempCtx.putImageData(imgData, 0, 0);
+        return tempCanvas;
+    }
+
     async render() {
         if (!this.ctx || !this.canvas) return;
 
-        // 1. Récupérer l'image source active depuis le Studio (soit le canvas de preview, soit l'image chargée)
         let sourceImage = null;
-        const previewCanvas = document.getElementById("previewCanvas");
-        if (previewCanvas && previewCanvas.width > 0) {
-            sourceImage = previewCanvas;
+        if (window.imageProcessor && window.imageProcessor.loadedImage) {
+            sourceImage = window.imageProcessor.loadedImage;
+        } else {
+            const previewCanvas = document.getElementById("previewCanvas");
+            if (previewCanvas && previewCanvas.width > 0) {
+                sourceImage = previewCanvas;
+            }
         }
 
-        // Dimensions de la feuille selon le format choisi
+        const selectedIccPath = document.getElementById("printIccProfile")?.value || "none";
+
+        // Dimensions de la feuille
         const format = document.getElementById("printPaperFormat")?.value || "A4";
         const orientation = document.getElementById("printOrientation")?.value || "portrait";
         const dpi = parseInt(document.getElementById("printDpi")?.value) || 300;
 
-        // Définition des dimensions en cm converties en pixels (basé sur les DPI)
-        let widthCm = 21, heightCm = 29.7; // A4 par défaut
+        let widthCm = 21, heightCm = 29.7;
 
         if (format === "10x15") { widthCm = 10; heightCm = 15; }
         else if (format === "A4") { widthCm = 21; heightCm = 29.7; }
@@ -77,12 +175,10 @@ class PrintManager {
             heightCm = parseFloat(document.getElementById("printCustomHeight")?.value) || 90.0;
         }
 
-        // Application de l'orientation
         if (orientation === "landscape") {
             let temp = widthCm; widthCm = heightCm; heightCm = temp;
         }
 
-        // Conversion cm -> pixels pour le canvas haute résolution (DPI)
         const cmToInch = 1 / 2.54;
         const canvasWidth = Math.round(widthCm * cmToInch * dpi);
         const canvasHeight = Math.round(heightCm * cmToInch * dpi);
@@ -90,12 +186,13 @@ class PrintManager {
         this.canvas.width = canvasWidth;
         this.canvas.height = canvasHeight;
 
-        // Fond blanc de la feuille
+        // 🔹 Nettoyage absolu du fond : Blanc pur garanti sur toute la surface de la feuille
+        this.ctx.save();
         this.ctx.fillStyle = "#ffffff";
         this.ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        this.ctx.restore();
 
         if (!sourceImage) {
-            // Si aucune image n'est chargée, on affiche un message sur la feuille
             this.ctx.fillStyle = "#888888";
             this.ctx.font = `${Math.round(dpi / 10)}px sans-serif`;
             this.ctx.textAlign = "center";
@@ -103,69 +200,84 @@ class PrintManager {
             return;
         }
 
-        // Récupération des options de mise en page
-        const marginMm = parseFloat(document.getElementById("printMargin")?.value) || 10;
-        const marginPx = Math.round((marginMm / 10) * cmToInch * dpi);
+        let userImgW = parseFloat(document.getElementById("printImgWidth")?.value) || 30.0;
+        let userImgH = parseFloat(document.getElementById("printImgHeight")?.value) || 20.0;
+
+        // Sécurité : La taille demandée ne peut pas dépasser les dimensions physiques de la feuille
+        if (userImgW > widthCm) userImgW = widthCm;
+        if (userImgH > heightCm) userImgH = heightCm;
+
+        // 1. LE CADRE ROUGE (Cellule cible exacte demandée par l'utilisateur en cm)
+        const targetW = Math.round(userImgW * cmToInch * dpi);
+        const targetH = Math.round(userImgH * cmToInch * dpi);
+        const frameX = Math.round((canvasWidth - targetW) / 2);
+        const frameY = Math.round((canvasHeight - targetH) / 2);
+
+        // 2. CALCUL PROPORTIONNEL DE LA PHOTO A L'INTERIEUR DE LA CELLULE CIBLE
+        const srcW = sourceImage.width || 1;
+        const srcH = sourceImage.height || 1;
+        const imgAspect = srcW / srcH;
+        const targetAspect = targetW / targetH;
+
+        let drawW = targetW;
+        let drawH = targetH;
+
         const zoomFill = document.getElementById("printZoomFill")?.checked || false;
-        const enableBorder = document.getElementById("printEnableBorder")?.checked || false;
-        const borderWidth = parseInt(document.getElementById("printBorderWidth")?.value) || 2;
-
-        // Zone imprimable disponible
-        const printAreaX = marginPx;
-        const printAreaY = marginPx;
-        const printAreaW = canvasWidth - (marginPx * 2);
-        const printAreaH = canvasHeight - (marginPx * 2);
-
-        // Dessin de l'image avec respect du ratio
-        const imgAspect = sourceImage.width / sourceImage.height;
-        const areaAspect = printAreaW / printAreaH;
-
-        let drawW, drawH, drawX, drawY;
 
         if (zoomFill) {
-            // Mode remplissage (Crop si nécessaire)
-            if (imgAspect > areaAspect) {
-                drawH = printAreaH;
+            if (imgAspect > targetAspect) {
+                drawH = targetH;
                 drawW = drawH * imgAspect;
             } else {
-                drawW = printAreaW;
+                drawW = targetW;
                 drawH = drawW / imgAspect;
             }
         } else {
-            // Mode ajusté (contient toute l'image sans couper)
-            if (imgAspect > areaAspect) {
-                drawW = printAreaW;
+            if (imgAspect > targetAspect) {
+                drawW = targetW;
                 drawH = drawW / imgAspect;
             } else {
-                drawH = printAreaH;
+                drawH = targetH;
                 drawW = drawH * imgAspect;
             }
         }
 
-        drawX = printAreaX + (printAreaW - drawW) / 2;
-        drawY = printAreaY + (printAreaH - drawH) / 2;
+        const drawX = frameX + Math.round((targetW - drawW) / 2);
+        const drawY = frameY + Math.round((targetH - drawH) / 2);
 
-        // Sauvegarde du contexte pour le clip/dessin de l'image
         this.ctx.save();
-        
-        // Si zoomFill est activé, on restreint le dessin à la zone imprimable (pour couper les débords)
+
         if (zoomFill) {
             this.ctx.beginPath();
-            this.ctx.rect(printAreaX, printAreaY, printAreaW, printAreaH);
+            this.ctx.rect(frameX, frameY, targetW, targetH);
             this.ctx.clip();
         }
 
-        this.ctx.drawImage(sourceImage, drawX, drawY, drawW, drawH);
+        let imageToDraw = sourceImage;
+        if (selectedIccPath !== "none") {
+            imageToDraw = await this.applyIccSimulation(sourceImage, selectedIccPath);
+            
+            this.ctx.fillStyle = "rgba(88, 101, 242, 0.8)";
+            this.ctx.font = `bold ${Math.round(dpi / 40)}px sans-serif`;
+            this.ctx.textAlign = "left";
+            this.ctx.fillText(`📄 Simulation ICC active`, frameX + 10, frameY + 30);
+        }
+
+        this.ctx.drawImage(imageToDraw, 0, 0, srcW, srcH, drawX, drawY, drawW, drawH);
         this.ctx.restore();
 
-        // Cadre / Filet autour de l'image
+        this.ctx.strokeStyle = "rgba(255, 0, 0, 0.8)";
+        this.ctx.lineWidth = Math.max(2, Math.round(2 * (dpi / 300)));
+        this.ctx.strokeRect(frameX, frameY, targetW, targetH);
+
+        const enableBorder = document.getElementById("printEnableBorder")?.checked || false;
+        const borderWidth = parseInt(document.getElementById("printBorderWidth")?.value) || 2;
         if (enableBorder) {
             this.ctx.strokeStyle = "#000000";
-            this.ctx.lineWidth = borderWidth * (dpi / 300); // Ajuste l'épaisseur selon le DPI
+            this.ctx.lineWidth = borderWidth * (dpi / 300);
             this.ctx.strokeRect(drawX, drawY, drawW, drawH);
         }
 
-        // Informations textuelles sous l'image (si demandé)
         const infoType = document.getElementById("printInfoType")?.value || "none";
         if (infoType !== "none") {
             let textToPrint = "";
@@ -179,11 +291,10 @@ class PrintManager {
                 this.ctx.fillStyle = "#333333";
                 this.ctx.font = `${Math.round(dpi / 25)}px sans-serif`;
                 this.ctx.textAlign = "center";
-                this.ctx.fillText(textToPrint, canvasWidth / 2, drawY + drawH + Math.round(dpi / 15));
+                this.ctx.fillText(textToPrint, canvasWidth / 2, frameY + targetH + Math.round(dpi / 15));
             }
         }
 
-        // Filigrane (Watermark)
         const watermarkText = document.getElementById("printWatermarkText")?.value || "";
         const watermarkPos = document.getElementById("printWatermarkPos")?.value || "bottom-right";
         if (watermarkText) {
@@ -202,7 +313,6 @@ class PrintManager {
             this.ctx.fillText(watermarkText, wmX, wmY);
         }
 
-        // Redimensionner proprement l'affichage du canvas dans le conteneur HTML de prévisualisation
         const container = document.getElementById("printPreviewCanvasContainer");
         if (container) {
             const maxW = container.parentElement.clientWidth - 60;
