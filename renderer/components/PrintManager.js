@@ -11,8 +11,10 @@ class PrintManager {
         this.currentImagePath = null;
         this.currentPictureControl = null;
         this.currentImageData = null; // Pour l'aperçu
-        
+        this.selectedPrinter = null; // 🔹 NOUVEAU : imprimante choisie dans le sélecteur intégré
+
         this.initListeners();
+        this.initPrinterSelector();
         
         // Écouter les changements d'image depuis le Studio
         window.addEventListener('imageLoadedForPrint', (e) => {
@@ -20,6 +22,71 @@ class PrintManager {
                 this.setImage(e.detail.imagePath, e.detail.pictureControl);
             }
         });
+    }
+
+    /**
+     * 🔹 NOUVEAU : Crée (si besoin) et peuple un sélecteur d'imprimante.
+     * Injecté dynamiquement juste avant le bouton "Lancer l'impression" pour
+     * ne pas dépendre d'une modification du HTML.
+     */
+    async initPrinterSelector() {
+        const btnPrintExecute = document.getElementById("btnPrintExecute");
+        if (!btnPrintExecute || !btnPrintExecute.parentNode) return;
+
+        // Éviter les doublons si initPrinterSelector est appelé plusieurs fois
+        let select = document.getElementById("printerSelect");
+        if (!select) {
+            select = document.createElement("select");
+            select.id = "printerSelect";
+            select.style.marginBottom = "8px";
+            select.style.width = "100%";
+            btnPrintExecute.parentNode.insertBefore(select, btnPrintExecute);
+
+            select.addEventListener("change", () => {
+                this.selectedPrinter = select.value || null;
+                console.log("🖨️ Imprimante sélectionnée :", this.selectedPrinter || "(boîte de dialogue Windows)");
+            });
+        }
+
+        if (!window.electronAPI || typeof window.electronAPI.getPrinters !== "function") {
+            console.warn("⚠️ electronAPI.getPrinters indisponible : sélecteur d'imprimante désactivé.");
+            return;
+        }
+
+        try {
+            const printers = await window.electronAPI.getPrinters();
+            select.innerHTML = "";
+
+            // Option par défaut : laisser Windows proposer le choix (comportement historique)
+            const defaultOpt = document.createElement("option");
+            defaultOpt.value = "";
+            defaultOpt.textContent = "Choisir via la boîte de dialogue Windows";
+            select.appendChild(defaultOpt);
+
+            if (!printers || printers.length === 0) {
+                console.warn("⚠️ Aucune imprimante détectée par Electron.");
+                return;
+            }
+
+            printers.forEach(p => {
+                const opt = document.createElement("option");
+                opt.value = p.name;
+                opt.textContent = p.displayName || p.name;
+                if (p.isDefault) opt.textContent += " (par défaut)";
+                select.appendChild(opt);
+            });
+
+            // Présélectionner l'imprimante par défaut du système, si connue
+            const def = printers.find(p => p.isDefault);
+            if (def) {
+                select.value = def.name;
+                this.selectedPrinter = def.name;
+            }
+
+            console.log(`✅ ${printers.length} imprimante(s) chargée(s) dans le sélecteur`);
+        } catch (e) {
+            console.error("❌ Erreur chargement des imprimantes:", e);
+        }
     }
 
     /**
@@ -144,8 +211,32 @@ class PrintManager {
      * 🔹 MODIFIÉ : Prépare l'image et l'envoie vers Electron
      */
     async handlePrintOrPdf(actionType = "print") {
-        if (!this.currentImagePath) {
-            alert("Aucune image chargée");
+    if (!this.currentImagePath) {
+        alert("Aucune image chargée");
+        return;
+    }
+
+    // Récupérer les dimensions
+    let widthCm = parseFloat(document.getElementById("printImgWidth")?.value) || 15;
+    let heightCm = parseFloat(document.getElementById("printImgHeight")?.value) || 10;
+    
+    // 🔥 LIMITER LES DIMENSIONS MAXIMUM
+    const MAX_CM = 100;
+    if (widthCm > MAX_CM) {
+        widthCm = MAX_CM;
+        document.getElementById("printImgWidth").value = MAX_CM;
+        console.log(`⚠️ Largeur limitée à ${MAX_CM}cm`);
+    }
+    if (heightCm > MAX_CM) {
+        heightCm = MAX_CM;
+        document.getElementById("printImgHeight").value = MAX_CM;
+        console.log(`⚠️ Hauteur limitée à ${MAX_CM}cm`);
+    }
+
+        // 🔹 NOUVEAU : récupérer l'image AU MOMENT DE L'IMPRESSION, avec les réglages actuels
+        const liveImageDataUrl = this.getLiveImageDataUrl();
+        if (!liveImageDataUrl) {
+            alert("❌ Impossible de récupérer l'image traitée. Vérifiez qu'une photo est bien chargée dans le Studio.");
             return;
         }
 
@@ -153,7 +244,9 @@ class PrintManager {
         const params = {
             action: actionType,
             imagePath: this.currentImagePath,
+            imageDataUrl: liveImageDataUrl,
             pictureControl: this.currentPictureControl,
+            printerName: this.selectedPrinter || null,
             defaultName: this.currentImagePath ? 
                 this.currentImagePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, "") : 
                 "impression-photo",
@@ -190,6 +283,39 @@ class PrintManager {
             console.error("❌ Erreur lors de l'action d'impression/PDF :", err);
             alert(`❌ Erreur : ${err.message}`);
         }
+    }
+
+    /**
+     * 🔹 NOUVEAU : Récupère l'image ACTUELLE, avec tous les réglages appliqués.
+     * Utilise la même source que l'export JPEG (window.imageProcessor.exportFullResolution),
+     * qui rend l'image traitée à sa résolution réelle, sans marge ni fond autour.
+     * ⚠️ Ne PAS utiliser previewCanvas.toDataURL() directement en source principale :
+     * ce canvas d'affichage peut contenir des marges/un fond autour de la photo,
+     * ce qui imprimerait "toute la page" au lieu de la photo seule.
+     */
+    getLiveImageDataUrl() {
+        if (window.imageProcessor && typeof window.imageProcessor.exportFullResolution === "function") {
+            try {
+                const dataUrl = window.imageProcessor.exportFullResolution(1, "image/jpeg");
+                if (dataUrl) {
+                    console.log("✅ Image à jour récupérée via exportFullResolution (avec réglages)");
+                    return dataUrl;
+                }
+            } catch (e) {
+                console.warn("⚠️ exportFullResolution a échoué:", e);
+            }
+        }
+
+        // Repli de dernier recours seulement : le canvas d'aperçu du Studio.
+        // Attention : peut contenir des marges/un fond → risque d'imprimer "toute la page".
+        const previewCanvas = document.getElementById("previewCanvas");
+        if (previewCanvas && previewCanvas.width > 0 && previewCanvas.height > 0) {
+            console.warn("⚠️ Repli sur previewCanvas.toDataURL() : exportFullResolution indisponible. " +
+                "Risque d'imprimer le canvas entier (marges incluses) plutôt que la photo seule.");
+            return previewCanvas.toDataURL("image/jpeg", 0.95);
+        }
+
+        return null;
     }
 
     /**
@@ -235,25 +361,20 @@ class PrintManager {
         }
 
         try {
-            // 🔹 CHARGER L'IMAGE DEPUIS LE DISQUE
-            let imageData = null;
-            
-            // Essayer de charger via Electron
-            if (window.electronAPI && typeof window.electronAPI.loadImageForPrint === "function") {
+            // 🔹 MODIFIÉ : utiliser en priorité l'image traitée ET à jour (mêmes réglages
+            // que ceux visibles dans le Studio à l'instant présent), pas une version figée
+            // au moment du chargement du fichier.
+            let imageData = this.getLiveImageDataUrl();
+
+            // Repli : recharger depuis le disque via Electron (image brute, réglages non garantis à jour)
+            if (!imageData && window.electronAPI && typeof window.electronAPI.loadImageForPrint === "function") {
+                console.warn("⚠️ Repli sur loadImageForPrint (Electron) : l'image peut ne pas refléter les derniers réglages.");
                 const result = await window.electronAPI.loadImageForPrint(
                     this.currentImagePath,
                     this.currentPictureControl
                 );
                 if (result && result.success) {
                     imageData = result.data;
-                }
-            }
-
-            // Fallback : utiliser le canvas du studio
-            if (!imageData) {
-                const previewCanvas = document.getElementById("previewCanvas");
-                if (previewCanvas && previewCanvas.width > 0) {
-                    imageData = previewCanvas.toDataURL("image/jpeg");
                 }
             }
 

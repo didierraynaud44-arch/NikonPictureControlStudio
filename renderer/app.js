@@ -1,5 +1,6 @@
 /*=========================================================
     Nikon Picture Control Studio - Controller (app.js)
+    Version avec EXIF depuis la base de données
 =========================================================*/
 
 let currentNefFileName = "image-editee";
@@ -18,6 +19,254 @@ try {
 
 // Cache mémoire pour accélérer le passage d'une photo à l'autre
 const studioImageCache = new Map();
+
+// ============================================================
+// GESTION DE LA PERSISTANCE DES RÉGLAGES PICTURE CONTROL
+// ============================================================
+
+let currentSettingsSaveTimeout = null;
+
+/**
+ * Sauvegarde automatique des réglages Picture Control
+ */
+async function saveCurrentPictureControlSettings(filePath) {
+    if (!filePath) {
+        console.warn("⚠️ Aucun fichier chargé pour sauvegarder");
+        return;
+    }
+
+    try {
+        if (!window.imageProcessor) {
+            console.warn("⚠️ imageProcessor non disponible");
+            return;
+        }
+
+        const settings = window.imageProcessor.getPictureControl ? 
+            window.imageProcessor.getPictureControl() : 
+            window.imageProcessor.pictureControl;
+
+        if (!settings) {
+            console.warn("⚠️ Aucun réglage à sauvegarder");
+            return;
+        }
+
+        console.log("💾 Sauvegarde des réglages pour:", filePath);
+
+        if (window.electronAPI && typeof window.electronAPI.savePhotoSettings === "function") {
+            const result = await window.electronAPI.savePhotoSettings(filePath, settings);
+            if (result && result.success !== false) {
+                console.log("✅ Réglages sauvegardés avec succès");
+                return result;
+            } else {
+                console.error("❌ Erreur sauvegarde:", result?.error);
+                return null;
+            }
+        }
+    } catch (err) {
+        console.error("❌ Erreur sauvegarde automatique:", err);
+        return null;
+    }
+}
+
+/**
+ * 💾 Sauvegarde automatique des réglages de la photo active dans SQLite en temps réel
+ */
+async function saveCurrentPhotoSettingsToCatalog() {
+    if (!window.currentStudioFilePath) return;
+    const currentPC = window.imageProcessor?.pictureControl || activeProfilePC || {};
+    
+    if (window.electronAPI && typeof window.electronAPI.savePhotoSettings === "function") {
+        try {
+            await window.electronAPI.savePhotoSettings(window.currentStudioFilePath, currentPC);
+            console.log("💾 Réglages sauvegardés automatiquement pour:", window.currentStudioFilePath);
+        } catch (err) {
+            console.error("❌ Erreur lors de la sauvegarde automatique des réglages :", err);
+        }
+    }
+}
+
+/**
+ * Charge les réglages sauvegardés pour une photo
+ */
+async function loadPictureControlSettings(filePath) {
+    if (!filePath) return null;
+
+    try {
+        console.log("📂 Chargement des réglages pour:", filePath);
+
+        let settings = null;
+        
+        if (window.electronAPI && typeof window.electronAPI.getPhotoSettings === "function") {
+            settings = await window.electronAPI.getPhotoSettings(filePath);
+        }
+
+        if (settings) {
+            console.log("📂 Réglages chargés depuis la base");
+            return settings;
+        } else {
+            console.log("📂 Aucun réglage trouvé pour cette photo");
+            return null;
+        }
+    } catch (err) {
+        console.error("❌ Erreur chargement réglages:", err);
+        return null;
+    }
+}
+
+/**
+ * Applique les réglages à l'imageProcessor
+ */
+function applySettingsToImageProcessor(settings) {
+    if (!settings || !window.imageProcessor) return;
+
+    console.log("🎨 Application des réglages à l'image:", Object.keys(settings));
+    
+    try {
+        const pcData = { ...settings };
+        
+        if (typeof window.imageProcessor.setPictureControl === "function") {
+            window.imageProcessor.setPictureControl(pcData);
+        } else {
+            window.imageProcessor.pictureControl = pcData;
+        }
+        
+        if (typeof window.updatePictureControl === "function") {
+            window.updatePictureControl({
+                pictureControl: pcData,
+                isNewFile: false
+            }, true);
+        }
+        
+        console.log("✅ Réglages appliqués à l'image");
+    } catch (err) {
+        console.error("❌ Erreur application des réglages:", err);
+    }
+}
+
+/**
+ * Applique les réglages aux curseurs de l'interface
+ */
+function applySettingsToSliders(settings) {
+    if (!settings) return;
+    
+    console.log("🎛️ Application des réglages aux curseurs:", Object.keys(settings));
+    
+    const sliders = document.querySelectorAll('input[type="range"]');
+    sliders.forEach(slider => {
+        const key = slider.id || slider.name;
+        if (key && settings[key] !== undefined) {
+            const value = settings[key];
+            slider.value = value;
+            const display = document.getElementById(`${key}-value`);
+            if (display) {
+                display.textContent = value;
+            }
+            console.log(`  - ${key}: ${value}`);
+        }
+    });
+}
+
+// ============================================================
+// FIN GESTION PERSISTANCE
+// ============================================================
+
+// ============================================================
+// MISE À JOUR EXIF DEPUIS LA BASE DE DONNÉES
+// ============================================================
+
+/**
+ * Met à jour la barre EXIF avec les données de la base
+ */
+function updateExifBarFromDb(photo) {
+    const cameraEl = document.getElementById('exifCamera');
+    const lensEl = document.getElementById('exifLens');
+    const paramsEl = document.getElementById('exifParams');
+    
+    if (!cameraEl || !lensEl || !paramsEl) return;
+
+    // Appareil photo
+    const make = photo.make || '';
+    const model = photo.model || '';
+    cameraEl.textContent = make && model ? `${make} ${model}` : (make || model || '-');
+
+    // Objectif
+    lensEl.textContent = photo.lens || '-';
+
+    // Paramètres
+    const params = [];
+    if (photo.focal_length) params.push(`${photo.focal_length}mm`);
+    if (photo.aperture) params.push(`f/${photo.aperture}`);
+    if (photo.shutter_speed) params.push(photo.shutter_speed);
+    if (photo.iso) params.push(`ISO ${photo.iso}`);
+    if (photo.exposure_compensation) params.push(`EV ${photo.exposure_compensation}`);
+    if (photo.white_balance) params.push(photo.white_balance);
+    if (photo.date_time_original) params.push(new Date(photo.date_time_original).toLocaleDateString());
+    
+    paramsEl.textContent = params.length > 0 ? params.join(' | ') : 'Aucune EXIF';
+}
+
+/**
+
+ */
+async function loadExifFromDatabase(filePath) {
+    try {
+        // Essayer d'abord avec getPhotoByPath si disponible
+        if (window.catalogAPI && typeof window.catalogAPI.getPhotoByPath === "function") {
+            const photo = await window.catalogAPI.getPhotoByPath(filePath);
+            if (photo && (photo.make || photo.model || photo.iso)) {
+                updateExifBarFromDb(photo);
+                console.log("✅ EXIF chargées via getPhotoByPath");
+                return photo;
+            }
+        }
+        
+        // Fallback: utiliser getPhotos pour chercher la photo
+        if (window.catalogAPI && typeof window.catalogAPI.getPhotos === "function") {
+            // Normaliser le chemin pour la comparaison
+            const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+            
+            // Récupérer toutes les photos
+            const allPhotos = await window.catalogAPI.getPhotos(null);
+            
+            if (allPhotos && allPhotos.length > 0) {
+                // Chercher la photo par chemin
+                const photo = allPhotos.find(p => {
+                    const pPath = (p.file_path || '').replace(/\\/g, '/').toLowerCase();
+                    return pPath === normalizedPath;
+                });
+                
+                if (photo && (photo.make || photo.model || photo.iso)) {
+                    updateExifBarFromDb(photo);
+                    console.log("✅ EXIF chargées via getPhotos (fallback)");
+                    return photo;
+                }
+            }
+        }
+        
+        // Fallback: utiliser electronAPI
+        if (window.electronAPI && typeof window.electronAPI.getPhotoExif === "function") {
+            const exifData = await window.electronAPI.getPhotoExif(filePath);
+            if (exifData && (exifData.make || exifData.model || exifData.iso)) {
+                updateExifBarFromDb(exifData);
+                console.log("✅ EXIF chargées via electronAPI");
+                return exifData;
+            }
+        }
+        
+        console.warn("⚠️ Aucune EXIF trouvée pour:", filePath);
+        return null;
+    } catch (err) {
+        console.error("❌ Erreur chargement EXIF depuis la base:", err);
+        return null;
+    }
+}
+
+// Exposer les fonctions globalement
+window.updateExifBarFromDb = updateExifBarFromDb;
+window.loadExifFromDatabase = loadExifFromDatabase;
+// ============================================================
+// FIN GESTION EXIF
+// ============================================================
 
 /**
  * Extrait tous les fichiers d'un nœud de dossier pour alimenter la grille
@@ -52,7 +301,6 @@ function buildTreeHTML(node) {
     ul.style.margin = "0";
 
     if (node.children && node.children.length > 0) {
-        // 🔹 Tri strict et naturel (type Windows) des sous-dossiers dans l'interface
         const sortedChildren = [...node.children].sort((a, b) => {
             return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
         });
@@ -94,7 +342,6 @@ function buildTreeHTML(node) {
     }
 
     if (node.files && node.files.length > 0) {
-        // 🔹 Tri strict et naturel des fichiers images
         const sortedFiles = [...node.files].sort((a, b) => {
             return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
         });
@@ -211,7 +458,6 @@ function renderStudioFolderTree() {
         return;
     }
 
-    // 🔹 Tri des dossiers racines importés
     const sortedFoldersList = [...studioFoldersList].sort((a, b) => {
         return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
     });
@@ -384,7 +630,7 @@ function pathFileName(filePath) {
 }
 
 /* =========================================================
-    CHARGEMENT STUDIO & RENDERER
+    CHARGEMENT STUDIO AVEC EXIF DEPUIS LA BASE
 ========================================================= */
 async function loadImageInStudio(filePath) {
     if (!filePath) return;
@@ -412,6 +658,116 @@ async function loadImageInStudio(filePath) {
             return;
         }
 
+        // 🔍 DEBUG - Voir ce que contient fileInfo
+        console.log("🔍 fileInfo contient:", {
+            make: fileInfo.make,
+            model: fileInfo.model,
+            iso: fileInfo.iso,
+            aperture: fileInfo.aperture,
+            focalLength: fileInfo.focalLength,
+            lens: fileInfo.lens,
+            allKeys: Object.keys(fileInfo)
+        });
+
+        // ============================================================
+        // 🔥 AFFICHER LES EXIF DIRECTEMENT DEPUIS fileInfo
+        // ============================================================
+        
+        // Vérifier que fileInfo contient les EXIF
+        if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
+            // Utiliser updateExifBarFromDb avec les données de fileInfo
+            updateExifBarFromDb({
+                make: fileInfo.make || null,
+                model: fileInfo.model || null,
+                lens: fileInfo.lens || fileInfo.lensModel || null,
+                iso: fileInfo.iso || null,
+                aperture: fileInfo.aperture || null,
+                focal_length: fileInfo.focalLength || null,
+                shutter_speed: fileInfo.shutterSpeed || null,
+                exposure_compensation: fileInfo.exposureCompensation || null,
+                white_balance: fileInfo.whiteBalance || null,
+                date_time_original: fileInfo.dateTimeOriginal || null
+            });
+            console.log("✅ EXIF affichées depuis fileInfo");
+        } else {
+            // Fallback: essayer la base de données
+            console.log("📸 Pas d'EXIF dans fileInfo, essai base de données...");
+            try {
+                if (window.catalogAPI && typeof window.catalogAPI.getPhotos === "function") {
+                    const allPhotos = await window.catalogAPI.getPhotos(null);
+                    if (allPhotos && allPhotos.length > 0) {
+                        const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+                        const photo = allPhotos.find(p => {
+                            const pPath = (p.file_path || '').replace(/\\/g, '/').toLowerCase();
+                            return pPath === normalizedPath;
+                        });
+                        if (photo && (photo.make || photo.model || photo.iso)) {
+                            updateExifBarFromDb(photo);
+                            console.log("✅ EXIF depuis la base (fallback)");
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("⚠️ Erreur fallback base:", e);
+            }
+        }
+
+        // ============================================================
+        // FIN AFFICHAGE EXIF
+        // ============================================================
+
+        // 🔥 CHARGER LES RÉGLAGES SAUVEGARDÉS
+        const savedSettings = await loadPictureControlSettings(filePath);
+        let pcData = {};
+
+        if (savedSettings && Object.keys(savedSettings).length > 0) {
+            pcData = savedSettings;
+            console.log("📂 Utilisation des réglages sauvegardés");
+            
+            // Appliquer les réglages aux curseurs
+            if (typeof window.applySettingsToSliders === "function") {
+                window.applySettingsToSliders(savedSettings);
+            } else {
+                // Fallback manuel
+                console.warn("⚠️ window.applySettingsToSliders non disponible, fallback manuel");
+                const sliders = document.querySelectorAll('input[type="range"]');
+                sliders.forEach(slider => {
+                    const key = slider.id || slider.name;
+                    if (key && savedSettings[key] !== undefined) {
+                        slider.value = savedSettings[key];
+                        const display = document.getElementById(`${key}-value`);
+                        if (display) {
+                            display.textContent = savedSettings[key];
+                        }
+                    }
+                });
+            }
+            
+            // Mettre à jour le panneau Picture Control
+            if (typeof window.updatePictureControl === "function") {
+                window.updatePictureControl({
+                    pictureControl: savedSettings,
+                    isNewFile: false
+                }, true);
+            }
+            
+            console.log("✅ Réglages appliqués à l'interface");
+        } else {
+            pcData = fileInfo.pictureControl || fileInfo.pc || {};
+            pcData.sharpening = pcData.sharpening ?? pcData.sharpness ?? 3.25;
+            pcData.midRangeSharpening = pcData.midRangeSharpening ?? 1.0;
+            
+            // Réinitialiser les curseurs à 0
+            const sliders = document.querySelectorAll('input[type="range"]');
+            sliders.forEach(slider => {
+                slider.value = 0;
+                const display = document.getElementById(`${slider.id}-value`);
+                if (display) {
+                    display.textContent = '0';
+                }
+            });
+        }
+
         let rawSrc = fileInfo.preview || fileInfo.filePath || fileInfo.path;
         let imageSrc = "";
 
@@ -425,14 +781,6 @@ async function loadImageInStudio(filePath) {
                 imageSrc = formattedPath.startsWith("/") ? `file://${formattedPath}` : `file:///${formattedPath}`;
             }
         }
-
-        if (typeof window.updateExif === "function") {
-            window.updateExif(fileInfo);
-        }
-
-        const pcData = fileInfo.pictureControl || fileInfo.pc || {};
-        pcData.sharpening = pcData.sharpening ?? pcData.sharpness ?? 3.25;
-        pcData.midRangeSharpening = pcData.midRangeSharpening ?? 1.0;
 
         if (imageSrc && window.imageProcessor) {
             if (typeof window.imageProcessor.clear === "function") {
@@ -449,6 +797,7 @@ async function loadImageInStudio(filePath) {
                 }
             );
 
+            // Appliquer les réglages chargés
             window.imageProcessor.setPictureControl(pcData);
         }
 
@@ -460,16 +809,18 @@ async function loadImageInStudio(filePath) {
             }, true);
         }
 
+        window.currentPictureControl = pcData;
+
         if (typeof window.switchToView === "function") {
             window.switchToView("view-studio");
         }
 
-        // 🔹 AJOUT : Partager l'image avec le PrintManager
+        // Partager l'image avec PrintManager
         if (window.printManager && fileInfo) {
-            const pcForPrint = fileInfo.pictureControl || fileInfo.pc || {};
+            const pcForPrint = savedSettings || pcData || {};
             try {
                 window.printManager.setImage(filePath, pcForPrint);
-                console.log("✅ Image partagée avec PrintManager:", filePath);
+                console.log("✅ Image partagée avec PrintManager avec réglages:", Object.keys(pcForPrint));
             } catch (pmErr) {
                 console.warn("⚠️ Erreur partage avec PrintManager:", pmErr);
             }
@@ -482,6 +833,7 @@ async function loadImageInStudio(filePath) {
     }
 }
 window.loadImageInStudio = loadImageInStudio;
+
 
 function prefetchAdjacentImages(currentPath) {
     if (!window.gridManager || !window.gridManager.images || window.gridManager.images.length === 0) return;
@@ -506,10 +858,6 @@ function prefetchAdjacentImages(currentPath) {
         }
     });
 }
-
-/* =========================================================
-    MODULE EXPORTATION
-========================================================= */
 
 /* =========================================================
     MODULE EXPORTATION
@@ -569,17 +917,14 @@ function initExportModal() {
 
             try {
                 if (isSingleMode) {
-                    // ===== NOUVELLE VERSION : Export en pleine résolution avec modifications =====
                     if (!window.imageProcessor) {
                         alert("❌ Aucune image chargée à exporter");
                         return;
                     }
 
-                    // Utiliser la nouvelle méthode exportFullResolution
-                    const dataUrl = window.imageProcessor.exportFullResolution(
-                        config.quality,
-                        config.format
-                    );
+                    const dataUrl = window.imageProcessor.exportFullResolution ? 
+                        window.imageProcessor.exportFullResolution(config.quality, config.format) :
+                        null;
 
                     if (!dataUrl) {
                         alert("❌ Impossible de générer l'export. Aucune image chargée ou erreur de traitement.");
@@ -691,6 +1036,38 @@ function initButtons() {
         window.imageProcessor = new ImageProcessor("previewCanvas");
     }
 
+    // INTERCEPTER LES MODIFICATIONS POUR SAUVEGARDE AUTOMATIQUE
+    if (window.imageProcessor) {
+        const debouncedSave = (() => {
+            let timeout = null;
+            return (filePath) => {
+                if (timeout) clearTimeout(timeout);
+                timeout = setTimeout(async () => {
+                    if (filePath && window.imageProcessor) {
+                        const settings = window.imageProcessor.getPictureControl ? 
+                            window.imageProcessor.getPictureControl() : 
+                            window.imageProcessor.pictureControl;
+                        if (settings) {
+                            await saveCurrentPictureControlSettings(filePath);
+                        }
+                    }
+                    timeout = null
+                                    }, 500);
+            };
+        })();
+
+        const originalSetPictureControl = window.imageProcessor.setPictureControl;
+        if (originalSetPictureControl) {
+            window.imageProcessor.setPictureControl = function(pc) {
+                const result = originalSetPictureControl.call(this, pc);
+                if (window.currentStudioFilePath) {
+                    debouncedSave(window.currentStudioFilePath);
+                }
+                return result;
+            };
+        }
+    }
+
     if (window.imageProcessor && typeof window.initMasksController === "function") {
         window.initMasksController(window.imageProcessor);
     }
@@ -747,6 +1124,7 @@ function initButtons() {
     function applyStudioTransform() {
         if (window.imageProcessor && typeof window.imageProcessor.setTransform === "function") {
             window.imageProcessor.setTransform(currentTransform);
+            saveCurrentPhotoSettingsToCatalog();
         }
     }
 
@@ -792,7 +1170,11 @@ function initButtons() {
         window.renderPictureControlPanel("pictureControlStatus", null, {
             compact: false,
             onChange: (state) => {
-                if (window.imageProcessor) window.imageProcessor.setPictureControl(state);
+                if (window.imageProcessor) {
+                    window.imageProcessor.setPictureControl(state);
+                    // 💾 Sauvegarde automatique des curseurs
+                    saveCurrentPhotoSettingsToCatalog();
+                }
             }
         });
     }
@@ -800,7 +1182,9 @@ function initButtons() {
     renderStudioFolderTree();
     initExportModal();
 
-    if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
+    if (typeof window.renderMasksPanel === "function") {
+        window.renderMasksPanel();
+    }
 
     ensureStudioNavigationArrows();
     
@@ -918,3 +1302,56 @@ function initIccManager() {
         };
     }
 }
+const btnFullscreen = document.getElementById('btnFullscreen');
+if (btnFullscreen) {
+    btnFullscreen.addEventListener('click', () => {
+        const container = document.getElementById('singleImageContainer');
+        if (container) {
+            if (!document.fullscreenElement) {
+                container.requestFullscreen().catch(err => {
+                    console.warn("⚠️ Plein écran non disponible:", err);
+                });
+                btnFullscreen.textContent = '⛶'; // Icône plein écran
+                btnFullscreen.title = 'Quitter le plein écran';
+            } else {
+                document.exitFullscreen();
+                btnFullscreen.textContent = '⛶';
+                btnFullscreen.title = 'Plein écran';
+            }
+        }
+    });
+}
+
+// Surveiller les changements de plein écran
+document.addEventListener('fullscreenchange', () => {
+    const btn = document.getElementById('btnFullscreen');
+    if (btn) {
+        if (document.fullscreenElement) {
+            btn.textContent = '⛶';
+            btn.title = 'Quitter le plein écran';
+        } else {
+            btn.textContent = '⛶';
+            btn.title = 'Plein écran';
+        }
+    }
+});
+// ============================================================
+// EXPOSER LES FONCTIONS AU GLOBAL
+// ============================================================
+
+window.saveCurrentPictureControlSettings = saveCurrentPictureControlSettings;
+window.loadPictureControlSettings = loadPictureControlSettings;
+window.applySettingsToImageProcessor = applySettingsToImageProcessor;
+window.applySettingsToSliders = applySettingsToSliders;
+window.collectAllFilesFromFolder = collectAllFilesFromFolder;
+window.buildTreeHTML = buildTreeHTML;
+window.renderStudioFolderTree = renderStudioFolderTree;
+window.openStudioFolder = openStudioFolder;
+window.loadSavedStudioFolders = loadSavedStudioFolders;
+window.renderNp3Library = renderNp3Library;
+window.initIccManager = initIccManager;
+window.saveCurrentPhotoSettingsToCatalog = saveCurrentPhotoSettingsToCatalog;
+window.loadExifFromDatabase = loadExifFromDatabase;
+window.updateExifBarFromDb = updateExifBarFromDb;
+
+console.log("✅ app.js chargé avec persistance des réglages Picture Control et EXIF depuis la base");

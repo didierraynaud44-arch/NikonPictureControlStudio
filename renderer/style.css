@@ -715,9 +715,62 @@ canvas {
     position: relative;
 }
 
-/* =========================================================
-   CONTENEUR ET SUPERPOSITION CANVAS (Studio & Profils)
-========================================================= */
+/* ============================================================
+   BARRE EXIF - AFFICHAGE FORCÉ
+============================================================ */
+
+#exifInfo {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    padding: 8px 16px !important;
+    min-height: 36px !important;
+    height: auto !important;
+    background: #1a1a1a !important;
+    border-top: 1px solid #333 !important;
+    color: #aaa !important;
+    font-size: 12px !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+}
+
+#exifInfo span {
+    color: #e8eaed !important;
+    font-weight: 500 !important;
+}
+
+#exifCamera {
+    color: #8ab4f8 !important;
+}
+
+#exifLens {
+    color: #a8dab5 !important;
+}
+
+#exifParams {
+    color: #fdd663 !important;
+}
+
+.exif-bar {
+    display: flex !important;
+    align-items: center !important;
+    padding: 8px 16px !important;
+    min-height: 36px !important;
+    height: auto !important;
+    background: #1a1a1a !important;
+    border-top: 1px solid #333 !important;
+    color: #aaa !important;
+    font-size: 12px !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
 /* =========================================================
    CONTENEUR & SUPERPOSITION DES CANVAS (Studio)
 ========================================================= */
@@ -895,4 +948,161 @@ canvas {
 
 .studio-next-btn {
     right: 20px;
+}
+/* ============================================================
+   BARRE EXIF - STYLES
+============================================================ */
+/* ============================================================
+   BARRE EXIF - STYLES UNIFIÉS
+============================================================ */
+
+/* Style de base */
+#exifInfo,
+.exif-bar {
+    display: flex !important;
+    align-items: center !important;
+    padding: 8px 16px !important;
+    min-height: 36px !important;
+    height: auto !important;
+    background: #1a1a1a !important;
+    border-top: 1px solid #333 !important;
+    color: #aaa !important;
+    font-size: 12px !important;
+    gap: 10px !important;
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    flex-shrink: 0 !important;
+    position: relative !important;
+    z-index: 10 !important;
+}
+
+/* Séparateurs */
+.exif-sep {
+    color: #555 !important;
+}
+
+/* Couleurs des éléments EXIF */
+#exifCamera {
+    color: #8ab4f8 !important;
+    font-weight: 500 !important;
+}
+
+#exifLens {
+    color: #a8dab5 !important;
+    font-weight: 500 !important;
+}
+
+#exifParams {
+    color: #fdd663 !important;
+    font-weight: 500 !important;
+}
+
+/* ============================================================
+   BARRE EXIF - MODE PLEIN ÉCRAN
+============================================================ */
+
+/* Quand le preview-panel est en plein écran */
+.preview-panel:fullscreen #exifInfo,
+.preview-panel:fullscreen .exif-bar,
+.preview-panel:-webkit-full-screen #exifInfo,
+.preview-panel:-webkit-full-screen .exif-bar,
+.preview-panel:-moz-full-screen #exifInfo,
+.preview-panel:-moz-full-screen .exif-bar {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 9999 !important;
+    background: rgba(20, 20, 20, 0.95) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+    border-top: 1px solid #444 !important;
+    padding: 10px 20px !important;
+    min-height: 44px !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+}
+
+/* Ajuster le canvas en plein écran pour laisser de la place à la barre */
+.preview-panel:fullscreen .canvas-container,
+.preview-panel:-webkit-full-screen .canvas-container,
+.preview-panel:-moz-full-screen .canvas-container {
+    height: calc(100% - 50px) !important;
+    max-height: calc(100% - 50px) !important;
+}
+
+/* ============================================================
+   BARRE EXIF - RESPONSIVE
+============================================================ */
+
+@media (max-width: 768px) {
+    #exifInfo,
+    .exif-bar {
+        font-size: 10px !important;
+        padding: 4px 10px !important;
+        gap: 4px !important;
+        min-height: 28px !important;
+    }
+    
+    .preview-panel:fullscreen #exifInfo,
+    .preview-panel:fullscreen .exif-bar,
+    .preview-panel:-webkit-full-screen #exifInfo,
+    .preview-panel:-webkit-full-screen .exif-bar {
+        padding: 6px 12px !important;
+        min-height: 32px !important;
+        font-size: 10px !important;
+    }
+}
+/* Plein écran - avec plus de marge */
+.preview-panel:fullscreen #exifInfo,
+.preview-panel:-webkit-full-screen #exifInfo {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 9999 !important;
+    background: rgba(20, 20, 20, 0.95) !important;
+    backdrop-filter: blur(8px) !important;
+    border-top: 1px solid #444 !important;
+    padding: 10px 20px 20px !important;  /* ← plus de padding en bas */
+    min-height: 50px !important;         /* ← plus haut */
+}
+/* Bouton plein écran */
+#btnFullscreen {
+    background: transparent;
+    border: 1px solid #444;
+    color: #aaa;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+#btnFullscreen:hover {
+    background: #2a2d32;
+    border-color: #5865f2;
+    color: #fff;
+}
+/* Indicateur de mode plein écran */
+#singleImageContainer:fullscreen::after {
+    content: "⛶ Plein écran - Appuyez sur Échap pour quitter";
+    position: fixed;
+    bottom: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: #aaa;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 12px;
+    z-index: 9998;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.5s;
+}
+
+#singleImageContainer:fullscreen:hover::after {
+    opacity: 1;
 }

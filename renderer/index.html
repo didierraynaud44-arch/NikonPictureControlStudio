@@ -17,6 +17,7 @@
         <div id="header-studio-actions" class="header-buttons">
             <button id="exportJpg" class="btn-action btn-success" style="display: none;">📸 Exporter JPG</button>
             <button id="btnViewPrint" class="btn-tool" title="Module d'impression">🖨️ Impression</button>
+            <button id="btnFullscreen" class="btn-tool" title="Plein écran">⛶</button>
         </div>
 
         <!-- Actions Vue 2 (Gestionnaire) -->
@@ -96,11 +97,14 @@
             </div>
 
             <!-- Barre EXIF -->
-            <div id="exifInfo" class="exif-bar">
-                <span id="exifCamera">-</span> | 
-                <span id="exifLens">-</span> | 
-                <span id="exifParams">-</span>
-            </div>
+            <!-- Barre EXIF -->
+<div id="exifInfo" class="exif-bar" >
+    <span id="exifCamera" style="color:#8ab4f8;">-</span>
+    <span style="color:#555;">|</span>
+    <span id="exifLens" style="color:#a8dab5;">-</span>
+    <span style="color:#555;">|</span>
+    <span id="exifParams" style="color:#fdd663;">-</span>
+</div>
         </section>
 
         <!-- Colonne Droite : Réglages Picture Control + Masques + Rotation -->
@@ -401,6 +405,7 @@
     <script src="components/MaskCanvasController.js"></script>
     <script src="components/masksPanel.js"></script>
 	<script src="components/PrintManager.js"></script>
+    <script src="catalogRenderer.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
