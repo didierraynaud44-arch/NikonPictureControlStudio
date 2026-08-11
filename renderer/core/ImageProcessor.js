@@ -8,6 +8,11 @@ class ImageProcessor {
         this.buffer = new ImageBuffer();
         this.originalRawBuffer = null;
         this.previewBuffer = null;
+
+        // 🔹 Cache mémoire des décodages pleine résolution (export/impression),
+        // pour éviter de redécoder un RAW déjà décodé pendant la session.
+        this.fullResCache = new Map();
+        this.fullResLoadedPath = null;
         this.loadedImage = null;
         this.currentOrientation = 1;
         this.currentLensInfo = null;
@@ -120,6 +125,10 @@ class ImageProcessor {
                 const fullCanvas = this.createRotatedCanvas(img, this.currentOrientation);
                 const fullCtx = fullCanvas.getContext("2d");
                 this.originalRawBuffer = fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height);
+
+                // Ce buffer est la vignette basse résolution : un éventuel chargement
+                // pleine résolution précédent pour ce fichier n'est plus le buffer actif.
+                this.fullResLoadedPath = null;
 
                 const previewCanvas = this.createRotatedCanvas(img, this.currentOrientation, 1600);
                 const previewCtx = previewCanvas.getContext("2d");
@@ -359,12 +368,101 @@ class ImageProcessor {
     }
 
     /**
+     * 🔹 Charge le buffer PLEINE RÉSOLUTION (résolution capteur native pour un RAW,
+     * résolution native du fichier pour une image standard) pour l'export/impression.
+     * Résultat mis en cache par filePath pour éviter de redécoder plusieurs fois
+     * la même photo pendant la session, et stocké dans this.originalRawBuffer
+     * (qui remplace la version basse résolution utilisée pour l'aperçu Studio).
+     * @param {string} filePath
+     * @returns {Promise<ImageData|null>}
+     */
+    async loadFullResolutionForExport(filePath) {
+        if (!filePath) return null;
+
+        if (this.fullResCache.has(filePath)) {
+            const cached = this.fullResCache.get(filePath);
+            this.originalRawBuffer = cached;
+            this.fullResLoadedPath = filePath;
+            return cached;
+        }
+
+        if (!window.electronAPI || typeof window.electronAPI.getFullResolutionImage !== "function") {
+            console.warn("⚠️ electronAPI.getFullResolutionImage indisponible");
+            return null;
+        }
+
+        console.log(`⏳ Décodage pleine résolution en cours pour ${filePath}...`);
+        const result = await window.electronAPI.getFullResolutionImage(filePath);
+
+        if (!result || !result.success) {
+            console.error("❌ Échec chargement pleine résolution :", result?.error);
+            return null;
+        }
+
+        let imageData = null;
+
+        if (result.isRaw) {
+            if (typeof window.decodeRawFullResolution === "function") {
+                const decoded = await window.decodeRawFullResolution(result.rawBytes);
+                if (decoded) {
+                    imageData = new ImageData(decoded.data, decoded.width, decoded.height);
+                }
+            }
+
+            // Repli : le décodage pleine résolution a échoué sur ce fichier
+            // particulier -> on retombe sur la vignette embarquée (decodeRAWImage),
+            // déjà utilisée pour le chargement rapide dans le Studio.
+            if (!imageData) {
+                console.warn("⚠️ Décodage RAW pleine résolution indisponible, repli sur la vignette embarquée");
+                const fallback = await window.electronAPI.readFileDirect(filePath);
+                if (fallback && fallback.preview) {
+                    imageData = await this._dataUrlToImageData(fallback.preview);
+                }
+            }
+        } else if (result.dataUrl) {
+            imageData = await this._dataUrlToImageData(result.dataUrl);
+        }
+
+        if (!imageData) return null;
+
+        this.fullResCache.set(filePath, imageData);
+        this.originalRawBuffer = imageData;
+        this.fullResLoadedPath = filePath;
+        return imageData;
+    }
+
+    /**
+     * @private
+     */
+    _dataUrlToImageData(dataUrl) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement("canvas");
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0);
+                resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
+            };
+            img.onerror = reject;
+            img.src = dataUrl;
+        });
+    }
+
+    /**
      * 🔹 NOUVELLE MÉTHODE : Exporte en PLEINE RÉSOLUTION avec toutes les modifications
+     * @param {string} filePath - Chemin du fichier source, pour charger le buffer pleine
+     *        résolution s'il n'est pas déjà chargé (voir loadFullResolutionForExport)
      * @param {number} quality - Qualité JPEG (0.0 à 1.0)
      * @param {string} format - Format de sortie ("image/jpeg" ou "image/png")
-     * @returns {string|null} - DataURL de l'image exportée
+     * @returns {Promise<string|null>} - DataURL de l'image exportée
      */
-    exportFullResolution(quality = 0.95, format = "image/jpeg") {
+    async exportFullResolution(filePath, quality = 0.95, format = "image/jpeg") {
+        if (filePath && this.fullResLoadedPath !== filePath) {
+            await this.loadFullResolutionForExport(filePath);
+        }
+
         if (!this.originalRawBuffer) {
             console.error("❌ Pas de buffer original pour l'export full res");
             return null;

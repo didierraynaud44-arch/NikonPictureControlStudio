@@ -28,10 +28,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     printOrSavePdf: (data) => 
         ipcRenderer.invoke("print-or-save-pdf", data),
     
-    getPrinters: () => 
-        ipcRenderer.invoke("get-printers"),
-    
-    loadICC: () => 
+    loadICC: () =>
         ipcRenderer.invoke("loadICC"),
 
     // ============================================================
@@ -58,9 +55,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     openNEF: () => 
         ipcRenderer.invoke("open-nef"),
     
-    readFileDirect: (filePath) => 
+    readFileDirect: (filePath) =>
         ipcRenderer.invoke("read-file-direct", filePath),
-    
+
+    getFullResolutionImage: (filePath) =>
+        ipcRenderer.invoke("get-full-resolution-image", filePath),
+
+    getShutterCount: (filePath) =>
+        ipcRenderer.invoke("get-shutter-count", filePath),
+
     loadNP3: () => 
         ipcRenderer.invoke("loadNP3"),
     

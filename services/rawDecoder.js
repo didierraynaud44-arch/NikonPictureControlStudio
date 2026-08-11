@@ -213,6 +213,32 @@ async function decodeRAWImage(filePath) {
 }
 
 /**
+ * Lit les octets bruts d'un fichier RAW, pour transmission au renderer.
+ *
+ * Le démosaïçage pleine résolution (libraw-wasm) ne peut PAS s'exécuter ici,
+ * dans le process main : libraw-wasm démarre un Worker DOM pour décoder,
+ * et cette API navigateur n'existe pas dans le contexte Node du process
+ * main Electron (testé : "Worker is not defined"). Seul le renderer,
+ * basé sur Chromium, dispose de `Worker`. Cette fonction se contente donc
+ * de lire le fichier ; le décodage réel se fait côté renderer
+ * (voir renderer/core/RawFullResDecoder.js), avec repli sur decodeRAWImage
+ * (vignette embarquée) si ce décodage échoue.
+ */
+async function readRawFileBuffer(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+
+    if (!SUPPORTED_EXTENSIONS.includes(ext)) {
+        throw new Error(`Extension non prise en charge : ${ext}`);
+    }
+
+    if (!fs.existsSync(filePath)) {
+        throw new Error(`Fichier introuvable : ${filePath}`);
+    }
+
+    return fs.promises.readFile(filePath);
+}
+
+/**
  * À appeler une seule fois à la fermeture de l'application (ex: dans
  * app.on('will-quit', ...) côté main.js) pour terminer proprement le
  * process exiftool persistant et éviter un process zombie.
@@ -227,6 +253,7 @@ async function shutdownExiftool() {
 
 module.exports = {
     decodeRAWImage,
+    readRawFileBuffer,
     shutdownExiftool,
     SUPPORTED_EXTENSIONS
 };

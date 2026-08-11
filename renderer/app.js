@@ -19,7 +19,80 @@ try {
 
 // Cache mémoire pour accélérer le passage d'une photo à l'autre
 const studioImageCache = new Map();
+function updateExifBarFromDb(photo) {
+    const cameraEl = document.getElementById('exifCamera');
+    const lensEl = document.getElementById('exifLens');
+    const paramsEl = document.getElementById('exifParams');
+    
+    if (!cameraEl || !lensEl || !paramsEl) return;
 
+    const make = photo.make || '';
+    const model = photo.model || '';
+    cameraEl.textContent = make && model ? `${make} ${model}` : (make || model || '-');
+
+    lensEl.textContent = photo.lens || '-';
+
+    const params = [];
+    if (photo.focal_length) params.push(`${photo.focal_length}mm`);
+    if (photo.aperture) params.push(`f/${photo.aperture}`);
+    if (photo.shutter_speed) params.push(photo.shutter_speed);
+    if (photo.iso) params.push(`ISO ${photo.iso}`);
+    if (photo.exposure_compensation) params.push(`EV ${photo.exposure_compensation}`);
+    if (photo.white_balance) params.push(photo.white_balance);
+    if (photo.date_time_original) params.push(new Date(photo.date_time_original).toLocaleDateString());
+    
+    // 🔥 AJOUTER LE SHUTTER COUNT
+    const shutterCount = photo.shutter_count || photo.shutterCount;
+    if (shutterCount) {
+        params.push(`🔢 ${shutterCount}`);
+    }
+    
+    paramsEl.textContent = params.length > 0 ? params.join(' | ') : 'Aucune EXIF';
+}
+
+/**
+ * 🔹 Récupère le ShutterCount en tâche de fond, APRÈS que la photo et ses EXIF
+ * principales soient déjà affichées (ne bloque jamais loadImageInStudio : pas
+ * de await côté appelant). Met à jour le cache mémoire (studioImageCache) et,
+ * seulement si l'utilisateur regarde toujours cette photo à la réception de la
+ * réponse, rafraîchit uniquement le champ ShutterCount de la barre EXIF.
+ */
+function fetchShutterCountInBackground(filePath, fileInfo) {
+    if (fileInfo.shutterCount) return; // déjà connu (cache réutilisé sans réappel)
+    if (!window.electronAPI || typeof window.electronAPI.getShutterCount !== "function") return;
+
+    window.electronAPI.getShutterCount(filePath)
+        .then((result) => {
+            if (!result || !result.success || !result.shutterCount) return;
+
+            // Mémorise le résultat pour la session, même si l'utilisateur a
+            // déjà navigué vers une autre photo entre-temps.
+            fileInfo.shutterCount = result.shutterCount;
+            const cached = studioImageCache.get(filePath);
+            if (cached) cached.shutterCount = result.shutterCount;
+
+            // N'actualise l'affichage que si cette photo est toujours à l'écran.
+            if (window.currentStudioFilePath !== filePath) return;
+
+            updateExifBarFromDb({
+                make: fileInfo.make || null,
+                model: fileInfo.model || null,
+                lens: fileInfo.lens || fileInfo.lensModel || null,
+                iso: fileInfo.iso || null,
+                aperture: fileInfo.aperture || null,
+                focal_length: fileInfo.focalLength || null,
+                shutter_speed: fileInfo.shutterSpeed || null,
+                exposure_compensation: fileInfo.exposureCompensation || null,
+                white_balance: fileInfo.whiteBalance || null,
+                date_time_original: fileInfo.dateTimeOriginal || null,
+                shutter_count: result.shutterCount
+            });
+            console.log("🔢 ShutterCount mis à jour en arrière-plan:", result.shutterCount);
+        })
+        .catch((err) => {
+            console.warn("⚠️ Erreur récupération ShutterCount en arrière-plan:", err);
+        });
+}
 // ============================================================
 // GESTION DE LA PERSISTANCE DES RÉGLAGES PICTURE CONTROL
 // ============================================================
@@ -659,9 +732,31 @@ if (typeof window.applySettingsToSliders === "function") {
             }
         }
 
-        if (typeof window.updateExif === "function") {
-            window.updateExif(fileInfo);
-        }
+  // ============================================================
+// 🔥 AFFICHER LES EXIF AVEC SHUTTER COUNT
+// ============================================================
+if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
+    // Utiliser updateExifBarFromDb avec les données de fileInfo
+    updateExifBarFromDb({
+        make: fileInfo.make || null,
+        model: fileInfo.model || null,
+        lens: fileInfo.lens || fileInfo.lensModel || null,
+        iso: fileInfo.iso || null,
+        aperture: fileInfo.aperture || null,
+        focal_length: fileInfo.focalLength || null,
+        shutter_speed: fileInfo.shutterSpeed || null,
+        exposure_compensation: fileInfo.exposureCompensation || null,
+        white_balance: fileInfo.whiteBalance || null,
+        date_time_original: fileInfo.dateTimeOriginal || null,
+        shutter_count: fileInfo.shutterCount || null  // 🔥 NOUVEAU
+    });
+    console.log("✅ EXIF affichées depuis fileInfo avec shutterCount:", fileInfo.shutterCount);
+} else {
+    // Fallback sur l'ancienne méthode
+    if (typeof window.updateExif === "function") {
+        window.updateExif(fileInfo);
+    }
+}
 
         if (imageSrc && window.imageProcessor) {
             if (typeof window.imageProcessor.clear === "function") {
@@ -707,6 +802,10 @@ if (typeof window.applySettingsToSliders === "function") {
             }
         }
 
+        // 🔹 ShutterCount en tâche de fond : appelé APRÈS l'affichage de la photo et
+        // des EXIF de base, sans await, pour ne jamais retarder la navigation.
+        fetchShutterCountInBackground(filePath, fileInfo);
+
         prefetchAdjacentImages(filePath);
 
         // 🔹 NOUVEAU : synchronise la surbrillance dans l'arbre "Dossiers Photos",
@@ -751,6 +850,39 @@ function prefetchAdjacentImages(currentPath) {
 /* =========================================================
     MODULE EXPORTATION
 ========================================================= */
+
+/**
+ * 🔹 Affiche/masque un indicateur simple pendant le décodage pleine résolution
+ * (peut prendre plusieurs secondes sur un gros RAW).
+ */
+function showRawDecodingIndicator(show) {
+    let el = document.getElementById("rawDecodingIndicator");
+
+    if (show) {
+        if (!el) {
+            el = document.createElement("div");
+            el.id = "rawDecodingIndicator";
+            el.textContent = "⏳ Décodage RAW en cours...";
+            el.style.cssText = `
+                position: fixed;
+                top: 16px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #222;
+                color: #fff;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 13px;
+                z-index: 9999;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            `;
+            document.body.appendChild(el);
+        }
+        el.style.display = "block";
+    } else if (el) {
+        el.style.display = "none";
+    }
+}
 
 function initExportModal() {
     const modal = document.getElementById("exportModal");
@@ -811,9 +943,15 @@ function initExportModal() {
                         return;
                     }
 
-                    const dataUrl = window.imageProcessor.exportFullResolution ? 
-                        window.imageProcessor.exportFullResolution(config.quality, config.format) :
-                        null;
+                    showRawDecodingIndicator(true);
+                    let dataUrl;
+                    try {
+                        dataUrl = window.imageProcessor.exportFullResolution ?
+                            await window.imageProcessor.exportFullResolution(window.currentStudioFilePath, config.quality, config.format) :
+                            null;
+                    } finally {
+                        showRawDecodingIndicator(false);
+                    }
 
                     if (!dataUrl) {
                         alert("❌ Impossible de générer l'export. Aucune image chargée ou erreur de traitement.");

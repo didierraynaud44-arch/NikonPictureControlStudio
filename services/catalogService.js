@@ -1,6 +1,6 @@
 /*=========================================================
     Nikon Picture Control Studio - Catalog Service (SQLite)
-    Version complète avec indexation EXIF
+    Version complète avec indexation EXIF + Shutter Count
 =========================================================*/
 const path = require("path");
 const fs = require("fs");
@@ -26,7 +26,6 @@ let db = null;
 // ============================================================
 // INITIALISATION DE LA BASE DE DONNÉES
 // ============================================================
-
 function initCatalogDB() {
     return new Promise((resolve, reject) => {
         db = new sqlite3.Database(DB_PATH, (err) => {
@@ -48,7 +47,7 @@ function initCatalogDB() {
                     )
                 `);
 
-                // Table des photos avec TOUS les champs EXIF
+                // Table des photos avec TOUS les champs EXIF + SHUTTER COUNT
                 db.run(`
                     CREATE TABLE IF NOT EXISTS catalog_photos (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +87,9 @@ function initCatalogDB() {
                         label TEXT,
                         raw_exif TEXT,
                         
+                        -- 🔥 Nombre de déclenchements
+                        shutter_count INTEGER,
+                        
                         added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
@@ -97,22 +99,34 @@ function initCatalogDB() {
                         return reject(err);
                     }
 
-                    // Créer les index
-                    db.run(`CREATE INDEX IF NOT EXISTS idx_photos_folder_path ON catalog_photos(folder_path)`);
-                    db.run(`CREATE INDEX IF NOT EXISTS idx_photos_model ON catalog_photos(model)`);
-                    db.run(`CREATE INDEX IF NOT EXISTS idx_photos_iso ON catalog_photos(iso)`);
-                    db.run(`CREATE INDEX IF NOT EXISTS idx_photos_date ON catalog_photos(date_time_original)`);
-                    db.run(`CREATE INDEX IF NOT EXISTS idx_photos_lens ON catalog_photos(lens)`);
-                    db.run(`CREATE INDEX IF NOT EXISTS idx_photos_rating ON catalog_photos(rating)`);
-                    
-                    console.log("✅ Tables et index créés avec succès");
-                    resolve(db);
+                    // 🔥 MIGRATION : Ajouter shutter_count si elle n'existe pas
+                    db.run(`ALTER TABLE catalog_photos ADD COLUMN shutter_count INTEGER`, (alterErr) => {
+                        if (alterErr && !alterErr.message.includes('duplicate column name')) {
+                            console.warn("⚠️ Erreur ajout colonne shutter_count:", alterErr.message);
+                        } else if (!alterErr) {
+                            console.log("✅ Colonne shutter_count ajoutée (migration)");
+                        }
+
+                        // Créer les index
+                        db.run(`CREATE INDEX IF NOT EXISTS idx_photos_folder_path ON catalog_photos(folder_path)`);
+                        db.run(`CREATE INDEX IF NOT EXISTS idx_photos_model ON catalog_photos(model)`);
+                        db.run(`CREATE INDEX IF NOT EXISTS idx_photos_iso ON catalog_photos(iso)`);
+                        db.run(`CREATE INDEX IF NOT EXISTS idx_photos_date ON catalog_photos(date_time_original)`);
+                        db.run(`CREATE INDEX IF NOT EXISTS idx_photos_lens ON catalog_photos(lens)`);
+                        db.run(`CREATE INDEX IF NOT EXISTS idx_photos_rating ON catalog_photos(rating)`);
+                        db.run(`CREATE INDEX IF NOT EXISTS idx_photos_shutter ON catalog_photos(shutter_count)`, (idxErr) => {
+                            if (idxErr) {
+                                console.warn("⚠️ Erreur création index shutter_count:", idxErr.message);
+                            }
+                            console.log("✅ Tables et index créés avec succès");
+                            resolve(db);
+                        });
+                    });
                 });
             });
         });
     });
 }
-
 // ============================================================
 // FONCTIONS UTILITAIRES SQL
 // ============================================================
@@ -157,8 +171,31 @@ function formatShutterSpeed(value) {
 
 async function extractExifData(filePath) {
     try {
-        const exif = await exifr.parse(filePath);
+        // 🔥 Extraire avec des options spécifiques pour le shutter count
+        const exif = await exifr.parse(filePath, {
+            pick: [
+                'Make', 'Model', 'LensModel', 'Lens', 'ISO', 
+                'FNumber', 'FocalLength', 'ExposureTime', 
+                'ExposureCompensation', 'WhiteBalanceName', 
+                'DateTimeOriginal', 'Orientation',
+                'ShutterCount',           // Nikon
+                'ImageCount',             // Nikon
+                'TotalShutterReleases',   // Nikon Z
+                'ShutterCount'            // Générique
+            ],
+            tiff: true,
+            exif: true,
+            xmp: true
+        });
+        
         if (!exif) return {};
+        
+        // 🔥 Extraire le shutter count (plusieurs noms possibles)
+        let shutterCount = null;
+        if (exif.ShutterCount) shutterCount = exif.ShutterCount;
+        else if (exif.ImageCount) shutterCount = exif.ImageCount;
+        else if (exif.TotalShutterReleases) shutterCount = exif.TotalShutterReleases;
+        else if (exif['ShutterCount']) shutterCount = exif['ShutterCount'];
         
         return {
             make: exif.Make || null,
@@ -187,7 +224,8 @@ async function extractExifData(filePath) {
             keywords: exif.Keywords ? JSON.stringify(exif.Keywords) : null,
             rating: exif.Rating || null,
             label: exif.Label || null,
-            raw_exif: JSON.stringify(exif)
+            raw_exif: JSON.stringify(exif),
+            shutter_count: shutterCount ? parseInt(shutterCount) : null  // 🔥 NOUVEAU
         };
     } catch (err) {
         console.warn(`⚠️ Erreur extraction EXIF pour ${path.basename(filePath)}:`, err.message);
@@ -232,59 +270,70 @@ async function addFolderToCatalog(folderData) {
                         let pictureControlJson = existing?.picture_control_json || null;
                         let transformJson = existing?.transform_json || null;
 
-                        // Requête avec TOUS les champs EXIF
+                        // 🔥 REQUÊTE CORRECTE - 36 colonnes
                         const query = `
-    INSERT OR REPLACE INTO catalog_photos (
-        folder_path, file_path, file_name, thumb_path,
-        picture_control_json, transform_json,
-        make, model, lens, focal_length, aperture,
-        shutter_speed, iso, exposure_compensation,
-        white_balance, color_temperature,
-        date_time_original, date_time_digitized,
-        gps_latitude, gps_longitude, gps_altitude,
-        orientation, flash, exposure_mode,
-        metering_mode, focus_mode,
-        image_width, image_height, color_space,
-        keywords, rating, label, raw_exif,
-        updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`;
+                            INSERT OR REPLACE INTO catalog_photos (
+                                folder_path, file_path, file_name, thumb_path,
+                                picture_control_json, transform_json,
+                                make, model, lens, focal_length, aperture,
+                                shutter_speed, iso, exposure_compensation,
+                                white_balance, color_temperature,
+                                date_time_original, date_time_digitized,
+                                gps_latitude, gps_longitude, gps_altitude,
+                                orientation, flash, exposure_mode,
+                                metering_mode, focus_mode,
+                                image_width, image_height, color_space,
+                                keywords, rating, label, raw_exif,
+                                shutter_count,
+                                added_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        `;
 
+                        // 🔥 PARAMÈTRES - 36 valeurs
                         const params = [
-                            folderData.path,
-                            file.path,
-                            file.name,
-                            null, // thumb_path
-                            pictureControlJson,
-                            transformJson,
-                            exifData.make || null,
-                            exifData.model || null,
-                            exifData.lens || null,
-                            exifData.focal_length || null,
-                            exifData.aperture || null,
-                            exifData.shutter_speed || null,
-                            exifData.iso || null,
-                            exifData.exposure_compensation || null,
-                            exifData.white_balance || null,
-                            exifData.color_temperature || null,
-                            exifData.date_time_original || null,
-                            exifData.date_time_digitized || null,
-                            exifData.gps_latitude || null,
-                            exifData.gps_longitude || null,
-                            exifData.gps_altitude || null,
-                            exifData.orientation || 1,
-                            exifData.flash ? 1 : 0,
-                            exifData.exposure_mode || null,
-                            exifData.metering_mode || null,
-                            exifData.focus_mode || null,
-                            exifData.image_width || null,
-                            exifData.image_height || null,
-                            exifData.color_space || null,
-                            exifData.keywords || null,
-                            exifData.rating || null,
-                            exifData.label || null,
-                            exifData.raw_exif || null
+                            folderData.path,                         // 1. folder_path
+                            file.path,                               // 2. file_path
+                            file.name,                               // 3. file_name
+                            null,                                    // 4. thumb_path
+                            pictureControlJson,                      // 5. picture_control_json
+                            transformJson,                           // 6. transform_json
+                            exifData.make || null,                   // 7. make
+                            exifData.model || null,                  // 8. model
+                            exifData.lens || null,                   // 9. lens
+                            exifData.focal_length || null,           // 10. focal_length
+                            exifData.aperture || null,               // 11. aperture
+                            exifData.shutter_speed || null,          // 12. shutter_speed
+                            exifData.iso || null,                    // 13. iso
+                            exifData.exposure_compensation || null,  // 14. exposure_compensation
+                            exifData.white_balance || null,          // 15. white_balance
+                            exifData.color_temperature || null,      // 16. color_temperature
+                            exifData.date_time_original || null,     // 17. date_time_original
+                            exifData.date_time_digitized || null,    // 18. date_time_digitized
+                            exifData.gps_latitude || null,           // 19. gps_latitude
+                            exifData.gps_longitude || null,          // 20. gps_longitude
+                            exifData.gps_altitude || null,           // 21. gps_altitude
+                            exifData.orientation || 1,               // 22. orientation
+                            exifData.flash ? 1 : 0,                  // 23. flash
+                            exifData.exposure_mode || null,          // 24. exposure_mode
+                            exifData.metering_mode || null,          // 25. metering_mode
+                            exifData.focus_mode || null,             // 26. focus_mode
+                            exifData.image_width || null,            // 27. image_width
+                            exifData.image_height || null,           // 28. image_height
+                            exifData.color_space || null,            // 29. color_space
+                            exifData.keywords || null,               // 30. keywords
+                            exifData.rating || null,                 // 31. rating
+                            exifData.label || null,                  // 32. label
+                            exifData.raw_exif || null,               // 33. raw_exif
+                            exifData.shutter_count || null,          // 34. shutter_count
+                            null,                                    // 35. added_at (NULL = CURRENT_TIMESTAMP)
+                            null                                     // 36. updated_at (NULL = CURRENT_TIMESTAMP)
                         ];
+
+                        // Vérifier le nombre de paramètres
+                        if (params.length !== 36) {
+                            console.error(`❌ Erreur: ${params.length} valeurs pour 36 colonnes`);
+                            continue;
+                        }
 
                         await runAsync(query, params);
                         indexedCount++;
@@ -328,7 +377,7 @@ async function getFolders() {
 }
 
 /**
- * Récupère les photos d'un dossier (ou toutes) avec TOUS les EXIF
+ * Récupère les photos d'un dossier (ou toutes) avec TOUS les EXIF + SHUTTER COUNT
  */
 async function getPhotos(folderPath = null) {
     try {
@@ -345,6 +394,7 @@ async function getPhotos(folderPath = null) {
                 metering_mode, focus_mode,
                 image_width, image_height, color_space,
                 keywords, rating, label,
+                shutter_count,  -- 🔥 NOUVEAU
                 raw_exif
             FROM catalog_photos
         `;
@@ -367,6 +417,7 @@ async function getPhotos(folderPath = null) {
             iso: row.iso ? parseInt(row.iso) : null,
             aperture: row.aperture ? parseFloat(row.aperture) : null,
             focal_length: row.focal_length ? parseFloat(row.focal_length) : null,
+            shutter_count: row.shutter_count ? parseInt(row.shutter_count) : null,  // 🔥 NOUVEAU
             thumbBase64: row.thumb_path ? `file://${row.thumb_path.replace(/\\/g, '/')}` : null
         }));
     } catch (err) {
@@ -376,7 +427,7 @@ async function getPhotos(folderPath = null) {
 }
 
 /**
- * Récupère une photo spécifique par son chemin avec TOUS les EXIF
+ * Récupère une photo spécifique par son chemin avec TOUS les EXIF + SHUTTER COUNT
  */
 async function getPhotoByPath(filePath) {
     try {
@@ -393,6 +444,7 @@ async function getPhotoByPath(filePath) {
                 metering_mode, focus_mode,
                 image_width, image_height, color_space,
                 keywords, rating, label,
+                shutter_count,  -- 🔥 NOUVEAU
                 raw_exif
             FROM catalog_photos
             WHERE file_path = ?
@@ -409,6 +461,7 @@ async function getPhotoByPath(filePath) {
             iso: row.iso ? parseInt(row.iso) : null,
             aperture: row.aperture ? parseFloat(row.aperture) : null,
             focal_length: row.focal_length ? parseFloat(row.focal_length) : null,
+            shutter_count: row.shutter_count ? parseInt(row.shutter_count) : null,  // 🔥 NOUVEAU
             thumbBase64: row.thumb_path ? `file://${row.thumb_path.replace(/\\/g, '/')}` : null
         };
     } catch (err) {
@@ -417,6 +470,7 @@ async function getPhotoByPath(filePath) {
     }
 }
 
+// ... (le reste du fichier est inchangé)
 /**
  * Recherche avancée dans le catalogue
  */

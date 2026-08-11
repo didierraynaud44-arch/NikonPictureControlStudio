@@ -6,6 +6,7 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const exifr = require('exifr');
+const { exiftool } = require('exiftool-vendored');
 
 // 🔹 Imports des services
 const { initDatabase, getDb, dbAll, dbRun } = require("./db");
@@ -19,15 +20,17 @@ const {
 } = require("./services/catalogService");
 
 // 🔹 Imports pour le décodage RAW (si disponibles)
-let decodeRAWImage, SUPPORTED_EXTENSIONS;
+let decodeRAWImage, readRawFileBuffer, SUPPORTED_EXTENSIONS;
 try {
     const rawDecoder = require("./services/rawDecoder");
     decodeRAWImage = rawDecoder.decodeRAWImage;
+    readRawFileBuffer = rawDecoder.readRawFileBuffer;
     SUPPORTED_EXTENSIONS = rawDecoder.SUPPORTED_EXTENSIONS || [];
     console.log("✅ rawDecoder chargé");
 } catch (err) {
     console.warn("⚠️ rawDecoder non disponible, utilisation du mode standard");
     decodeRAWImage = null;
+    readRawFileBuffer = null;
     SUPPORTED_EXTENSIONS = [];
 }
 
@@ -279,132 +282,236 @@ function setupIpcHandlers() {
     // 📖 LECTURE DIRECTE - VERSION CORRIGÉE (conserve le fonctionnement original)
     // ============================================================
 
-    ipcMain.handle("read-file-direct", async (event, filePath) => {
-        if (!filePath || !fs.existsSync(filePath)) {
-            console.error("❌ Fichier introuvable:", filePath);
-            return null;
+
+ipcMain.handle("read-file-direct", async (event, filePath) => {
+    if (!filePath || !fs.existsSync(filePath)) {
+        console.error("❌ Fichier introuvable:", filePath);
+        return null;
+    }
+
+    try {
+        const ext = path.extname(filePath).toLowerCase();
+        console.log("📖 Lecture directe du fichier:", filePath);
+
+        // 🔥 1. Structure de base (comme avant)
+        let result = {
+            filePath: filePath,
+            path: filePath,
+            name: path.basename(filePath),
+            fileName: path.basename(filePath),
+            fullPath: filePath
+        };
+
+        // 🔥 2. Traiter les images standards (comme avant)
+        if ([".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"].includes(ext)) {
+            let imageBuffer;
+            let mimeType = "image/jpeg";
+            
+            try {
+                const sharp = require('sharp');
+                const metadata = await sharp(filePath).metadata();
+                console.log(`📷 Image source: ${metadata.width}x${metadata.height}px`);
+                
+                const previewWidth = Math.min(metadata.width, 1200);
+                const previewHeight = Math.round(previewWidth * (metadata.height / metadata.width));
+                
+                imageBuffer = await sharp(filePath)
+                    .resize(previewWidth, previewHeight, {
+                        fit: 'inside',
+                        withoutEnlargement: true
+                    })
+                    .jpeg({ quality: 85 })
+                    .toBuffer();
+                    
+                mimeType = "image/jpeg";
+                console.log(`✅ Aperçu généré: ${previewWidth}x${previewHeight}px`);
+                
+            } catch (sharpErr) {
+                console.warn("⚠️ Sharp non disponible, lecture directe:", sharpErr.message);
+                imageBuffer = fs.readFileSync(filePath);
+            }
+
+            const base64 = imageBuffer.toString("base64");
+            result.preview = `data:${mimeType};base64,${base64}`;
+            result.isStandardImage = true;
+            result.orientation = 1;
+            result.fullPath = filePath;
+        }
+        else if ([".nef", ".cr2", ".cr3", ".raf", ".arw", ".rw2", ".dng", ".pef", ".orf"].includes(ext)) {
+            // 🔥 3. Traiter les RAW (comme avant)
+            if (decodeRAWImage) {
+                try {
+                    const previewDataUrl = await decodeRAWImage(filePath);
+                    if (previewDataUrl) {
+                        result.preview = previewDataUrl;
+                        result.isRaw = true;
+                        result.orientation = 1;
+                    }
+                } catch (rawErr) {
+                    console.warn("⚠️ Erreur décodage RAW:", rawErr.message);
+                }
+            }
+            result.isRaw = true;
+            result.fullPath = filePath;
         }
 
+        // 🔥 4. Charger les réglages (comme avant)
         try {
-            const ext = path.extname(filePath).toLowerCase();
-            console.log("📖 Lecture directe du fichier:", filePath);
-
-            // 🔥 1. Structure de base (comme avant)
-            let result = {
-                filePath: filePath,
-                path: filePath,
-                name: path.basename(filePath),
-                fileName: path.basename(filePath),
-                fullPath: filePath
-            };
-
-            // 🔥 2. Traiter les images standards (comme avant)
-            if ([".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"].includes(ext)) {
-                let imageBuffer;
-                let mimeType = "image/jpeg";
-                
-                try {
-                    const sharp = require('sharp');
-                    const metadata = await sharp(filePath).metadata();
-                    console.log(`📷 Image source: ${metadata.width}x${metadata.height}px`);
-                    
-                    const previewWidth = Math.min(metadata.width, 1200);
-                    const previewHeight = Math.round(previewWidth * (metadata.height / metadata.width));
-                    
-                    imageBuffer = await sharp(filePath)
-                        .resize(previewWidth, previewHeight, {
-                            fit: 'inside',
-                            withoutEnlargement: true
-                        })
-                        .jpeg({ quality: 85 })
-                        .toBuffer();
-                        
-                    mimeType = "image/jpeg";
-                    console.log(`✅ Aperçu généré: ${previewWidth}x${previewHeight}px`);
-                    
-                } catch (sharpErr) {
-                    console.warn("⚠️ Sharp non disponible, lecture directe:", sharpErr.message);
-                    imageBuffer = fs.readFileSync(filePath);
-                }
-
-                const base64 = imageBuffer.toString("base64");
-                result.preview = `data:${mimeType};base64,${base64}`;
-                result.isStandardImage = true;
-                result.orientation = 1;
-                result.fullPath = filePath;
-            }
-            else if ([".nef", ".cr2", ".cr3", ".raf", ".arw", ".rw2", ".dng", ".pef", ".orf"].includes(ext)) {
-                // 🔥 3. Traiter les RAW (comme avant)
-                if (decodeRAWImage) {
-                    try {
-                        const previewDataUrl = await decodeRAWImage(filePath);
-                        if (previewDataUrl) {
-                            result.preview = previewDataUrl;
-                            result.isRaw = true;
-                            result.orientation = 1;
-                        }
-                    } catch (rawErr) {
-                        console.warn("⚠️ Erreur décodage RAW:", rawErr.message);
-                    }
-                }
-                result.isRaw = true;
-                result.fullPath = filePath;
-            }
-
-            // 🔥 4. Charger les réglages (comme avant)
-            try {
-                const settings = await getPhotoSettings(filePath);
-                if (settings) {
-                    result.settings = settings;
-                    settingsCache.set(filePath, settings);
-                    console.log("📂 Réglages chargés pour:", filePath);
-                } else {
-                    result.settings = null;
-                }
-            } catch (settingsErr) {
-                console.warn("⚠️ Pas de réglages pour:", filePath);
+            const settings = await getPhotoSettings(filePath);
+            if (settings) {
+                result.settings = settings;
+                settingsCache.set(filePath, settings);
+                console.log("📂 Réglages chargés pour:", filePath);
+            } else {
                 result.settings = null;
             }
+        } catch (settingsErr) {
+            console.warn("⚠️ Pas de réglages pour:", filePath);
+            result.settings = null;
+        }
 
-            // 🔥 5. AJOUTER LES EXIF (NOUVEAU - mais sans casser le reste)
-            try {
-                const exif = await exifr.parse(filePath);
-                if (exif) {
-                    result.make = exif.Make || null;
-                    result.model = exif.Model || null;
-                    result.lens = exif.LensModel || exif.Lens || null;
-                    result.iso = exif.ISO || null;
-                    result.aperture = exif.FNumber || null;
-                    result.focalLength = exif.FocalLength || null;
-                    result.shutterSpeed = exif.ExposureTime || null;
-                    result.exposureCompensation = exif.ExposureCompensation || null;
-                    result.whiteBalance = exif.WhiteBalanceName || null;
-                    result.dateTimeOriginal = exif.DateTimeOriginal || null;
-                    result.orientation = exif.Orientation || 1;
-                    console.log("📸 EXIF extraites:", { make: result.make, model: result.model, iso: result.iso });
-                }
-            } catch (exifErr) {
-                console.warn("⚠️ Erreur extraction EXIF:", exifErr.message);
+        // 🔥 5. AJOUTER LES EXIF AVEC exifr
+        try {
+            const exif = await exifr.parse(filePath, {
+                pick: [
+                    'Make', 'Model', 'LensModel', 'Lens', 'ISO', 
+                    'FNumber', 'FocalLength', 'ExposureTime', 
+                    'ExposureCompensation', 'WhiteBalanceName', 
+                    'DateTimeOriginal', 'Orientation'
+                ],
+                tiff: true,
+                exif: true,
+                xmp: true
+            });
+            
+            if (exif) {
+                result.make = exif.Make || null;
+                result.model = exif.Model || null;
+                result.lens = exif.LensModel || exif.Lens || null;
+                result.iso = exif.ISO || null;
+                result.aperture = exif.FNumber || null;
+                result.focalLength = exif.FocalLength || null;
+                result.shutterSpeed = exif.ExposureTime || null;
+                result.exposureCompensation = exif.ExposureCompensation || null;
+                result.whiteBalance = exif.WhiteBalanceName || null;
+                result.dateTimeOriginal = exif.DateTimeOriginal || null;
+                result.orientation = exif.Orientation || 1;
+                
+                console.log("📸 EXIF extraites (exifr):", { 
+                    make: result.make, 
+                    model: result.model, 
+                    iso: result.iso
+                });
             }
+        } catch (exifErr) {
+            console.warn("⚠️ Erreur extraction EXIF (exifr):", exifErr.message);
+        }
 
-            return result;
+        // 🔥 Le ShutterCount (exiftool.read complet) a été retiré d'ici : c'était l'appel
+        // le plus lent de ce handler et il bloquait l'affichage de chaque photo à la
+        // navigation. Il est désormais récupéré en tâche de fond après affichage, via
+        // le handler IPC "get-shutter-count" (voir ci-dessous et renderer/app.js).
 
-        } catch (err) {
-            console.error("❌ Erreur lecture directe:", err);
+        return result;
+
+    } catch (err) {
+        console.error("❌ Erreur lecture directe:", err);
+        return {
+            filePath: filePath,
+            path: filePath,
+            preview: null,
+            name: path.basename(filePath),
+            fileName: path.basename(filePath),
+            error: err.message,
+            settings: null,
+            fullPath: filePath
+        };
+    }
+});
+
+    // ============================================================
+    // 🔢 SHUTTER COUNT (récupéré en arrière-plan, après affichage)
+    // ============================================================
+    // Lecture ciblée (pas un exiftool.read() complet) pour rester légère : c'est
+    // volontairement un second aller-retour IPC séparé de read-file-direct, pour ne
+    // jamais retarder l'affichage initial de la photo et de ses EXIF principales.
+
+ipcMain.handle("get-shutter-count", async (event, filePath) => {
+    if (!filePath || !fs.existsSync(filePath)) {
+        return { success: false, error: "Fichier introuvable" };
+    }
+
+    try {
+        const metadata = await exiftool.read(filePath, ["ShutterCount", "ImageCount", "TotalShutterReleases", "Model"]);
+        const shutterCount = metadata?.ShutterCount ||
+                              metadata?.ImageCount ||
+                              metadata?.TotalShutterReleases ||
+                              null;
+
+        if (shutterCount) {
+            console.log("🔢 ShutterCount (arrière-plan) via exiftool:", shutterCount);
+        }
+
+        return { success: true, shutterCount: shutterCount ? parseInt(shutterCount) : null };
+
+    } catch (err) {
+        console.warn("⚠️ Erreur get-shutter-count:", err.message);
+        return { success: false, error: err.message };
+    }
+});
+
+    // ============================================================
+    // 🖼️ IMAGE PLEINE RÉSOLUTION (export / impression uniquement)
+    // ============================================================
+    // Pour les RAW : le démosaïçage réel (libraw-wasm) se fait côté renderer
+    // (nécessite l'API Worker du navigateur, absente du process main). On se
+    // contente ici de lire les octets bruts du fichier et de les transmettre.
+    // Pour les images standards : lecture à la résolution native (pas de
+    // redimensionnement à 1200px comme dans read-file-direct).
+
+ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
+    if (!filePath || !fs.existsSync(filePath)) {
+        return { success: false, error: "Fichier introuvable" };
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const timerLabel = `⏱️ get-full-resolution-image (${path.basename(filePath)})`;
+    console.time(timerLabel);
+
+    try {
+        if (SUPPORTED_EXTENSIONS.includes(ext)) {
+            if (!readRawFileBuffer) {
+                return { success: false, error: "Lecteur RAW indisponible" };
+            }
+            const buffer = await readRawFileBuffer(filePath);
+            console.log(`📦 RAW lu (${(buffer.length / (1024 * 1024)).toFixed(1)} Mo) — décodage délégué au renderer`);
+            return { success: true, isRaw: true, ext, rawBytes: buffer };
+        }
+
+        if ([".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"].includes(ext)) {
+            const sharp = require("sharp");
+            const metadata = await sharp(filePath).metadata();
+            const imageBuffer = await sharp(filePath)
+                .jpeg({ quality: 95 })
+                .toBuffer();
+            console.log(`✅ Image pleine résolution chargée : ${metadata.width}x${metadata.height}px`);
             return {
-                filePath: filePath,
-                path: filePath,
-                preview: null,
-                name: path.basename(filePath),
-                fileName: path.basename(filePath),
-                error: err.message,
-                settings: null,
-                fullPath: filePath
+                success: true,
+                isRaw: false,
+                dataUrl: `data:image/jpeg;base64,${imageBuffer.toString("base64")}`
             };
         }
-    });
-      
-         
+
+        return { success: false, error: `Extension non prise en charge : ${ext}` };
+
+    } catch (err) {
+        console.error("❌ Erreur get-full-resolution-image:", err);
+        return { success: false, error: err.message };
+    } finally {
+        console.timeEnd(timerLabel);
+    }
+});
+
     // ============================================================
     // 💾 SAUVEGARDE ET CHARGEMENT DES RÉGLAGES
     // ============================================================
@@ -684,19 +791,6 @@ function setupIpcHandlers() {
     // 🖨️ IMPRESSION ET EXPORT PDF
     // ============================================================
 
-    // 🔹 NOUVEAU : liste des imprimantes installées, pour un sélecteur intégré à l'appli
-    // (plus fiable que de compter sur la boîte de dialogue Windows pour les lister).
-    ipcMain.handle("get-printers", async (event) => {
-        try {
-            const printers = await event.sender.getPrintersAsync();
-            console.log(`🖨️ ${printers.length} imprimante(s) détectée(s):`, printers.map(p => p.name).join(", "));
-            return printers;
-        } catch (e) {
-            console.error("❌ Erreur récupération imprimantes:", e);
-            return [];
-        }
-    });
-
     ipcMain.handle("print-or-save-pdf", async (event, data) => {
         console.log("🖨️ print-or-save-pdf appelé, action:", data?.action);
 
@@ -709,14 +803,13 @@ function setupIpcHandlers() {
         let win = null;
 
         try {
-            const { 
-                action, 
+            const {
+                action,
                 imagePath,
                 imageDataUrl,
                 pictureControl,
-                printerName,
                 defaultName = "document",
-                widthCm = 15, 
+                widthCm = 15,
                 heightCm = 10,
                 orientation = "portrait"
             } = data;
@@ -860,17 +953,13 @@ function setupIpcHandlers() {
                 await win.loadFile(tempHtmlPath);
                 await new Promise(r => setTimeout(r, 2000));
 
-                // 🔹 NOUVEAU : si une imprimante précise a été choisie dans l'appli,
-                // on imprime directement dessus (silent) sans passer par la boîte de
-                // dialogue Windows, qui ne liste pas toujours fidèlement les imprimantes
-                // physiques installées. Sinon, on garde l'ancien comportement (dialogue natif).
-                const printOptions = printerName
-                    ? { silent: true, printBackground: true, deviceName: printerName }
-                    : { silent: false, printBackground: true };
+                // 🔹 Toujours passer par la boîte de dialogue Windows : c'est elle qui
+                // donne accès au bouton "Propriétés/Préférences" du pilote imprimante
+                // (bac papier, type de papier, profil ICC), indispensable pour une
+                // imprimante photo comme la Canon PRO-300.
+                const printOptions = { silent: false, printBackground: true };
 
-                console.log(printerName
-                    ? `🖨️ Impression directe sur : ${printerName}`
-                    : "🖨️ Impression via la boîte de dialogue Windows");
+                console.log("🖨️ Impression via la boîte de dialogue Windows");
 
                 return new Promise((resolve) => {
                     win.webContents.print(printOptions, (success, err) => {
@@ -1252,4 +1341,4 @@ app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
 });
 
-console.log("✅ main1.js chargé avec persistance des réglages Picture Control");
+console.log("✅ main.js chargé avec persistance des réglages Picture Control");
