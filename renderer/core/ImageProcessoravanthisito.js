@@ -24,10 +24,6 @@ class ImageProcessor {
         this.maskController = null;
         this.showMaskOverlay = true;
 
-        // 🔹 NOUVEAU : Histogramme
-        this.histogramMode = "luminance"; // "luminance" | "rgb"
-        this._lastImageDataForHistogram = null;
-
         if (typeof WhiteBalanceFilter !== "undefined") this.pipeline.add(new WhiteBalanceFilter());
         if (typeof SharpenFilter !== "undefined") this.pipeline.add(new SharpenFilter());
         if (typeof MidRangeSharpenFilter !== "undefined") this.pipeline.add(new MidRangeSharpenFilter());
@@ -227,96 +223,6 @@ class ImageProcessor {
 
         this.display.draw(currentImageData);
         if (this.enableMasks) this.renderMaskOverlay();
-
-        // 🔹 NOUVEAU : Histogramme mis à jour à chaque rendu (donc en temps réel
-        // à chaque réglage), sur les MÊMES données que ce qui est affiché.
-        try {
-            this._lastImageDataForHistogram = currentImageData;
-            this.updateHistogram(currentImageData);
-        } catch (err) {
-            console.error("❌ Erreur mise à jour histogramme :", err);
-        }
-    }
-
-    /**
-     * 🔹 NOUVEAU : Calcule et dessine l'histogramme (luminance ou RVB) à partir
-     * des données d'image actuellement affichées (post pipeline + masques).
-     */
-    updateHistogram(imageData) {
-        const canvas = document.getElementById("histogramCanvas");
-        if (!canvas || !imageData || !imageData.data) return;
-        const ctx = canvas.getContext("2d");
-        const w = canvas.width, h = canvas.height;
-
-        const data = imageData.data;
-        const totalPixels = imageData.width * imageData.height;
-
-        // Échantillonnage pour rester fluide même en glissant un curseur en direct
-        const maxSamples = 250000;
-        const pixelStep = Math.max(1, Math.floor(totalPixels / maxSamples));
-        const byteStep = pixelStep * 4;
-
-        const rBins = new Uint32Array(256);
-        const gBins = new Uint32Array(256);
-        const bBins = new Uint32Array(256);
-        const lBins = new Uint32Array(256);
-
-        for (let i = 0; i < data.length; i += byteStep) {
-            const r = data[i], g = data[i + 1], b = data[i + 2];
-            rBins[r]++;
-            gBins[g]++;
-            bBins[b]++;
-            lBins[(0.299 * r + 0.587 * g + 0.114 * b) | 0]++;
-        }
-
-        ctx.clearRect(0, 0, w, h);
-        ctx.fillStyle = "#111";
-        ctx.fillRect(0, 0, w, h);
-
-        if (this.histogramMode === "rgb") {
-            ctx.globalCompositeOperation = "lighter";
-            this._drawHistogramChannel(ctx, rBins, w, h, "rgba(255,70,70,0.75)");
-            this._drawHistogramChannel(ctx, gBins, w, h, "rgba(60,255,110,0.65)");
-            this._drawHistogramChannel(ctx, bBins, w, h, "rgba(80,140,255,0.65)");
-            ctx.globalCompositeOperation = "source-over";
-        } else {
-            this._drawHistogramChannel(ctx, lBins, w, h, "rgba(220,220,220,0.9)");
-        }
-    }
-
-    /**
-     * 🔹 NOUVEAU : Dessine une courbe/silhouette remplie pour un canal de l'histogramme.
-     * @private
-     */
-    _drawHistogramChannel(ctx, bins, w, h, color) {
-        let max = 1;
-        for (let i = 0; i < 256; i++) if (bins[i] > max) max = bins[i];
-
-        ctx.beginPath();
-        ctx.moveTo(0, h);
-        for (let i = 0; i < 256; i++) {
-            const x = (i / 255) * w;
-            // Compression sqrt pour que les pics n'écrasent pas le reste (comme la plupart des logiciels photo)
-            const norm = Math.sqrt(bins[i] / max);
-            const y = h - norm * h;
-            ctx.lineTo(x, y);
-        }
-        ctx.lineTo(w, h);
-        ctx.closePath();
-        ctx.fillStyle = color;
-        ctx.fill();
-    }
-
-    /**
-     * 🔹 NOUVEAU : Bascule entre histogramme Luminance et RVB, sans recalculer le pipeline
-     * (redessine juste à partir des dernières données déjà traitées).
-     */
-    toggleHistogramMode() {
-        this.histogramMode = this.histogramMode === "rgb" ? "luminance" : "rgb";
-        if (this._lastImageDataForHistogram) {
-            this.updateHistogram(this._lastImageDataForHistogram);
-        }
-        return this.histogramMode;
     }
 
     /**

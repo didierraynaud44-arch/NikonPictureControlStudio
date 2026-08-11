@@ -71,6 +71,8 @@ class ColorBlenderFilter {
     apply(imageData, pc) {
         if (!imageData || !pc) return imageData;
 
+        if (pc.isMonochrome) return imageData;
+
         // --- Décalage de teinte global (champ "Teinte" du panneau NCP, inchangé) ---
         const rawHue = pc.hue ?? pc.colorBalance ?? pc.hueAdjustment ?? 0;
         const globalHueShift = typeof rawHue === "number" ? rawHue : parseFloat(rawHue) || 0;

@@ -18,7 +18,7 @@ class BaseFilter {
 
     isNeutral(value) {
 
-        return value === 0;
+        return !Number.isFinite(value) || value === 0;
 
     }
 

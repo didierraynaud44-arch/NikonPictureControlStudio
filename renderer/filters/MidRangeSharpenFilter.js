@@ -18,8 +18,10 @@ class MidRangeSharpenFilter extends BaseFilter {
 
         const threshold = 2.0;
 
-        for (let y = 2; y < height - 2; y++) {
-            for (let x = 2; x < width - 2; x++) {
+        const step = Math.max(2, Math.round(width / 800));
+
+        for (let y = step; y < height - step; y++) {
+            for (let x = step; x < width - step; x++) {
 
                 const i = (y * width + x) * 4;
 
@@ -29,10 +31,10 @@ class MidRangeSharpenFilter extends BaseFilter {
 
                 const yCenter = 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
-                const top    = ((y - 2) * width + x) * 4;
-                const bottom = ((y + 2) * width + x) * 4;
-                const left   = (y * width + (x - 2)) * 4;
-                const right  = (y * width + (x + 2)) * 4;
+                const top    = ((y - step) * width + x) * 4;
+                const bottom = ((y + step) * width + x) * 4;
+                const left   = (y * width + (x - step)) * 4;
+                const right  = (y * width + (x + step)) * 4;
 
                 const yAvg = (
                     (0.2126 * src[top]    + 0.7152 * src[top + 1]    + 0.0722 * src[top + 2]) +

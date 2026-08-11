@@ -194,29 +194,6 @@ function collectAllFilesFromFolder(node) {
 /**
  * Construit récursivement l'arborescence HTML (Fermée par défaut avec tri naturel)
  */
-/**
- * 🔹 NOUVEAU : Met en surbrillance l'élément correspondant au fichier actuellement affiché
- * dans l'arbre "Dossiers Photos", quelle que soit la façon dont la photo a été chargée
- * (clic direct dans la liste, flèches de navigation, chargement initial...).
- * Ne reconstruit pas l'arbre (contrairement à renderStudioFolderTree), donc ne referme
- * pas les dossiers dépliés.
- */
-function highlightSelectedTreeItem(filePath) {
-    if (!filePath) return;
-    const normalize = (p) => (p || "").toString().replace(/\\/g, "/").toLowerCase();
-    const target = normalize(filePath);
-
-    document.querySelectorAll(".tree-file-item").forEach(el => {
-        const isMatch = normalize(el.dataset.path) === target;
-        el.style.background = isMatch ? "#1a73e8" : "transparent";
-        el.style.color = isMatch ? "#ffffff" : "#b0b5ba";
-        if (isMatch) {
-            el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        }
-    });
-}
-window.highlightSelectedTreeItem = highlightSelectedTreeItem;
-
 function buildTreeHTML(node) {
     if (!node) return document.createTextNode("");
 
@@ -284,11 +261,15 @@ function buildTreeHTML(node) {
             li.style.whiteSpace = "nowrap";
             li.textContent = `🖼️ ${file.name}`;
             li.title = file.path;
-            li.dataset.path = file.path; // 🔹 NOUVEAU : pour retrouver l'élément depuis n'importe où (flèches incluses)
 
             li.onclick = async (e) => {
                 e.stopPropagation();
-                highlightSelectedTreeItem(file.path);
+                document.querySelectorAll(".tree-file-item").forEach(el => {
+                    el.style.background = "transparent";
+                    el.style.color = "#b0b5ba";
+                });
+                li.style.background = "#1a73e8";
+                li.style.color = "#ffffff";
 
                 if (typeof window.loadImageInStudio === "function") {
                     await window.loadImageInStudio(file.path);
@@ -708,10 +689,6 @@ if (typeof window.applySettingsToSliders === "function") {
         }
 
         prefetchAdjacentImages(filePath);
-
-        // 🔹 NOUVEAU : synchronise la surbrillance dans l'arbre "Dossiers Photos",
-        // même quand le chargement vient des flèches de navigation et non d'un clic.
-        highlightSelectedTreeItem(filePath);
 
     } catch (err) {
         console.error("❌ Erreur lors du chargement dans le Studio :", err);

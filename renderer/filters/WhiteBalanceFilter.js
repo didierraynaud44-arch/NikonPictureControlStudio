@@ -37,6 +37,6 @@ class WhiteBalanceFilter {
     }
 }
 
-if (typeof module !== "undefined" && module.exports) {
-    module.exports = WhiteBalanceFilter;
+if (typeof window !== "undefined") {
+    window.WhiteBalanceFilter = WhiteBalanceFilter;
 }

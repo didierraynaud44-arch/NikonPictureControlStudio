@@ -65,10 +65,12 @@ class DisplayCanvas {
         const parent = this.canvas.parentElement;
         if (!parent) return;
 
-        let zoomBar = document.getElementById("canvasZoomBar");
+        const zoomBarId = "canvasZoomBar_" + this.canvas.id;
+
+        let zoomBar = document.getElementById(zoomBarId);
         if (!zoomBar) {
             zoomBar = document.createElement("div");
-            zoomBar.id = "canvasZoomBar";
+            zoomBar.id = zoomBarId;
             zoomBar.style.cssText = `
                 display: flex;
                 align-items: center;
@@ -221,7 +223,7 @@ class DisplayCanvas {
         if (parent) {
             const w = Math.floor(parent.clientWidth);
             const h = Math.floor(parent.clientHeight);
-            if (w > 0 && h > 0) {
+            if (w > 0 && h > 0 && (this.canvas.width !== w || this.canvas.height !== h)) {
                 this.canvas.width = w;
                 this.canvas.height = h;
             }

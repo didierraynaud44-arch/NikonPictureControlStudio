@@ -13,8 +13,7 @@ class ShadowsFilter extends BaseFilter {
         // Normalisation (ajuste selon l'amplitude max de ton NP3, ex: -3.0 à +3.0)
         const amount = shadows / 5.0;
 
-        const output = this.clone(imageData);
-        const data = output.data;
+        const data = imageData.data;
 
         for (let i = 0; i < data.length; i += 4) {
 
@@ -46,7 +45,7 @@ class ShadowsFilter extends BaseFilter {
             }
         }
 
-        return output;
+        return imageData;
 
     }
 

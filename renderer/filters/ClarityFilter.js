@@ -18,7 +18,7 @@ class ClarityFilter {
         const factor = (clarity / 5) * 0.35; 
 
         // 3. Calcul du micro-contraste par échantillonnage local rapide (Fast Local Contrast)
-        const step = 4; // Échantillonne les pixels voisins pour extraire les fréquences moyennes
+        const step = Math.max(2, Math.round(width / 400)); // Échantillonne les pixels voisins pour extraire les fréquences moyennes
 
         for (let y = step; y < height - step; y += 1) {
             for (let x = step; x < width - step; x += 1) {

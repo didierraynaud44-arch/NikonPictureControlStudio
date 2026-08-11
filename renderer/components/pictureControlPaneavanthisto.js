@@ -145,17 +145,6 @@ function buildPanelHtml(pc, compact, extendedNP3) {
             </select>
         </div>
 
-        <!-- 🔹 NOUVEAU : Histogramme, juste sous le sélecteur de profil (uniquement en mode non-compact, Studio) -->
-        ${compact ? "" : `
-        <div class="card-panel" id="histogramPanel" style="margin-bottom: 14px; padding: 10px; background: #171717; border: 1px solid #333; border-radius: 4px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <span style="font-size: 11px; font-weight: bold; color: #aaa;">Histogramme</span>
-                <button id="btnToggleHistoMode" class="btn-tool" style="padding: 2px 8px; font-size: 10px;" title="Basculer Luminance / RVB">RVB</button>
-            </div>
-            <canvas id="histogramCanvas" width="360" height="100" style="width: 100%; height: 100px; display: block; background: #111; border-radius: 3px;"></canvas>
-        </div>
-        `}
-
         ${compact ? "" : `
         <div style="margin-bottom: 15px; background: #1e1f22; padding: 10px; border-radius: 6px; border: 1px solid #35373c;">
             <h4 style="color: #5865f2; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">
@@ -419,17 +408,6 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
     container.querySelectorAll(".pc-select, .pc-checkbox").forEach(el => {
         el.addEventListener("change", trigger);
     });
-
-    // 🔹 NOUVEAU : Bascule Histogramme Luminance / RVB
-    // (rebranché à chaque appel car le DOM du panneau est régénéré via innerHTML)
-    const btnToggleHistoMode = container.querySelector("#btnToggleHistoMode");
-    if (btnToggleHistoMode && window.imageProcessor) {
-        btnToggleHistoMode.textContent = window.imageProcessor.histogramMode === "rgb" ? "Luminance" : "RVB";
-        btnToggleHistoMode.addEventListener("click", () => {
-            const mode = window.imageProcessor.toggleHistogramMode();
-            btnToggleHistoMode.textContent = mode === "rgb" ? "Luminance" : "RVB";
-        });
-    }
 
     const profileSelect = container.querySelector('[data-field="pcProfileSelect"]');
     if (profileSelect) {

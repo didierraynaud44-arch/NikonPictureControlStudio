@@ -19,8 +19,10 @@ class DenoiseFilter {
         // 2. Luminance : lissage léger de la structure de grain
         const lumaBlend = Math.min(0.5, amount * 0.08); 
 
-        for (let y = 1; y < height - 1; y++) {
-            for (let x = 1; x < width - 1; x++) {
+        const step = Math.max(1, Math.round(width / 1600));
+
+        for (let y = step; y < height - step; y++) {
+            for (let x = step; x < width - step; x++) {
                 const i = (y * width + x) * 4;
 
                 const r = copy[i];
@@ -28,10 +30,10 @@ class DenoiseFilter {
                 const b = copy[i + 2];
 
                 // Index des 4 voisins direct (haut, bas, gauche, droite)
-                const iL = i - 4;
-                const iR = i + 4;
-                const iT = i - width * 4;
-                const iB = i + width * 4;
+                const iL = i - step * 4;
+                const iR = i + step * 4;
+                const iT = i - width * step * 4;
+                const iB = i + width * step * 4;
 
                 // Moyennes RVB environnantes
                 const avgR = (copy[iL] + copy[iR] + copy[iT] + copy[iB]) * 0.25;

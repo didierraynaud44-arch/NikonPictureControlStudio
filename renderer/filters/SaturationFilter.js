@@ -9,6 +9,8 @@ class SaturationFilter extends BaseFilter {
         if (!pictureControl || pictureControl.saturation === undefined)
             return imageData;
 
+        if (pictureControl.isMonochrome) return imageData;
+
         let saturation = Number(pictureControl.saturation);
         if (isNaN(saturation)) saturation = 0;
 

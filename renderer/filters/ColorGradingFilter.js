@@ -30,6 +30,8 @@ class ColorGradingFilter {
     apply(imageData, pc) {
         if (!imageData || !pc) return imageData;
 
+        if (pc.isMonochrome) return imageData;
+
         const cg = pc.colorGrading && typeof pc.colorGrading === "object" ? pc.colorGrading : null;
         if (!cg) return imageData;
 

@@ -1,6 +1,6 @@
 /*=========================================================
     Nikon Picture Control Studio - Controller (app.js)
-    Version avec persistance des réglages Picture Control
+    Version avec EXIF depuis la base de données
 =========================================================*/
 
 let currentNefFileName = "image-editee";
@@ -170,6 +170,104 @@ function applySettingsToSliders(settings) {
 // FIN GESTION PERSISTANCE
 // ============================================================
 
+// ============================================================
+// MISE À JOUR EXIF DEPUIS LA BASE DE DONNÉES
+// ============================================================
+
+/**
+ * Met à jour la barre EXIF avec les données de la base
+ */
+function updateExifBarFromDb(photo) {
+    const cameraEl = document.getElementById('exifCamera');
+    const lensEl = document.getElementById('exifLens');
+    const paramsEl = document.getElementById('exifParams');
+    
+    if (!cameraEl || !lensEl || !paramsEl) return;
+
+    // Appareil photo
+    const make = photo.make || '';
+    const model = photo.model || '';
+    cameraEl.textContent = make && model ? `${make} ${model}` : (make || model || '-');
+
+    // Objectif
+    lensEl.textContent = photo.lens || '-';
+
+    // Paramètres
+    const params = [];
+    if (photo.focal_length) params.push(`${photo.focal_length}mm`);
+    if (photo.aperture) params.push(`f/${photo.aperture}`);
+    if (photo.shutter_speed) params.push(photo.shutter_speed);
+    if (photo.iso) params.push(`ISO ${photo.iso}`);
+    if (photo.exposure_compensation) params.push(`EV ${photo.exposure_compensation}`);
+    if (photo.white_balance) params.push(photo.white_balance);
+    if (photo.date_time_original) params.push(new Date(photo.date_time_original).toLocaleDateString());
+    
+    paramsEl.textContent = params.length > 0 ? params.join(' | ') : 'Aucune EXIF';
+}
+
+/**
+
+ */
+async function loadExifFromDatabase(filePath) {
+    try {
+        // Essayer d'abord avec getPhotoByPath si disponible
+        if (window.catalogAPI && typeof window.catalogAPI.getPhotoByPath === "function") {
+            const photo = await window.catalogAPI.getPhotoByPath(filePath);
+            if (photo && (photo.make || photo.model || photo.iso)) {
+                updateExifBarFromDb(photo);
+                console.log("✅ EXIF chargées via getPhotoByPath");
+                return photo;
+            }
+        }
+        
+        // Fallback: utiliser getPhotos pour chercher la photo
+        if (window.catalogAPI && typeof window.catalogAPI.getPhotos === "function") {
+            // Normaliser le chemin pour la comparaison
+            const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+            
+            // Récupérer toutes les photos
+            const allPhotos = await window.catalogAPI.getPhotos(null);
+            
+            if (allPhotos && allPhotos.length > 0) {
+                // Chercher la photo par chemin
+                const photo = allPhotos.find(p => {
+                    const pPath = (p.file_path || '').replace(/\\/g, '/').toLowerCase();
+                    return pPath === normalizedPath;
+                });
+                
+                if (photo && (photo.make || photo.model || photo.iso)) {
+                    updateExifBarFromDb(photo);
+                    console.log("✅ EXIF chargées via getPhotos (fallback)");
+                    return photo;
+                }
+            }
+        }
+        
+        // Fallback: utiliser electronAPI
+        if (window.electronAPI && typeof window.electronAPI.getPhotoExif === "function") {
+            const exifData = await window.electronAPI.getPhotoExif(filePath);
+            if (exifData && (exifData.make || exifData.model || exifData.iso)) {
+                updateExifBarFromDb(exifData);
+                console.log("✅ EXIF chargées via electronAPI");
+                return exifData;
+            }
+        }
+        
+        console.warn("⚠️ Aucune EXIF trouvée pour:", filePath);
+        return null;
+    } catch (err) {
+        console.error("❌ Erreur chargement EXIF depuis la base:", err);
+        return null;
+    }
+}
+
+// Exposer les fonctions globalement
+window.updateExifBarFromDb = updateExifBarFromDb;
+window.loadExifFromDatabase = loadExifFromDatabase;
+// ============================================================
+// FIN GESTION EXIF
+// ============================================================
+
 /**
  * Extrait tous les fichiers d'un nœud de dossier pour alimenter la grille
  */
@@ -194,29 +292,6 @@ function collectAllFilesFromFolder(node) {
 /**
  * Construit récursivement l'arborescence HTML (Fermée par défaut avec tri naturel)
  */
-/**
- * 🔹 NOUVEAU : Met en surbrillance l'élément correspondant au fichier actuellement affiché
- * dans l'arbre "Dossiers Photos", quelle que soit la façon dont la photo a été chargée
- * (clic direct dans la liste, flèches de navigation, chargement initial...).
- * Ne reconstruit pas l'arbre (contrairement à renderStudioFolderTree), donc ne referme
- * pas les dossiers dépliés.
- */
-function highlightSelectedTreeItem(filePath) {
-    if (!filePath) return;
-    const normalize = (p) => (p || "").toString().replace(/\\/g, "/").toLowerCase();
-    const target = normalize(filePath);
-
-    document.querySelectorAll(".tree-file-item").forEach(el => {
-        const isMatch = normalize(el.dataset.path) === target;
-        el.style.background = isMatch ? "#1a73e8" : "transparent";
-        el.style.color = isMatch ? "#ffffff" : "#b0b5ba";
-        if (isMatch) {
-            el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        }
-    });
-}
-window.highlightSelectedTreeItem = highlightSelectedTreeItem;
-
 function buildTreeHTML(node) {
     if (!node) return document.createTextNode("");
 
@@ -284,11 +359,15 @@ function buildTreeHTML(node) {
             li.style.whiteSpace = "nowrap";
             li.textContent = `🖼️ ${file.name}`;
             li.title = file.path;
-            li.dataset.path = file.path; // 🔹 NOUVEAU : pour retrouver l'élément depuis n'importe où (flèches incluses)
 
             li.onclick = async (e) => {
                 e.stopPropagation();
-                highlightSelectedTreeItem(file.path);
+                document.querySelectorAll(".tree-file-item").forEach(el => {
+                    el.style.background = "transparent";
+                    el.style.color = "#b0b5ba";
+                });
+                li.style.background = "#1a73e8";
+                li.style.color = "#ffffff";
 
                 if (typeof window.loadImageInStudio === "function") {
                     await window.loadImageInStudio(file.path);
@@ -551,12 +630,8 @@ function pathFileName(filePath) {
 }
 
 /* =========================================================
-    CHARGEMENT STUDIO & RENDERER AVEC PERSISTANCE - CORRIGÉ
+    CHARGEMENT STUDIO AVEC EXIF DEPUIS LA BASE
 ========================================================= */
-/* =========================================================
-    CHARGEMENT STUDIO & RENDERER AVEC PERSISTANCE - CORRIGÉ
-========================================================= */
-
 async function loadImageInStudio(filePath) {
     if (!filePath) return;
 
@@ -583,7 +658,65 @@ async function loadImageInStudio(filePath) {
             return;
         }
 
-        // 🔥 CHARGER LES RÉGLAGES SAUVEGARDÉS (UN SEUL APPEL !)
+        // 🔍 DEBUG - Voir ce que contient fileInfo
+        console.log("🔍 fileInfo contient:", {
+            make: fileInfo.make,
+            model: fileInfo.model,
+            iso: fileInfo.iso,
+            aperture: fileInfo.aperture,
+            focalLength: fileInfo.focalLength,
+            lens: fileInfo.lens,
+            allKeys: Object.keys(fileInfo)
+        });
+
+        // ============================================================
+        // 🔥 AFFICHER LES EXIF DIRECTEMENT DEPUIS fileInfo
+        // ============================================================
+        
+        // Vérifier que fileInfo contient les EXIF
+        if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
+            // Utiliser updateExifBarFromDb avec les données de fileInfo
+            updateExifBarFromDb({
+                make: fileInfo.make || null,
+                model: fileInfo.model || null,
+                lens: fileInfo.lens || fileInfo.lensModel || null,
+                iso: fileInfo.iso || null,
+                aperture: fileInfo.aperture || null,
+                focal_length: fileInfo.focalLength || null,
+                shutter_speed: fileInfo.shutterSpeed || null,
+                exposure_compensation: fileInfo.exposureCompensation || null,
+                white_balance: fileInfo.whiteBalance || null,
+                date_time_original: fileInfo.dateTimeOriginal || null
+            });
+            console.log("✅ EXIF affichées depuis fileInfo");
+        } else {
+            // Fallback: essayer la base de données
+            console.log("📸 Pas d'EXIF dans fileInfo, essai base de données...");
+            try {
+                if (window.catalogAPI && typeof window.catalogAPI.getPhotos === "function") {
+                    const allPhotos = await window.catalogAPI.getPhotos(null);
+                    if (allPhotos && allPhotos.length > 0) {
+                        const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+                        const photo = allPhotos.find(p => {
+                            const pPath = (p.file_path || '').replace(/\\/g, '/').toLowerCase();
+                            return pPath === normalizedPath;
+                        });
+                        if (photo && (photo.make || photo.model || photo.iso)) {
+                            updateExifBarFromDb(photo);
+                            console.log("✅ EXIF depuis la base (fallback)");
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("⚠️ Erreur fallback base:", e);
+            }
+        }
+
+        // ============================================================
+        // FIN AFFICHAGE EXIF
+        // ============================================================
+
+        // 🔥 CHARGER LES RÉGLAGES SAUVEGARDÉS
         const savedSettings = await loadPictureControlSettings(filePath);
         let pcData = {};
 
@@ -591,36 +724,26 @@ async function loadImageInStudio(filePath) {
             pcData = savedSettings;
             console.log("📂 Utilisation des réglages sauvegardés");
             
-            // 🔥 APPLIQUER LES RÉGLAGES AUX CURSEURS
-          // Dans loadImageInStudio, remplace :
-if (typeof applySettingsToSliders === "function") {
-    applySettingsToSliders(savedSettings);
-} else if (typeof window.applySettingsToSliders === "function") {
-    window.applySettingsToSliders(savedSettings);
-} else {
-    // Fallback...
-}
-
-// Par ceci (plus simple) :
-if (typeof window.applySettingsToSliders === "function") {
-    window.applySettingsToSliders(savedSettings);
-} else {
-    // Fallback manuel
-    console.warn("⚠️ window.applySettingsToSliders non disponible, fallback manuel");
-    const sliders = document.querySelectorAll('input[type="range"]');
-    sliders.forEach(slider => {
-        const key = slider.id || slider.name;
-        if (key && savedSettings[key] !== undefined) {
-            slider.value = savedSettings[key];
-            const display = document.getElementById(`${key}-value`);
-            if (display) {
-                display.textContent = savedSettings[key];
+            // Appliquer les réglages aux curseurs
+            if (typeof window.applySettingsToSliders === "function") {
+                window.applySettingsToSliders(savedSettings);
+            } else {
+                // Fallback manuel
+                console.warn("⚠️ window.applySettingsToSliders non disponible, fallback manuel");
+                const sliders = document.querySelectorAll('input[type="range"]');
+                sliders.forEach(slider => {
+                    const key = slider.id || slider.name;
+                    if (key && savedSettings[key] !== undefined) {
+                        slider.value = savedSettings[key];
+                        const display = document.getElementById(`${key}-value`);
+                        if (display) {
+                            display.textContent = savedSettings[key];
+                        }
+                    }
+                });
             }
-        }
-    });
-}
             
-            // 🔥 METTRE À JOUR LE PANNEAU PICTURE CONTROL
+            // Mettre à jour le panneau Picture Control
             if (typeof window.updatePictureControl === "function") {
                 window.updatePictureControl({
                     pictureControl: savedSettings,
@@ -659,10 +782,6 @@ if (typeof window.applySettingsToSliders === "function") {
             }
         }
 
-        if (typeof window.updateExif === "function") {
-            window.updateExif(fileInfo);
-        }
-
         if (imageSrc && window.imageProcessor) {
             if (typeof window.imageProcessor.clear === "function") {
                 window.imageProcessor.clear();
@@ -678,7 +797,7 @@ if (typeof window.applySettingsToSliders === "function") {
                 }
             );
 
-            // 🔥 APPLIQUER LES RÉGLAGES CHARGÉS
+            // Appliquer les réglages chargés
             window.imageProcessor.setPictureControl(pcData);
         }
 
@@ -696,7 +815,7 @@ if (typeof window.applySettingsToSliders === "function") {
             window.switchToView("view-studio");
         }
 
-        // 🔥 PARTAGER L'IMAGE AVEC PrintManager AVEC LES RÉGLAGES
+        // Partager l'image avec PrintManager
         if (window.printManager && fileInfo) {
             const pcForPrint = savedSettings || pcData || {};
             try {
@@ -709,19 +828,11 @@ if (typeof window.applySettingsToSliders === "function") {
 
         prefetchAdjacentImages(filePath);
 
-        // 🔹 NOUVEAU : synchronise la surbrillance dans l'arbre "Dossiers Photos",
-        // même quand le chargement vient des flèches de navigation et non d'un clic.
-        highlightSelectedTreeItem(filePath);
-
     } catch (err) {
         console.error("❌ Erreur lors du chargement dans le Studio :", err);
     }
 }
 window.loadImageInStudio = loadImageInStudio;
-
-     
-
-     
 
 
 function prefetchAdjacentImages(currentPath) {
@@ -925,7 +1036,7 @@ function initButtons() {
         window.imageProcessor = new ImageProcessor("previewCanvas");
     }
 
-    // 🔥 INTERCEPTER LES MODIFICATIONS POUR SAUVEGARDE AUTOMATIQUE
+    // INTERCEPTER LES MODIFICATIONS POUR SAUVEGARDE AUTOMATIQUE
     if (window.imageProcessor) {
         const debouncedSave = (() => {
             let timeout = null;
@@ -940,8 +1051,8 @@ function initButtons() {
                             await saveCurrentPictureControlSettings(filePath);
                         }
                     }
-                    timeout = null;
-                }, 500);
+                    timeout = null
+                                    }, 500);
             };
         })();
 
@@ -1020,7 +1131,7 @@ function initButtons() {
     if (btnRotateLeft) btnRotateLeft.onclick = () => { currentTransform.rotation -= 90; applyStudioTransform(); };
     if (btnRotateRight) btnRotateRight.onclick = () => { currentTransform.rotation += 90; applyStudioTransform(); };
     if (btnFlipH) btnFlipH.onclick = () => { currentTransform.flipH = !currentTransform.flipH; applyStudioTransform(); };
-      if (btnFlipV) btnFlipV.onclick = () => { currentTransform.flipV = !currentTransform.flipV; applyStudioTransform(); };
+    if (btnFlipV) btnFlipV.onclick = () => { currentTransform.flipV = !currentTransform.flipV; applyStudioTransform(); };
 
     if (rangeDegree) {
         rangeDegree.oninput = (e) => {
@@ -1191,7 +1302,39 @@ function initIccManager() {
         };
     }
 }
+const btnFullscreen = document.getElementById('btnFullscreen');
+if (btnFullscreen) {
+    btnFullscreen.addEventListener('click', () => {
+        const container = document.getElementById('singleImageContainer');
+        if (container) {
+            if (!document.fullscreenElement) {
+                container.requestFullscreen().catch(err => {
+                    console.warn("⚠️ Plein écran non disponible:", err);
+                });
+                btnFullscreen.textContent = '⛶'; // Icône plein écran
+                btnFullscreen.title = 'Quitter le plein écran';
+            } else {
+                document.exitFullscreen();
+                btnFullscreen.textContent = '⛶';
+                btnFullscreen.title = 'Plein écran';
+            }
+        }
+    });
+}
 
+// Surveiller les changements de plein écran
+document.addEventListener('fullscreenchange', () => {
+    const btn = document.getElementById('btnFullscreen');
+    if (btn) {
+        if (document.fullscreenElement) {
+            btn.textContent = '⛶';
+            btn.title = 'Quitter le plein écran';
+        } else {
+            btn.textContent = '⛶';
+            btn.title = 'Plein écran';
+        }
+    }
+});
 // ============================================================
 // EXPOSER LES FONCTIONS AU GLOBAL
 // ============================================================
@@ -1208,5 +1351,7 @@ window.loadSavedStudioFolders = loadSavedStudioFolders;
 window.renderNp3Library = renderNp3Library;
 window.initIccManager = initIccManager;
 window.saveCurrentPhotoSettingsToCatalog = saveCurrentPhotoSettingsToCatalog;
+window.loadExifFromDatabase = loadExifFromDatabase;
+window.updateExifBarFromDb = updateExifBarFromDb;
 
-console.log("✅ app.js chargé avec persistance des réglages Picture Control");
+console.log("✅ app.js chargé avec persistance des réglages Picture Control et EXIF depuis la base");

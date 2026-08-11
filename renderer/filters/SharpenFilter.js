@@ -17,10 +17,12 @@ class SharpenFilter extends BaseFilter {
         if (amount === 0) return imageData;
 
         // Seuil pour ignorer le bruit de fond et éviter de blanchir les aplats
-        const threshold = 3.0; 
+        const threshold = 3.0;
 
-        for (let y = 1; y < height - 1; y++) {
-            for (let x = 1; x < width - 1; x++) {
+        const step = Math.max(1, Math.round(width / 1600));
+
+        for (let y = step; y < height - step; y++) {
+            for (let x = step; x < width - step; x++) {
 
                 const i = (y * width + x) * 4;
 
@@ -32,10 +34,10 @@ class SharpenFilter extends BaseFilter {
                 const yCenter = 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
                 // Voisins
-                const top    = ((y - 1) * width + x) * 4;
-                const bottom = ((y + 1) * width + x) * 4;
-                const left   = (y * width + (x - 1)) * 4;
-                const right  = (y * width + (x + 1)) * 4;
+                const top    = ((y - step) * width + x) * 4;
+                const bottom = ((y + step) * width + x) * 4;
+                const left   = (y * width + (x - step)) * 4;
+                const right  = (y * width + (x + step)) * 4;
 
                 const yAvg = (
                     (0.2126 * src[top]    + 0.7152 * src[top + 1]    + 0.0722 * src[top + 2]) +
