@@ -61,6 +61,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getFullResolutionImage: (filePath) =>
         ipcRenderer.invoke("get-full-resolution-image", filePath),
 
+    getThumbnail: (filePath) =>
+        ipcRenderer.invoke("get-thumbnail", filePath),
+
     getShutterCount: (filePath) =>
         ipcRenderer.invoke("get-shutter-count", filePath),
 
@@ -73,8 +76,37 @@ contextBridge.exposeInMainWorld("electronAPI", {
     readFolderRecursive: (folderPath) => 
         ipcRenderer.invoke("read-folder-recursive", folderPath),
     
-    selectExportFolder: () => 
+    selectExportFolder: () =>
         ipcRenderer.invoke("dialog:selectExportFolder"),
+
+    toggleFullscreen: () =>
+        ipcRenderer.invoke("toggle-fullscreen"),
+
+    // ============================================================
+    // SAUVEGARDE / RESTAURATION DU CATALOGUE
+    // ============================================================
+
+    exportBackup: () =>
+        ipcRenderer.invoke("catalog:export-backup"),
+
+    importBackup: () =>
+        ipcRenderer.invoke("catalog:import-backup"),
+
+    onCatalogRestored: (callback) =>
+        ipcRenderer.on("catalog:restored", callback),
+
+    // ============================================================
+    // NOTATION & STATUT DES PHOTOS
+    // ============================================================
+
+    setPhotoRating: (filePath, rating) =>
+        ipcRenderer.invoke("set-photo-rating", filePath, rating),
+
+    setPhotoFlag: (filePath, flag) =>
+        ipcRenderer.invoke("set-photo-flag", filePath, flag),
+
+    getPhotosStatus: (filePaths) =>
+        ipcRenderer.invoke("get-photos-status", filePaths),
 
     // ============================================================
     // PICTURE CONTROL ENGINE
@@ -118,9 +150,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onMenuSwitchView: (callback) => 
         ipcRenderer.on("menu-switch-view", (event, viewId) => callback(viewId)),
     
-    onMenuTriggerExport: (callback) => 
+    onMenuTriggerExport: (callback) =>
         ipcRenderer.on("menu-trigger-export", callback),
-    
+
+    onMenuExportBackup: (callback) =>
+        ipcRenderer.on("menu-export-backup", callback),
+
+    onMenuImportBackup: (callback) =>
+        ipcRenderer.on("menu-import-backup", callback),
+
     // ============================================================
     // NETTOYAGE DES ÉCOUTEURS (optionnel mais recommandé)
     // ============================================================

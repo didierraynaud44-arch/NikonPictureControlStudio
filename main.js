@@ -2,16 +2,18 @@
     Nikon Picture Control Studio - main1.js (Version Complète avec Persistance)
 =========================================================*/
 
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const exifr = require('exifr');
 const { exiftool } = require('exiftool-vendored');
 
 // 🔹 Imports des services
-const { initDatabase, getDb, dbAll, dbRun } = require("./db");
+const { initDatabase, getDb, closeDatabase, dbAll, dbRun } = require("./db");
 const {
+    DB_PATH: CATALOG_DB_PATH,
     initCatalogDB,
+    closeCatalogDB,
     addFolderToCatalog,
     getFullCatalog,
     removeFolderFromCatalog,
@@ -36,7 +38,16 @@ try {
 
 // 🔹 Variables globales
 let mainWindow = null;
+let windowStateStore = null; // instance electron-store, initialisée dans app.whenReady() (module ESM)
 const settingsCache = new Map();
+
+// 🔹 Fenêtre principale : dimensions par défaut et bornes
+const DEFAULT_WINDOW_WIDTH = 1200;
+const DEFAULT_WINDOW_HEIGHT = 800;
+const MIN_WINDOW_WIDTH = 900;
+const MIN_WINDOW_HEIGHT = 600;
+const WINDOW_SCREEN_MARGIN = 40; // marge pour ne pas coller aux bords de la zone utile
+const WINDOW_STATE_SAVE_DEBOUNCE_MS = 400;
 
 // 🔹 Fonction de scan récursif
 const ALL_IMAGE_EXTENSIONS = [
@@ -127,6 +138,23 @@ function createAppMenu() {
                     }
                 }
             ]
+        },
+        {
+            label: "Sauvegarde",
+            submenu: [
+                {
+                    label: "Exporter la base...",
+                    click: () => {
+                        if (mainWindow) mainWindow.webContents.send("menu-export-backup");
+                    }
+                },
+                {
+                    label: "Importer une sauvegarde...",
+                    click: () => {
+                        if (mainWindow) mainWindow.webContents.send("menu-import-backup");
+                    }
+                }
+            ]
         }
     ]);
 
@@ -172,29 +200,81 @@ function getDefaultPictureControl() {
 // INITIALISATION
 // ============================================================
 
+// 🔹 Table photo_settings : créée au démarrage, et re-créée après une restauration
+// de sauvegarde (le fichier importé peut être une base plus ancienne qui ne l'a pas).
+async function ensurePhotoSettingsTable() {
+    try {
+        await dbRun(`
+            CREATE TABLE IF NOT EXISTS photo_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_path TEXT UNIQUE NOT NULL,
+                settings TEXT NOT NULL,
+                date_modified DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log("✅ Table photo_settings créée/vérifiée");
+    } catch (tableErr) {
+        console.error("❌ Erreur création table photo_settings:", tableErr);
+    }
+
+    // 🔥 Migration : colonnes note (rating) et statut (flag), ajoutées à la volée
+    // si absentes (ex: base plus ancienne restaurée depuis une sauvegarde).
+    for (const migration of [
+        "ALTER TABLE photo_settings ADD COLUMN rating INTEGER DEFAULT 0",
+        "ALTER TABLE photo_settings ADD COLUMN flag TEXT DEFAULT NULL"
+    ]) {
+        try {
+            await dbRun(migration);
+        } catch (alterErr) {
+            if (!alterErr.message.includes("duplicate column name")) {
+                console.warn("⚠️ Erreur migration photo_settings:", alterErr.message);
+            }
+        }
+    }
+}
+
+// 🔹 Note (0-5) et statut ('validated' | 'rejected' | null) par photo.
+//
+// Stockés dans la table photo_settings (connexion db.js / global.db), PAS dans
+// catalog_photos (connexion catalogService.js) : catalog_photos exige une ligne
+// déjà existante pour le file_path (créée uniquement à l'import d'un dossier
+// dans le Catalogue via addFolderToCatalog), donc UPDATE catalog_photos ... WHERE
+// file_path = ? ne fait rien pour un fichier ouvert hors catalogue. photo_settings
+// a une contrainte UNIQUE(file_path) et supporte un vrai UPSERT, donc fonctionne
+// pour n'importe quel fichier, catalogué ou non — ce que demande cette fonctionnalité.
+async function setPhotoRatingValue(filePath, rating) {
+    const safeRating = Math.max(0, Math.min(5, parseInt(rating, 10) || 0));
+    await dbRun(
+        `INSERT INTO photo_settings (file_path, settings, rating) VALUES (?, '{}', ?)
+         ON CONFLICT(file_path) DO UPDATE SET rating = excluded.rating, date_modified = CURRENT_TIMESTAMP`,
+        [filePath, safeRating]
+    );
+    return safeRating;
+}
+
+async function setPhotoFlagValue(filePath, flag) {
+    const safeFlag = (flag === "validated" || flag === "rejected") ? flag : null;
+    await dbRun(
+        `INSERT INTO photo_settings (file_path, settings, flag) VALUES (?, '{}', ?)
+         ON CONFLICT(file_path) DO UPDATE SET flag = excluded.flag, date_modified = CURRENT_TIMESTAMP`,
+        [filePath, safeFlag]
+    );
+    return safeFlag;
+}
+
 app.whenReady().then(async () => {
     try {
         console.log("🚀 Démarrage de l'application...");
 
-        const dbPath = path.join(app.getPath("userData"), "catalog.db");
-        global.db = await initDatabase(dbPath);
+        // electron-store v10+ est un module ESM pur : impossible de le charger avec
+        // require() depuis ce fichier CommonJS, d'où l'import() dynamique ici.
+        const { default: Store } = await import("electron-store");
+        windowStateStore = new Store({ name: "window-state" });
+
+        global.db = await initDatabase(CATALOG_DB_PATH);
         await initCatalogDB();
-        
-        // 🔥 CRÉER LA TABLE photo_settings
-        try {
-            await dbRun(`
-                CREATE TABLE IF NOT EXISTS photo_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    file_path TEXT UNIQUE NOT NULL,
-                    settings TEXT NOT NULL,
-                    date_modified DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            `);
-            console.log("✅ Table photo_settings créée/vérifiée");
-        } catch (tableErr) {
-            console.error("❌ Erreur création table photo_settings:", tableErr);
-        }
-        
+        await ensurePhotoSettingsTable();
+
         console.log("✅ Base de données et catalogue initialisés.");
 
         createWindow();
@@ -207,15 +287,72 @@ app.whenReady().then(async () => {
     }
 });
 
+// 🔹 Taille par défaut, contrainte à la zone utile de l'écran principal
+// (barre des tâches Windows déjà exclue par workAreaSize).
+function getDefaultWindowBounds() {
+    const { width: workAreaWidth, height: workAreaHeight } = screen.getPrimaryDisplay().workAreaSize;
+    return {
+        width: Math.min(DEFAULT_WINDOW_WIDTH, workAreaWidth - WINDOW_SCREEN_MARGIN),
+        height: Math.min(DEFAULT_WINDOW_HEIGHT, workAreaHeight - WINDOW_SCREEN_MARGIN)
+    };
+}
+
+// 🔹 Bornes initiales : reprend la position/taille sauvegardée si elle correspond
+// encore à un écran actuellement connecté (sinon l'utilisateur a changé de moniteur
+// entre deux lancements et on retombe sur le calcul par défaut).
+function getInitialWindowBounds() {
+    const defaults = getDefaultWindowBounds();
+    const saved = windowStateStore ? windowStateStore.get("windowBounds") : null;
+
+    if (!saved || typeof saved.x !== "number" || typeof saved.y !== "number" ||
+        typeof saved.width !== "number" || typeof saved.height !== "number") {
+        return defaults;
+    }
+
+    const fitsInADisplay = screen.getAllDisplays().some((display) => {
+        const area = display.workArea;
+        return (
+            saved.x >= area.x &&
+            saved.y >= area.y &&
+            saved.x + saved.width <= area.x + area.width &&
+            saved.y + saved.height <= area.y + area.height
+        );
+    });
+
+    return fitsInADisplay ? saved : defaults;
+}
+
 function createWindow() {
+    const bounds = getInitialWindowBounds();
+
     mainWindow = new BrowserWindow({
-        width: 1200,
-        height: 800,
+        ...bounds,
+        minWidth: MIN_WINDOW_WIDTH,
+        minHeight: MIN_WINDOW_HEIGHT,
         webPreferences: {
             preload: path.join(__dirname, "preload.js"),
             contextIsolation: true,
             nodeIntegration: false
         }
+    });
+
+    // 🔹 Sauvegarde débattue (debounce) de la position/taille entre les sessions.
+    let saveStateTimeout = null;
+    const saveWindowState = () => {
+        if (!windowStateStore || !mainWindow || mainWindow.isDestroyed()) return;
+        if (mainWindow.isMaximized() || mainWindow.isMinimized() || mainWindow.isFullScreen()) return;
+        windowStateStore.set("windowBounds", mainWindow.getBounds());
+    };
+    const debouncedSaveWindowState = () => {
+        clearTimeout(saveStateTimeout);
+        saveStateTimeout = setTimeout(saveWindowState, WINDOW_STATE_SAVE_DEBOUNCE_MS);
+    };
+
+    mainWindow.on("resize", debouncedSaveWindowState);
+    mainWindow.on("move", debouncedSaveWindowState);
+    mainWindow.on("close", () => {
+        clearTimeout(saveStateTimeout);
+        saveWindowState();
     });
 
     mainWindow.loadFile("renderer/index.html");
@@ -513,6 +650,56 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
 });
 
     // ============================================================
+    // 🖼️ VIGNETTE LÉGÈRE (grille de la Galerie)
+    // ============================================================
+    // Handler dédié, séparé de read-file-direct : pas de redimensionnement à
+    // 1200px, pas d'extraction EXIF, pas de ShutterCount — juste un JPEG 300px
+    // de large max, nettement plus rapide pour peupler une grille de vignettes.
+
+    ipcMain.handle("get-thumbnail", async (event, filePath) => {
+        if (!filePath || !fs.existsSync(filePath)) {
+            return { success: false };
+        }
+
+        try {
+            const ext = path.extname(filePath).toLowerCase();
+            const sharp = require("sharp");
+
+            if (SUPPORTED_EXTENSIONS.includes(ext)) {
+                if (!decodeRAWImage) {
+                    return { success: false };
+                }
+                const previewDataUrl = await decodeRAWImage(filePath);
+                if (!previewDataUrl) return { success: false };
+
+                const base64Data = previewDataUrl.replace(/^data:image\/\w+;base64,/, "");
+                const previewBuffer = Buffer.from(base64Data, "base64");
+
+                const thumbBuffer = await sharp(previewBuffer)
+                    .resize(300, null, { fit: "inside", withoutEnlargement: true })
+                    .jpeg({ quality: 75 })
+                    .toBuffer();
+
+                return { success: true, dataUrl: `data:image/jpeg;base64,${thumbBuffer.toString("base64")}` };
+            }
+
+            if ([".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"].includes(ext)) {
+                const thumbBuffer = await sharp(filePath, { failOnError: false })
+                    .resize(300, null, { fit: "inside", withoutEnlargement: true })
+                    .jpeg({ quality: 75 })
+                    .toBuffer();
+
+                return { success: true, dataUrl: `data:image/jpeg;base64,${thumbBuffer.toString("base64")}` };
+            }
+
+            return { success: false };
+        } catch (err) {
+            console.warn("⚠️ Erreur get-thumbnail:", filePath, err.message);
+            return { success: false, error: err.message };
+        }
+    });
+
+    // ============================================================
     // 💾 SAUVEGARDE ET CHARGEMENT DES RÉGLAGES
     // ============================================================
 
@@ -613,6 +800,56 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
             console.error("❌ Erreur reset des réglages:", err);
             return getDefaultPictureControl();
         }
+    });
+
+    // ============================================================
+    // ⭐ NOTATION & STATUT DES PHOTOS
+    // ============================================================
+
+    ipcMain.handle("set-photo-rating", async (event, filePath, rating) => {
+        if (!filePath) return { success: false, error: "Chemin de fichier manquant" };
+        try {
+            const safeRating = await setPhotoRatingValue(filePath, rating);
+            return { success: true, rating: safeRating };
+        } catch (err) {
+            console.error("❌ Erreur set-photo-rating:", err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle("set-photo-flag", async (event, filePath, flag) => {
+        if (!filePath) return { success: false, error: "Chemin de fichier manquant" };
+        try {
+            const safeFlag = await setPhotoFlagValue(filePath, flag);
+            return { success: true, flag: safeFlag };
+        } catch (err) {
+            console.error("❌ Erreur set-photo-flag:", err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle("get-photos-status", async (event, filePaths) => {
+        const result = {};
+        if (!Array.isArray(filePaths) || filePaths.length === 0) return result;
+
+        for (const p of filePaths) {
+            result[p] = { rating: 0, flag: null };
+        }
+
+        try {
+            const placeholders = filePaths.map(() => "?").join(",");
+            const rows = await dbAll(
+                `SELECT file_path, rating, flag FROM photo_settings WHERE file_path IN (${placeholders})`,
+                filePaths
+            );
+            for (const row of rows) {
+                result[row.file_path] = { rating: row.rating || 0, flag: row.flag || null };
+            }
+        } catch (err) {
+            console.error("❌ Erreur get-photos-status:", err);
+        }
+
+        return result;
     });
 
     // ============================================================
@@ -1109,6 +1346,95 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
     });
 
     // ============================================================
+    // 🛟 SAUVEGARDE / RESTAURATION MANUELLE DU CATALOGUE
+    // ============================================================
+
+    ipcMain.handle("catalog:export-backup", async () => {
+        try {
+            const pad = (n) => String(n).padStart(2, "0");
+            const now = new Date();
+            const defaultName = `nikon-catalog-backup-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.db`;
+
+            const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+                title: "Exporter une sauvegarde du catalogue",
+                defaultPath: defaultName,
+                filters: [{ name: "Base de données SQLite", extensions: ["db"] }]
+            });
+
+            if (canceled || !filePath) {
+                return { success: false };
+            }
+
+            // VACUUM INTO exige que le fichier cible n'existe pas déjà.
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+
+            await dbRun("VACUUM INTO ?", [filePath]);
+            console.log("✅ Sauvegarde du catalogue exportée:", filePath);
+
+            return { success: true, path: filePath };
+        } catch (err) {
+            console.error("❌ Erreur export sauvegarde catalogue:", err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle("catalog:import-backup", async () => {
+        try {
+            const { filePaths, canceled } = await dialog.showOpenDialog(mainWindow, {
+                title: "Restaurer une sauvegarde du catalogue",
+                properties: ["openFile"],
+                filters: [{ name: "Base de données SQLite", extensions: ["db"] }]
+            });
+
+            if (canceled || !filePaths.length) {
+                return { success: false };
+            }
+
+            const importedPath = filePaths[0];
+
+            // db.js et catalogService.js ouvrent chacun leur propre connexion vers
+            // le même fichier catalog.db : il faut fermer les deux avant de toucher
+            // au fichier, sinon le remplacement peut échouer ou laisser une connexion
+            // pointer vers des données obsolètes.
+            await closeDatabase();
+            await closeCatalogDB();
+
+            try {
+                const backupsDir = path.join(path.dirname(CATALOG_DB_PATH), "backups");
+                if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
+
+                // Sauvegarde silencieuse de l'ancienne base avant écrasement, au cas
+                // où l'utilisateur se serait trompé de fichier à importer.
+                if (fs.existsSync(CATALOG_DB_PATH)) {
+                    const preImportBackupPath = path.join(backupsDir, `pre-import-backup-${Date.now()}.db`);
+                    fs.copyFileSync(CATALOG_DB_PATH, preImportBackupPath);
+                    console.log("🛟 Ancienne base sauvegardée avant import:", preImportBackupPath);
+                }
+
+                fs.copyFileSync(importedPath, CATALOG_DB_PATH);
+                console.log("✅ Base du catalogue remplacée par:", importedPath);
+            } finally {
+                // Toujours rouvrir les connexions, même en cas d'erreur pendant la
+                // copie, pour ne jamais laisser l'application sans base utilisable.
+                global.db = await initDatabase(CATALOG_DB_PATH);
+                await ensurePhotoSettingsTable();
+                await initCatalogDB();
+            }
+
+            if (mainWindow) {
+                mainWindow.webContents.send("catalog:restored");
+            }
+
+            return { success: true };
+        } catch (err) {
+            console.error("❌ Erreur import sauvegarde catalogue:", err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    // ============================================================
     // 🎨 PICTURE CONTROL - NP3
     // ============================================================
 
@@ -1212,6 +1538,13 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
     // ============================================================
     // 🗂️ AUTRES
     // ============================================================
+
+    ipcMain.handle("toggle-fullscreen", () => {
+        if (!mainWindow) return false;
+        const isFullscreen = mainWindow.isFullScreen();
+        mainWindow.setFullScreen(!isFullscreen);
+        return !isFullscreen;
+    });
 
     ipcMain.handle("dialog:selectExportFolder", async () => {
         const result = await dialog.showOpenDialog(mainWindow, {
@@ -1334,8 +1667,59 @@ function cleanup(tempImagePath, tempHtmlPath, win) {
 }
 
 // ============================================================
+// 🛟 SAUVEGARDE AUTOMATIQUE À LA FERMETURE (filet de sécurité)
+// ============================================================
+
+const MAX_AUTO_BACKUPS = 10;
+
+async function performAutoBackup() {
+    if (!global.db) return; // DB pas encore initialisée (fermeture très précoce)
+
+    try {
+        const backupsDir = path.join(path.dirname(CATALOG_DB_PATH), "backups");
+        if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const backupPath = path.join(backupsDir, `auto-backup-${timestamp}.db`);
+
+        await dbRun("VACUUM INTO ?", [backupPath]);
+        console.log("✅ Sauvegarde automatique créée:", backupPath);
+
+        // Purge : ne garder que les MAX_AUTO_BACKUPS sauvegardes automatiques les plus récentes
+        const autoBackups = fs.readdirSync(backupsDir)
+            .filter((f) => f.startsWith("auto-backup-") && f.endsWith(".db"))
+            .map((f) => {
+                const fullPath = path.join(backupsDir, f);
+                return { fullPath, mtime: fs.statSync(fullPath).mtimeMs };
+            })
+            .sort((a, b) => b.mtime - a.mtime);
+
+        for (const old of autoBackups.slice(MAX_AUTO_BACKUPS)) {
+            try {
+                fs.unlinkSync(old.fullPath);
+            } catch (unlinkErr) {
+                console.warn("⚠️ Erreur suppression ancienne sauvegarde auto:", unlinkErr.message);
+            }
+        }
+    } catch (err) {
+        console.error("❌ Erreur sauvegarde automatique à la fermeture:", err);
+    }
+}
+
+// ============================================================
 // 🔹 Gestion de la fermeture
 // ============================================================
+
+let readyToQuit = false;
+
+app.on("before-quit", (event) => {
+    if (readyToQuit) return;
+    event.preventDefault();
+    performAutoBackup().finally(() => {
+        readyToQuit = true;
+        app.quit();
+    });
+});
 
 app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();

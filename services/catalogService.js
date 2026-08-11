@@ -127,6 +127,17 @@ function initCatalogDB() {
         });
     });
 }
+function closeCatalogDB() {
+    return new Promise((resolve) => {
+        if (!db) return resolve();
+        db.close((err) => {
+            if (err) console.error("❌ Erreur fermeture DB catalogue:", err);
+            db = null;
+            resolve();
+        });
+    });
+}
+
 // ============================================================
 // FONCTIONS UTILITAIRES SQL
 // ============================================================
@@ -717,7 +728,9 @@ async function saveTransform(filePath, transformData) {
 // ============================================================
 
 module.exports = {
+    DB_PATH,
     initCatalogDB,
+    closeCatalogDB,
     addFolderToCatalog,
     getFolders,
     getPhotos,

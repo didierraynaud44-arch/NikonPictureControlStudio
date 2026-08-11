@@ -44,7 +44,11 @@
             
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h3 style="margin: 0; font-size: 13px; color: #ccc;">📁 Dossiers Photos</h3>
-                <button id="btnStudioOpenFolder" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Importer un dossier">＋ Ouvrir</button>
+                <div style="display: flex; gap: 4px;">
+                    <button id="btnStudioOpenFolder" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Importer un dossier">＋ Ouvrir</button>
+                    <button id="btnExportCatalogBackup" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Sauvegarder le catalogue (.db)">💾</button>
+                    <button id="btnImportCatalogBackup" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Restaurer une sauvegarde du catalogue (.db)">📥</button>
+                </div>
             </div>
             
             <!-- Zone de l'arborescence des répertoires et fichiers -->
@@ -87,6 +91,21 @@
 
                 <!-- Flèche Droite -->
                 <button class="studio-nav-btn studio-next-btn" onclick="navigateStudioPhoto(1)" title="Photo suivante (Flèche droite)">❯</button>
+            </div>
+
+            <!-- Barre de notation (étoiles + statut) de la photo affichée en Vue Photo -->
+            <div id="ratingBar" class="rating-bar">
+                <div class="rating-stars" id="ratingStars">
+                    <span class="star" data-value="1">☆</span>
+                    <span class="star" data-value="2">☆</span>
+                    <span class="star" data-value="3">☆</span>
+                    <span class="star" data-value="4">☆</span>
+                    <span class="star" data-value="5">☆</span>
+                </div>
+                <div class="rating-flags">
+                    <button id="btnFlagValidated" type="button" class="flag-btn flag-validated" title="Marquer comme validée">✓ Validée</button>
+                    <button id="btnFlagRejected" type="button" class="flag-btn flag-rejected" title="Marquer comme rejetée">✕ Rejetée</button>
+                </div>
             </div>
 
             <!-- Mode Galerie Grille -->
@@ -304,6 +323,9 @@
 
         </aside>
     </main>
+
+    <!-- Pied de page (visible sur toutes les vues) -->
+    <footer id="appFooter" class="app-footer"></footer>
 
     <!-- MODALE D'EXPORTATION CONFIGURABLE -->
     <div id="exportModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">

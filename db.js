@@ -32,6 +32,17 @@ function getDb() {
     return global.db;
 }
 
+function closeDatabase() {
+    return new Promise((resolve) => {
+        if (!global.db) return resolve();
+        global.db.close((err) => {
+            if (err) console.error("❌ Erreur fermeture DB:", err);
+            global.db = null;
+            resolve();
+        });
+    });
+}
+
 function dbAll(query, params = []) {
     return new Promise((resolve, reject) => {
         getDb().all(query, params, (err, rows) => {
@@ -54,6 +65,7 @@ function dbRun(query, params = []) {
 module.exports = {
     initDatabase,
     getDb,
+    closeDatabase,
     dbAll,
     dbRun
 };

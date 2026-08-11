@@ -121,6 +121,52 @@ function resolveProfileName(pc) {
     return "Standard";
 }
 
+function buildSortFilterHtml() {
+    const state = (window.gridManager && window.gridManager.filterState) ||
+        { sortBy: "name", sortDir: "asc", minRating: 0, flagFilter: "all" };
+
+    const sortOptions = [
+        { value: "name", label: "Nom" },
+        { value: "date", label: "Date" },
+        { value: "rating", label: "Note" }
+    ].map(o => `<option value="${o.value}" ${state.sortBy === o.value ? "selected" : ""}>${o.label}</option>`).join("");
+
+    const minRatingOptions = [0, 1, 2, 3, 4, 5]
+        .map(n => `<option value="${n}" ${state.minRating === n ? "selected" : ""}>${n === 0 ? "Toutes" : "≥ " + n + " ★"}</option>`)
+        .join("");
+
+    const flagOptions = [
+        { value: "all", label: "Toutes" },
+        { value: "validated", label: "Validées uniquement" },
+        { value: "rejected", label: "Rejetées uniquement" },
+        { value: "none", label: "Non notées uniquement" }
+    ].map(o => `<option value="${o.value}" ${state.flagFilter === o.value ? "selected" : ""}>${o.label}</option>`).join("");
+
+    return `
+    <div class="card-panel" id="sortFilterPanel" style="margin-bottom: 14px; padding: 10px; background: #171717; border: 1px solid #333; border-radius: 4px;">
+        <div style="font-size: 11px; font-weight: bold; color: #aaa; margin-bottom: 8px;">Tri &amp; Filtre</div>
+
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+            <select id="sortBySelect" style="flex:1; background:#222; color:#fff; border:1px solid #555; padding:4px 6px; border-radius:4px; font-size: 11px;">
+                ${sortOptions}
+            </select>
+            <button type="button" id="btnSortDir" data-dir="${state.sortDir}" class="btn-tool" style="padding: 3px 8px; font-size: 11px;" title="Inverser l'ordre du tri">${state.sortDir === "desc" ? "⬇️" : "⬆️"}</button>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+            <span style="font-size: 11px; color: #ccc; white-space: nowrap;">Note min. :</span>
+            <select id="minRatingSelect" style="flex:1; background:#222; color:#fff; border:1px solid #555; padding:4px 6px; border-radius:4px; font-size: 11px;">
+                ${minRatingOptions}
+            </select>
+        </div>
+
+        <select id="flagFilterSelect" style="width:100%; background:#222; color:#fff; border:1px solid #555; padding:4px 6px; border-radius:4px; font-size: 11px;">
+            ${flagOptions}
+        </select>
+    </div>
+    `;
+}
+
 function buildPanelHtml(pc, compact, extendedNP3) {
     const currentName = resolveProfileName(pc);
     const isMono = pc.isMonochrome === true || currentName === "Monochrome";
@@ -155,6 +201,11 @@ function buildPanelHtml(pc, compact, extendedNP3) {
             <canvas id="histogramCanvas" width="360" height="100" style="width: 100%; height: 100px; display: block; background: #111; border-radius: 3px;"></canvas>
         </div>
         `}
+
+        <!-- 🔹 NOUVEAU : Tri & Filtre de la Galerie, sous l'Histogramme (mode non-compact
+             uniquement). Reste visible en vue Photo pour préparer un filtre avant de
+             basculer sur Galerie — les contrôles reflètent l'état courant de GridManager. -->
+        ${compact ? "" : buildSortFilterHtml()}
 
         ${compact ? "" : `
         <div style="margin-bottom: 15px; background: #1e1f22; padding: 10px; border-radius: 6px; border: 1px solid #35373c;">
@@ -430,6 +481,34 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             btnToggleHistoMode.textContent = mode === "rgb" ? "Luminance" : "RVB";
         });
     }
+
+    // 🔹 NOUVEAU : Tri & Filtre de la Galerie (rebranché à chaque appel, DOM régénéré)
+    const sortBySelect = container.querySelector("#sortBySelect");
+    const btnSortDir = container.querySelector("#btnSortDir");
+    const minRatingSelect = container.querySelector("#minRatingSelect");
+    const flagFilterSelect = container.querySelector("#flagFilterSelect");
+
+    function applyGridFilterSort() {
+        if (!window.gridManager || typeof window.gridManager.applyFilterSort !== "function") return;
+        window.gridManager.applyFilterSort({
+            sortBy: sortBySelect ? sortBySelect.value : "name",
+            sortDir: btnSortDir ? btnSortDir.dataset.dir : "asc",
+            minRating: minRatingSelect ? parseInt(minRatingSelect.value, 10) : 0,
+            flagFilter: flagFilterSelect ? flagFilterSelect.value : "all"
+        });
+    }
+
+    if (btnSortDir) {
+        btnSortDir.addEventListener("click", () => {
+            const newDir = btnSortDir.dataset.dir === "desc" ? "asc" : "desc";
+            btnSortDir.dataset.dir = newDir;
+            btnSortDir.textContent = newDir === "desc" ? "⬇️" : "⬆️";
+            applyGridFilterSort();
+        });
+    }
+    if (sortBySelect) sortBySelect.addEventListener("change", applyGridFilterSort);
+    if (minRatingSelect) minRatingSelect.addEventListener("change", applyGridFilterSort);
+    if (flagFilterSelect) flagFilterSelect.addEventListener("change", applyGridFilterSort);
 
     const profileSelect = container.querySelector('[data-field="pcProfileSelect"]');
     if (profileSelect) {

@@ -3,16 +3,29 @@
 =========================================================*/
 
 class GridManager {
+    // Cache mémoire des vignettes déjà chargées dans la session (clé = chemin
+    // du fichier, valeur = dataUrl), partagé par toutes les instances : évite
+    // de rappeler getThumbnail si on quitte puis revient sur l'onglet Galerie.
+    static thumbnailCache = new Map();
+
     constructor() {
-        this.images = [];
+        this.images = [];      // liste actuellement affichée (après filtre/tri)
+        this.allImages = [];   // liste complète non filtrée du dossier courant
         this.selectedIds = new Set();
-        
+
+        // Note (0-5) / statut ('validated'|'rejected'|null) par chemin de fichier,
+        // peuplé en un seul appel groupé à chaque rendu de grille.
+        this.statusByPath = new Map();
+
+        this.filterState = { sortBy: "name", sortDir: "asc", minRating: 0, flagFilter: "all" };
+
         this.btnSingle = document.getElementById("btnViewSingle");
         this.btnGrid = document.getElementById("btnViewGrid");
         this.btnBatchExport = document.getElementById("btnBatchExport");
         this.singleContainer = document.getElementById("singleImageContainer");
         this.gridContainer = document.getElementById("gridImageContainer");
         this.gridWrapper = document.getElementById("gridItemsWrapper");
+        this.ratingBar = document.getElementById("ratingBar");
 
         this.initUI();
     }
@@ -45,19 +58,23 @@ class GridManager {
         if (mode === "single") {
             if (this.singleContainer) this.singleContainer.style.display = "flex";
             if (this.gridContainer) this.gridContainer.style.display = "none";
+            if (this.ratingBar) this.ratingBar.style.display = "flex";
             if (this.btnSingle) this.btnSingle.classList.add("active");
             if (this.btnGrid) this.btnGrid.classList.remove("active");
             if (this.btnBatchExport) this.btnBatchExport.style.display = "none";
-            
+
             if (window.imageProcessor && window.imageProcessor.display) {
                 window.imageProcessor.display.requestRender();
             }
         } else {
             if (this.singleContainer) this.singleContainer.style.display = "none";
             if (this.gridContainer) this.gridContainer.style.display = "flex";
+            if (this.ratingBar) this.ratingBar.style.display = "none";
             if (this.btnGrid) this.btnGrid.classList.add("active");
             if (this.btnSingle) this.btnSingle.classList.remove("active");
             this.updateExportButton();
+            // Rafraîchit note/statut au cas où ils auraient été modifiés depuis la vue Photo.
+            this.renderGrid();
         }
     }
 
@@ -110,7 +127,7 @@ class GridManager {
     setImages(items) {
         const flatList = this._extractFiles(items);
 
-        this.images = flatList.map((item, idx) => {
+        this.allImages = flatList.map((item, idx) => {
             const isFile = item instanceof File;
             const filePath = isFile ? item.path || item.name : item.path || item.url || item.filePath || item.name;
             const fileName = isFile ? item.name : item.name || ("Photo " + (idx + 1));
@@ -123,11 +140,126 @@ class GridManager {
             };
         });
 
+        // Ré-applique le filtre/tri courant (par défaut : aucun filtre, tri par nom)
+        // sur la nouvelle liste, ce qui reconstruit this.images et appelle renderGrid().
+        this.applyFilterSort(this.filterState);
+    }
+
+    // Date "déjà disponible" sur l'item (uniquement présente pour les photos
+    // indexées dans le Catalogue via addFolderToCatalog ; absente pour un simple
+    // dossier ouvert directement — dans ce cas le tri par date est un no-op stable).
+    _getItemDate(item) {
+        const raw = item.rawItem || {};
+        const dateStr = raw.date || raw.date_time_original || raw.dateTimeOriginal || null;
+        if (!dateStr) return 0;
+        const t = new Date(dateStr).getTime();
+        return Number.isFinite(t) ? t : 0;
+    }
+
+    // Filtre/trie this.allImages en mémoire (note/statut via this.statusByPath,
+    // nom/date via les métadonnées déjà disponibles sur chaque item), stocke le
+    // résultat dans this.images, puis redessine la grille.
+    applyFilterSort(filters = {}) {
+        this.filterState = {
+            sortBy: filters.sortBy || "name",
+            sortDir: filters.sortDir || "asc",
+            minRating: Number.isFinite(filters.minRating) ? filters.minRating : 0,
+            flagFilter: filters.flagFilter || "all"
+        };
+
+        const { sortBy, sortDir, minRating, flagFilter } = this.filterState;
+
+        let filtered = this.allImages.filter((item) => {
+            const status = this.statusByPath.get(item.path) || { rating: 0, flag: null };
+            if (minRating > 0 && status.rating < minRating) return false;
+            if (flagFilter === "validated" && status.flag !== "validated") return false;
+            if (flagFilter === "rejected" && status.flag !== "rejected") return false;
+            if (flagFilter === "none" && status.flag !== null) return false;
+            return true;
+        });
+
+        const dir = sortDir === "desc" ? -1 : 1;
+        filtered.sort((a, b) => {
+            if (sortBy === "rating") {
+                const ra = (this.statusByPath.get(a.path) || {}).rating || 0;
+                const rb = (this.statusByPath.get(b.path) || {}).rating || 0;
+                return (ra - rb) * dir;
+            }
+            if (sortBy === "date") {
+                return (this._getItemDate(a) - this._getItemDate(b)) * dir;
+            }
+            return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) * dir;
+        });
+
+        this.images = filtered;
         this.renderGrid();
     }
 
-    renderGrid() {
+    _buildStarsHtml(rating) {
+        let html = "";
+        for (let i = 1; i <= 5; i++) {
+            html += `<span class="grid-star${i <= rating ? " filled" : ""}" data-value="${i}">${i <= rating ? "★" : "☆"}</span>`;
+        }
+        return html;
+    }
+
+    // Bascule (ou définit) la note/le statut d'un fichier : met à jour
+    // this.statusByPath localement + les éléments DOM de la carte fournie
+    // (sans tout recharger), puis persiste via IPC.
+    async _toggleRating(filePath, clickedValue, starEls) {
+        const current = this.statusByPath.get(filePath) || { rating: 0, flag: null };
+        const newRating = current.rating === clickedValue ? 0 : clickedValue;
+        this.statusByPath.set(filePath, { ...current, rating: newRating });
+
+        starEls.forEach((el, idx) => {
+            const filled = (idx + 1) <= newRating;
+            el.classList.toggle("filled", filled);
+            el.textContent = filled ? "★" : "☆";
+        });
+
+        if (window.electronAPI && typeof window.electronAPI.setPhotoRating === "function") {
+            try {
+                await window.electronAPI.setPhotoRating(filePath, newRating);
+            } catch (err) {
+                console.error("❌ Erreur set-photo-rating:", filePath, err);
+            }
+        }
+    }
+
+    async _toggleFlag(filePath, clickedFlag, btnValidated, btnRejected) {
+        const current = this.statusByPath.get(filePath) || { rating: 0, flag: null };
+        const newFlag = current.flag === clickedFlag ? null : clickedFlag;
+        this.statusByPath.set(filePath, { ...current, flag: newFlag });
+
+        if (btnValidated) btnValidated.classList.toggle("active", newFlag === "validated");
+        if (btnRejected) btnRejected.classList.toggle("active", newFlag === "rejected");
+
+        if (window.electronAPI && typeof window.electronAPI.setPhotoFlag === "function") {
+            try {
+                await window.electronAPI.setPhotoFlag(filePath, newFlag);
+            } catch (err) {
+                console.error("❌ Erreur set-photo-flag:", filePath, err);
+            }
+        }
+    }
+
+    async renderGrid() {
         if (!this.gridWrapper) return;
+
+        // Récupère en un seul appel groupé la note/le statut de toutes les photos
+        // affichées (évite un aller-retour IPC par vignette).
+        if (window.electronAPI && typeof window.electronAPI.getPhotosStatus === "function" && this.images.length > 0) {
+            try {
+                const paths = this.images.map(i => i.path).filter(Boolean);
+                const statusMap = await window.electronAPI.getPhotosStatus(paths);
+                paths.forEach(p => {
+                    this.statusByPath.set(p, statusMap[p] || { rating: 0, flag: null });
+                });
+            } catch (err) {
+                console.warn("⚠️ Erreur récupération note/statut des photos:", err);
+            }
+        }
+
         this.gridWrapper.innerHTML = "";
 
         const countSpan = document.getElementById("selectedCount");
@@ -145,6 +277,7 @@ class GridManager {
             card.className = "grid-card " + (this.selectedIds.has(item.id) ? "selected" : "");
 
             const displayName = this.formatShortName(item.name);
+            const status = this.statusByPath.get(item.path) || { rating: 0, flag: null };
 
             card.innerHTML = `
                 <input type="checkbox" class="grid-checkbox" ${this.selectedIds.has(item.id) ? "checked" : ""}>
@@ -152,6 +285,14 @@ class GridManager {
                     <span class="grid-card-icon">⌛</span>
                     <span class="grid-card-name" title="${item.name}">${displayName}</span>
                 </div>
+                <div class="grid-card-rating-bar">
+                    <div class="grid-stars">${this._buildStarsHtml(status.rating)}</div>
+                    <div class="grid-card-flags">
+                        <button type="button" class="grid-flag-btn grid-flag-validated${status.flag === "validated" ? " active" : ""}" title="Validée">✓</button>
+                        <button type="button" class="grid-flag-btn grid-flag-rejected${status.flag === "rejected" ? " active" : ""}" title="Rejetée">✕</button>
+                    </div>
+                </div>
+                <div class="grid-card-overlay-title" title="${item.name}">${displayName}</div>
             `;
 
             const checkbox = card.querySelector(".grid-checkbox");
@@ -177,6 +318,30 @@ class GridManager {
                 this.updateExportButton();
             });
 
+            const starEls = Array.from(card.querySelectorAll(".grid-star"));
+            starEls.forEach((starEl) => {
+                starEl.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const value = parseInt(starEl.dataset.value, 10);
+                    this._toggleRating(item.path, value, starEls);
+                });
+            });
+
+            const btnValidated = card.querySelector(".grid-flag-validated");
+            const btnRejected = card.querySelector(".grid-flag-rejected");
+            if (btnValidated) {
+                btnValidated.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    this._toggleFlag(item.path, "validated", btnValidated, btnRejected);
+                });
+            }
+            if (btnRejected) {
+                btnRejected.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    this._toggleFlag(item.path, "rejected", btnValidated, btnRejected);
+                });
+            }
+
             fragment.appendChild(card);
         });
 
@@ -201,27 +366,19 @@ class GridManager {
             const thumbContainer = document.getElementById("thumb_" + item.id);
             if (!thumbContainer) return;
 
-            let imageSrc = "";
+            // 0. Cache mémoire : vignette déjà chargée pendant cette session
+            let imageSrc = GridManager.thumbnailCache.get(item.path) || "";
 
-            // 1. Essai via l'API Electron directe
-            if (window.electronAPI && typeof window.electronAPI.readFileDirect === "function") {
-                const fileInfo = await window.electronAPI.readFileDirect(item.path);
-                if (fileInfo) {
-                    let rawSrc = fileInfo.preview || fileInfo.filePath || fileInfo.path;
-                    if (rawSrc) {
-                        if (rawSrc.startsWith("data:") || rawSrc.startsWith("file:")) {
-                            imageSrc = rawSrc;
-                        } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.toString().trim().substring(0, 100))) {
-                            imageSrc = "data:image/jpeg;base64," + rawSrc.toString().trim();
-                        } else {
-                            const formattedPath = rawSrc.toString().replace(/\\/g, "/");
-                            imageSrc = formattedPath.startsWith("/") ? "file://" + formattedPath : "file:///" + formattedPath;
-                        }
-                    }
+            // 1. Handler léger dédié aux vignettes (300px, pas d'EXIF, pas de ShutterCount)
+            if (!imageSrc && window.electronAPI && typeof window.electronAPI.getThumbnail === "function") {
+                const result = await window.electronAPI.getThumbnail(item.path);
+                if (result && result.success && result.dataUrl) {
+                    imageSrc = result.dataUrl;
+                    GridManager.thumbnailCache.set(item.path, imageSrc);
                 }
             }
 
-            // 2. Repli direct pour les TIFF/TIF/JPG si l'API n'a pas renvoyé de data-URL
+            // 2. Repli direct (file://) si l'IPC a échoué
             if (!imageSrc && item.path) {
                 const formattedPath = item.path.replace(/\\/g, "/");
                 imageSrc = formattedPath.startsWith("/") ? "file://" + formattedPath : "file:///" + formattedPath;

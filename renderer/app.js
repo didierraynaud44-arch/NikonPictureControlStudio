@@ -791,6 +791,15 @@ if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
             window.switchToView("view-studio");
         }
 
+        // 🔹 CORRECTIF : switchToView ne fait que choisir entre Studio/Profils/Impression,
+        // il ignore le sous-mode Photo unique / Galerie interne au Studio. Sans ceci,
+        // charger une photo (clic dans l'arbre, flèches...) pendant qu'on est en mode
+        // Galerie la charge bien en mémoire mais laisse la grille affichée à l'écran —
+        // l'utilisateur a l'impression que la photo "ne s'affiche pas".
+        if (window.gridManager && typeof window.gridManager.switchMode === "function") {
+            window.gridManager.switchMode("single");
+        }
+
         // 🔥 PARTAGER L'IMAGE AVEC PrintManager AVEC LES RÉGLAGES
         if (window.printManager && fileInfo) {
             const pcForPrint = savedSettings || pcData || {};
@@ -811,6 +820,10 @@ if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
         // 🔹 NOUVEAU : synchronise la surbrillance dans l'arbre "Dossiers Photos",
         // même quand le chargement vient des flèches de navigation et non d'un clic.
         highlightSelectedTreeItem(filePath);
+
+        // 🔹 NOUVEAU : recharge la note/le statut de la photo affichée (peut avoir
+        // été modifié depuis la Galerie entre-temps).
+        refreshStudioRatingUI(filePath);
 
     } catch (err) {
         console.error("❌ Erreur lors du chargement dans le Studio :", err);
@@ -1038,6 +1051,117 @@ async function switchToView(targetViewId) {
 }
 window.switchToView = switchToView;
 
+function updateStudioRatingUI(status) {
+    const stars = document.querySelectorAll("#ratingStars .star");
+    const rating = (status && status.rating) || 0;
+    stars.forEach((starEl) => {
+        const value = parseInt(starEl.dataset.value, 10);
+        const filled = value <= rating;
+        starEl.classList.toggle("filled", filled);
+        starEl.textContent = filled ? "★" : "☆";
+    });
+
+    const flag = (status && status.flag) || null;
+    const btnValidated = document.getElementById("btnFlagValidated");
+    const btnRejected = document.getElementById("btnFlagRejected");
+    if (btnValidated) btnValidated.classList.toggle("active", flag === "validated");
+    if (btnRejected) btnRejected.classList.toggle("active", flag === "rejected");
+}
+
+async function refreshStudioRatingUI(filePath) {
+    if (!filePath || !window.electronAPI || typeof window.electronAPI.getPhotosStatus !== "function") {
+        updateStudioRatingUI(null);
+        return;
+    }
+    try {
+        const result = await window.electronAPI.getPhotosStatus([filePath]);
+        updateStudioRatingUI(result ? result[filePath] : null);
+    } catch (err) {
+        console.error("❌ Erreur récupération note/statut de la photo:", err);
+        updateStudioRatingUI(null);
+    }
+}
+window.refreshStudioRatingUI = refreshStudioRatingUI;
+
+function initRatingBar() {
+    const stars = Array.from(document.querySelectorAll("#ratingStars .star"));
+    const btnValidated = document.getElementById("btnFlagValidated");
+    const btnRejected = document.getElementById("btnFlagRejected");
+
+    stars.forEach((starEl) => {
+        starEl.addEventListener("click", async () => {
+            const filePath = window.currentStudioFilePath;
+            if (!filePath || !window.electronAPI) return;
+
+            const clickedValue = parseInt(starEl.dataset.value, 10);
+            const currentRating = stars.filter((s) => s.classList.contains("filled")).length;
+            const newRating = currentRating === clickedValue ? 0 : clickedValue;
+
+            updateStudioRatingUI({ rating: newRating, flag: btnValidated?.classList.contains("active") ? "validated" : (btnRejected?.classList.contains("active") ? "rejected" : null) });
+
+            if (typeof window.electronAPI.setPhotoRating === "function") {
+                await window.electronAPI.setPhotoRating(filePath, newRating);
+            }
+        });
+    });
+
+    if (btnValidated) {
+        btnValidated.addEventListener("click", async () => {
+            const filePath = window.currentStudioFilePath;
+            if (!filePath || !window.electronAPI) return;
+            const newFlag = btnValidated.classList.contains("active") ? null : "validated";
+            btnValidated.classList.toggle("active", newFlag === "validated");
+            btnRejected?.classList.remove("active");
+            if (typeof window.electronAPI.setPhotoFlag === "function") {
+                await window.electronAPI.setPhotoFlag(filePath, newFlag);
+            }
+        });
+    }
+
+    if (btnRejected) {
+        btnRejected.addEventListener("click", async () => {
+            const filePath = window.currentStudioFilePath;
+            if (!filePath || !window.electronAPI) return;
+            const newFlag = btnRejected.classList.contains("active") ? null : "rejected";
+            btnRejected.classList.toggle("active", newFlag === "rejected");
+            btnValidated?.classList.remove("active");
+            if (typeof window.electronAPI.setPhotoFlag === "function") {
+                await window.electronAPI.setPhotoFlag(filePath, newFlag);
+            }
+        });
+    }
+}
+
+async function exportCatalogBackup() {
+    if (!window.electronAPI) return;
+    const result = await window.electronAPI.exportBackup();
+    if (result && result.success) {
+        alert(`Sauvegarde du catalogue créée :\n${result.path}`);
+    } else if (result && result.error) {
+        alert(`Erreur lors de la sauvegarde du catalogue :\n${result.error}`);
+    }
+}
+
+async function importCatalogBackup() {
+    if (!window.electronAPI) return;
+    const confirmed = confirm(
+        "Ceci remplacera votre catalogue actuel par la sauvegarde sélectionnée. " +
+        "Une copie de sécurité de l'état actuel sera conservée. Continuer ?"
+    );
+    if (!confirmed) return;
+
+    const result = await window.electronAPI.importBackup();
+    if (!result || !result.success) {
+        if (result && result.error) {
+            alert(`Erreur lors de la restauration du catalogue :\n${result.error}`);
+        }
+        return;
+    }
+    // Le rechargement de l'arbre et la confirmation de succès se font via
+    // l'événement "catalog:restored" (onCatalogRestored), envoyé par le
+    // processus principal une fois l'import réellement terminé.
+}
+
 function initButtons() {
     const btnSaveNP3           = document.getElementById("saveNP3");
     const btnExportNCP         = document.getElementById("exportNCP");
@@ -1048,6 +1172,7 @@ function initButtons() {
     const btnBackToStudio      = document.getElementById("btnBackToStudio");
 
     switchToView("view-studio");
+    initRatingBar();
 
     if (btnViewPrint) {
         btnViewPrint.onclick = () => switchToView("view-print");
@@ -1057,6 +1182,24 @@ function initButtons() {
     }
     if (btnBackToStudio) {
         btnBackToStudio.onclick = () => switchToView("view-studio");
+    }
+
+    const btnFullscreen = document.getElementById("btnFullscreen");
+    if (btnFullscreen && window.electronAPI) {
+        btnFullscreen.onclick = async () => {
+            const isNowFullscreen = await window.electronAPI.toggleFullscreen();
+            btnFullscreen.title = isNowFullscreen ? "Quitter le plein écran" : "Plein écran";
+        };
+    }
+
+    const btnExportCatalogBackup = document.getElementById("btnExportCatalogBackup");
+    if (btnExportCatalogBackup && window.electronAPI) {
+        btnExportCatalogBackup.onclick = exportCatalogBackup;
+    }
+
+    const btnImportCatalogBackup = document.getElementById("btnImportCatalogBackup");
+    if (btnImportCatalogBackup && window.electronAPI) {
+        btnImportCatalogBackup.onclick = importCatalogBackup;
     }
 
     if (!window.imageProcessor && typeof ImageProcessor !== "undefined") {
@@ -1254,6 +1397,24 @@ if (window.electronAPI?.onMenuTriggerExport) {
         const modal = document.getElementById("exportModal");
         if (modal) modal.style.display = "flex";
     });
+}
+
+if (window.electronAPI?.onCatalogRestored) {
+    window.electronAPI.onCatalogRestored(() => {
+        console.log("♻️ Catalogue restauré depuis une sauvegarde, rechargement de l'arborescence...");
+        if (typeof window.loadSavedStudioFolders === "function") {
+            window.loadSavedStudioFolders();
+        }
+        alert("Le catalogue a été restauré avec succès.");
+    });
+}
+
+if (window.electronAPI?.onMenuExportBackup) {
+    window.electronAPI.onMenuExportBackup(() => exportCatalogBackup());
+}
+
+if (window.electronAPI?.onMenuImportBackup) {
+    window.electronAPI.onMenuImportBackup(() => importCatalogBackup());
 }
 
 const initApp = async () => {
