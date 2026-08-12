@@ -48,9 +48,13 @@ async function decodeRawFullResolution(bytes) {
         const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
 
         await raw.open(input, {
-            userFlip: -1,   // respecte l'orientation embarquée dans le RAW
-            outputColor: 1, // sRGB
-            outputBps: 8
+            userFlip: -1,     // respecte l'orientation embarquée dans le RAW
+            outputColor: 1,   // sRGB
+            outputBps: 8,
+            useCameraWb: true // sans ça, useCameraWb/useAutoWb sont à false par défaut (voir
+                               // libraw-wasm) et le rendu sort sans balance des blancs, avec
+                               // une forte dominante verte (2x plus de photosites verts dans
+                               // la matrice de Bayer que rouge/bleu).
         });
 
         const imageData = await raw.imageData();

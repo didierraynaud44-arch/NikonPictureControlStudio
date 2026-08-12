@@ -19,6 +19,47 @@ try {
 
 // Cache mémoire pour accélérer le passage d'une photo à l'autre
 const studioImageCache = new Map();
+
+// Qualité d'aperçu Studio (largeur max en px, transmise à readFileDirect). N'affecte
+// QUE l'aperçu Studio — l'export/impression pleine résolution (exportFullResolution)
+// n'utilise jamais cette valeur. Réglable via le sélecteur "Résolution" affiché dans
+// l'en-tête de la zone photo (mode Photo uniquement), persistée côté main process
+// (electron-store).
+let studioPreviewMaxWidth = 1200;
+const previewResolutionSelect = document.getElementById("previewResolutionSelect");
+if (window.electronAPI && typeof window.electronAPI.getPreviewQuality === "function") {
+    window.electronAPI.getPreviewQuality()
+        .then((maxWidth) => {
+            if (typeof maxWidth === "number" && maxWidth > 0) {
+                studioPreviewMaxWidth = maxWidth;
+                if (previewResolutionSelect) previewResolutionSelect.value = String(maxWidth);
+            }
+        })
+        .catch((err) => console.warn("⚠️ Erreur lecture qualité d'aperçu:", err));
+}
+if (window.electronAPI && typeof window.electronAPI.onMenuSetPreviewQuality === "function") {
+    window.electronAPI.onMenuSetPreviewQuality((maxWidth) => {
+        if (typeof maxWidth === "number" && maxWidth > 0) {
+            studioPreviewMaxWidth = maxWidth;
+            if (previewResolutionSelect) previewResolutionSelect.value = String(maxWidth);
+            console.log("⚙️ Qualité d'aperçu Studio mise à jour:", maxWidth);
+        }
+    });
+}
+if (previewResolutionSelect && window.electronAPI && typeof window.electronAPI.setPreviewQuality === "function") {
+    previewResolutionSelect.addEventListener("change", (e) => {
+        const maxWidth = parseInt(e.target.value, 10);
+        if (!maxWidth) return;
+        studioPreviewMaxWidth = maxWidth;
+        window.electronAPI.setPreviewQuality(maxWidth)
+            .catch((err) => console.warn("⚠️ Erreur enregistrement qualité d'aperçu:", err));
+    });
+}
+
+// "Dernière requête gagne" : évite qu'une navigation rapide (clics successifs sur
+// les flèches ‹ › du Studio) ne fasse se chevaucher plusieurs chargements async et
+// n'affiche brièvement des photos intermédiaires dans le désordre.
+let currentLoadToken = 0;
 function updateExifBarFromDb(photo) {
     const cameraEl = document.getElementById('exifCamera');
     const lensEl = document.getElementById('exifLens');
@@ -633,6 +674,8 @@ function pathFileName(filePath) {
 async function loadImageInStudio(filePath) {
     if (!filePath) return;
 
+    const myToken = ++currentLoadToken;
+
     window.currentStudioFilePath = filePath;
 
     try {
@@ -644,12 +687,16 @@ async function loadImageInStudio(filePath) {
             fileInfo = studioImageCache.get(filePath);
         } else {
             if (window.electronAPI && typeof window.electronAPI.readFileDirect === "function") {
-                fileInfo = await window.electronAPI.readFileDirect(filePath);
+                fileInfo = await window.electronAPI.readFileDirect(filePath, studioPreviewMaxWidth);
             }
             if (fileInfo) {
                 studioImageCache.set(filePath, fileInfo);
             }
         }
+
+        // Une navigation plus récente a été lancée entre-temps : on abandonne
+        // silencieusement ce chargement devenu obsolète, sans toucher à l'affichage.
+        if (myToken !== currentLoadToken) return;
 
         if (!fileInfo) {
             console.error("❌ Impossible de lire le fichier :", filePath);
@@ -658,6 +705,7 @@ async function loadImageInStudio(filePath) {
 
         // 🔥 CHARGER LES RÉGLAGES SAUVEGARDÉS (UN SEUL APPEL !)
         const savedSettings = await loadPictureControlSettings(filePath);
+        if (myToken !== currentLoadToken) return;
         let pcData = {};
 
         if (savedSettings && Object.keys(savedSettings).length > 0) {
@@ -773,6 +821,8 @@ if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
                 }
             );
 
+            if (myToken !== currentLoadToken) return;
+
             // 🔥 APPLIQUER LES RÉGLAGES CHARGÉS
             window.imageProcessor.setPictureControl(pcData);
         }
@@ -839,7 +889,7 @@ window.loadImageInStudio = loadImageInStudio;
 function prefetchAdjacentImages(currentPath) {
     if (!window.gridManager || !window.gridManager.images || window.gridManager.images.length === 0) return;
     const images = window.gridManager.images;
-    
+
     let currentIndex = images.findIndex(img => img.path === currentPath);
     if (currentIndex === -1) return;
 

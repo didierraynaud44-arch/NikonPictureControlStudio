@@ -39,7 +39,23 @@ try {
 // 🔹 Variables globales
 let mainWindow = null;
 let windowStateStore = null; // instance electron-store, initialisée dans app.whenReady() (module ESM)
+let studioPreferencesStore = null; // instance electron-store séparée, pour les préférences Studio (qualité d'aperçu, etc.)
 const settingsCache = new Map();
+
+// 🔹 Qualité d'aperçu Studio : largeur max (px) du redimensionnement appliqué par
+// read-file-direct. N'affecte QUE l'aperçu du Studio (voir read-file-direct plus
+// bas) — jamais get-full-resolution-image (export/impression), qui décode toujours
+// à la résolution native.
+const PREVIEW_QUALITY_OPTIONS = [
+    { id: "fast", label: "Rapide (800px)", maxWidth: 800 },
+    { id: "normal", label: "Normal (1200px)", maxWidth: 1200 },
+    { id: "high", label: "Élevée (1800px)", maxWidth: 1800 }
+];
+const DEFAULT_PREVIEW_MAX_WIDTH = 1200;
+
+function getPreviewQualityMaxWidth() {
+    return studioPreferencesStore ? studioPreferencesStore.get("previewMaxWidth", DEFAULT_PREVIEW_MAX_WIDTH) : DEFAULT_PREVIEW_MAX_WIDTH;
+}
 
 // 🔹 Fenêtre principale : dimensions par défaut et bornes
 const DEFAULT_WINDOW_WIDTH = 1200;
@@ -117,9 +133,14 @@ function createAppMenu() {
         },
         {
             label: "Studio",
-            click: () => {
-                if (mainWindow) mainWindow.webContents.send("menu-switch-view", "view-studio");
-            }
+            submenu: [
+                {
+                    label: "Ouvrir Studio",
+                    click: () => {
+                        if (mainWindow) mainWindow.webContents.send("menu-switch-view", "view-studio");
+                    }
+                }
+            ]
         },
         {
             label: "Gestionnaire de Profils",
@@ -270,6 +291,7 @@ app.whenReady().then(async () => {
         // require() depuis ce fichier CommonJS, d'où l'import() dynamique ici.
         const { default: Store } = await import("electron-store");
         windowStateStore = new Store({ name: "window-state" });
+        studioPreferencesStore = new Store({ name: "studio-preferences" });
 
         global.db = await initDatabase(CATALOG_DB_PATH);
         await initCatalogDB();
@@ -420,7 +442,7 @@ function setupIpcHandlers() {
     // ============================================================
 
 
-ipcMain.handle("read-file-direct", async (event, filePath) => {
+ipcMain.handle("read-file-direct", async (event, filePath, maxWidth = 1200) => {
     if (!filePath || !fs.existsSync(filePath)) {
         console.error("❌ Fichier introuvable:", filePath);
         return null;
@@ -449,9 +471,10 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
                 const metadata = await sharp(filePath).metadata();
                 console.log(`📷 Image source: ${metadata.width}x${metadata.height}px`);
                 
-                const previewWidth = Math.min(metadata.width, 1200);
+                const effectiveMaxWidth = (typeof maxWidth === "number" && maxWidth > 0) ? maxWidth : 1200;
+                const previewWidth = Math.min(metadata.width, effectiveMaxWidth);
                 const previewHeight = Math.round(previewWidth * (metadata.height / metadata.width));
-                
+
                 imageBuffer = await sharp(filePath)
                     .resize(previewWidth, previewHeight, {
                         fit: 'inside',
@@ -459,7 +482,7 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
                     })
                     .jpeg({ quality: 85 })
                     .toBuffer();
-                    
+
                 mimeType = "image/jpeg";
                 console.log(`✅ Aperçu généré: ${previewWidth}x${previewHeight}px`);
                 
@@ -511,16 +534,16 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
         try {
             const exif = await exifr.parse(filePath, {
                 pick: [
-                    'Make', 'Model', 'LensModel', 'Lens', 'ISO', 
-                    'FNumber', 'FocalLength', 'ExposureTime', 
-                    'ExposureCompensation', 'WhiteBalanceName', 
+                    'Make', 'Model', 'LensModel', 'Lens', 'ISO',
+                    'FNumber', 'FocalLength', 'ExposureTime',
+                    'ExposureCompensation', 'WhiteBalanceName',
                     'DateTimeOriginal', 'Orientation'
                 ],
                 tiff: true,
                 exif: true,
                 xmp: true
             });
-            
+
             if (exif) {
                 result.make = exif.Make || null;
                 result.model = exif.Model || null;
@@ -565,6 +588,23 @@ ipcMain.handle("read-file-direct", async (event, filePath) => {
         };
     }
 });
+
+    // ============================================================
+    // ⚙️ QUALITÉ D'APERÇU STUDIO (lue et réglée par le sélecteur "Résolution"
+    // dans l'en-tête de la zone photo, en mode Photo)
+    // ============================================================
+
+    ipcMain.handle("get-preview-quality", async () => {
+        return getPreviewQualityMaxWidth();
+    });
+
+    ipcMain.handle("set-preview-quality", async (event, maxWidth) => {
+        const isValid = PREVIEW_QUALITY_OPTIONS.some((option) => option.maxWidth === maxWidth);
+        if (isValid && studioPreferencesStore) {
+            studioPreferencesStore.set("previewMaxWidth", maxWidth);
+        }
+        return getPreviewQualityMaxWidth();
+    });
 
     // ============================================================
     // 🔢 SHUTTER COUNT (récupéré en arrière-plan, après affichage)

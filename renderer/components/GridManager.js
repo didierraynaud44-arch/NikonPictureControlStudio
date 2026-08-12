@@ -26,8 +26,14 @@ class GridManager {
         this.gridContainer = document.getElementById("gridImageContainer");
         this.gridWrapper = document.getElementById("gridItemsWrapper");
         this.ratingBar = document.getElementById("ratingBar");
+        this.gridZoomControl = document.querySelector(".grid-zoom-control");
+        this.previewResolutionSelector = document.getElementById("previewResolutionSelector");
 
         this.initUI();
+
+        // Synchronise l'affichage Taille/Résolution avec le mode actif au chargement
+        // (le bouton "Photo" est actif par défaut dans le HTML).
+        this.switchMode(this.btnGrid && this.btnGrid.classList.contains("active") ? "grid" : "single");
     }
 
     initUI() {
@@ -62,6 +68,8 @@ class GridManager {
             if (this.btnSingle) this.btnSingle.classList.add("active");
             if (this.btnGrid) this.btnGrid.classList.remove("active");
             if (this.btnBatchExport) this.btnBatchExport.style.display = "none";
+            if (this.gridZoomControl) this.gridZoomControl.style.display = "none";
+            if (this.previewResolutionSelector) this.previewResolutionSelector.style.display = "flex";
 
             if (window.imageProcessor && window.imageProcessor.display) {
                 window.imageProcessor.display.requestRender();
@@ -72,6 +80,8 @@ class GridManager {
             if (this.ratingBar) this.ratingBar.style.display = "none";
             if (this.btnGrid) this.btnGrid.classList.add("active");
             if (this.btnSingle) this.btnSingle.classList.remove("active");
+            if (this.gridZoomControl) this.gridZoomControl.style.display = "flex";
+            if (this.previewResolutionSelector) this.previewResolutionSelector.style.display = "none";
             this.updateExportButton();
             // Rafraîchit note/statut au cas où ils auraient été modifiés depuis la vue Photo.
             this.renderGrid();

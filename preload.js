@@ -55,11 +55,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     openNEF: () => 
         ipcRenderer.invoke("open-nef"),
     
-    readFileDirect: (filePath) =>
-        ipcRenderer.invoke("read-file-direct", filePath),
+    readFileDirect: (filePath, maxWidth) =>
+        ipcRenderer.invoke("read-file-direct", filePath, maxWidth),
 
     getFullResolutionImage: (filePath) =>
         ipcRenderer.invoke("get-full-resolution-image", filePath),
+
+    getPreviewQuality: () =>
+        ipcRenderer.invoke("get-preview-quality"),
+
+    setPreviewQuality: (maxWidth) =>
+        ipcRenderer.invoke("set-preview-quality", maxWidth),
 
     getThumbnail: (filePath) =>
         ipcRenderer.invoke("get-thumbnail", filePath),
@@ -147,8 +153,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onMenuOpenNP3: (callback) => 
         ipcRenderer.on("menu-open-np3", callback),
     
-    onMenuSwitchView: (callback) => 
+    onMenuSwitchView: (callback) =>
         ipcRenderer.on("menu-switch-view", (event, viewId) => callback(viewId)),
+
+    onMenuSetPreviewQuality: (callback) =>
+        ipcRenderer.on("menu-set-preview-quality", (event, maxWidth) => callback(maxWidth)),
     
     onMenuTriggerExport: (callback) =>
         ipcRenderer.on("menu-trigger-export", callback),

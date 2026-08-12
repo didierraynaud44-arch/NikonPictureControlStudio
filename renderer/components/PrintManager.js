@@ -23,13 +23,16 @@ class PrintManager {
     }
 
     /**
-     * 🔹 NOUVEAU : Définit l'image à imprimer
+     * 🔹 Définit l'image à imprimer. Appelée à CHAQUE navigation dans le Studio
+     * (voir app.js/loadImageInStudio) : doit rester légère et ne jamais déclencher
+     * de décodage RAW pleine résolution. Ce décodage n'a lieu que quand le panneau
+     * Impression est réellement affiché (switchToView -> renderPrintPreview -> render())
+     * ou au moment de l'impression/export PDF (handlePrintOrPdf -> getLiveImageDataUrl).
      */
     setImage(imagePath, pictureControl = null) {
-        console.log("📸 PrintManager.setImage:", imagePath);
+        console.log("📸 PrintManager.setImage (léger, sans décodage):", imagePath);
         this.currentImagePath = imagePath;
         this.currentPictureControl = pictureControl;
-        this.render();
     }
 
     initListeners() {

@@ -66,10 +66,20 @@
                     <button id="btnViewGrid" class="btn-tool" title="Affichage galerie">⣿ Galerie (<span id="selectedCount">0</span>)</button>
                 </div>
 
-                <!-- 🔍 Curseur de taille des vignettes -->
+                <!-- 🔍 Curseur de taille des vignettes (visible uniquement en mode Galerie) -->
                 <div class="grid-zoom-control" style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: #aaa;">
                     <span>Taille :</span>
                     <input type="range" id="gridZoomSlider" min="100" max="300" value="140" step="10" style="width: 100px; cursor: pointer;" title="Ajuster la taille des vignettes">
+                </div>
+
+                <!-- ⚙️ Sélecteur de résolution d'aperçu (visible uniquement en mode Photo) -->
+                <div id="previewResolutionSelector" style="display: none; align-items: center; gap: 8px; font-size: 11px; color: #aaa;">
+                    <span>Résolution :</span>
+                    <select id="previewResolutionSelect" style="cursor: pointer;" title="Qualité d'aperçu Studio">
+                        <option value="800">Rapide (800px)</option>
+                        <option value="1200">Normal (1200px)</option>
+                        <option value="1800">Élevée (1800px)</option>
+                    </select>
                 </div>
 
                 <div class="view-mode-actions">
