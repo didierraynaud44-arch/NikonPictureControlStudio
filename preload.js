@@ -41,9 +41,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getCatalog: () => 
         ipcRenderer.invoke("catalog:get-all"),
     
-    removeCatalogFolder: (folderPath) => 
+    removeCatalogFolder: (folderPath) =>
         ipcRenderer.invoke("catalog:remove-folder", folderPath),
-    
+
+    getCatalogStats: () =>
+        ipcRenderer.invoke("catalog:get-stats"),
+
+    // ============================================================
+    // LIENS EXTERNES (navigateur système)
+    // ============================================================
+
+    openExternalLink: (url) =>
+        ipcRenderer.invoke("open-external-link", url),
+
     // Garder l'ancien nom pour compatibilité (mais utiliser le nouveau handler)
     // savePhotoSettings: (filePath, pcData) => 
     //     ipcRenderer.invoke("catalog:save-photo-pc", filePath, pcData),
@@ -167,6 +177,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     onMenuImportBackup: (callback) =>
         ipcRenderer.on("menu-import-backup", callback),
+
+    onMenuOpenExternalProgramsConfig: (callback) =>
+        ipcRenderer.on("menu-open-external-programs-config", callback),
+
+    // ============================================================
+    // PROGRAMMES EXTERNES ("Ouvrir avec...")
+    // ============================================================
+
+    getExternalPrograms: () =>
+        ipcRenderer.invoke("get-external-programs"),
+
+    saveExternalPrograms: (programs) =>
+        ipcRenderer.invoke("save-external-programs", programs),
+
+    browseExecutable: () =>
+        ipcRenderer.invoke("browse-executable"),
+
+    openInExternalProgram: (payload) =>
+        ipcRenderer.invoke("open-in-external-program", payload),
+
+    addSingleFileToCatalog: (filePath) =>
+        ipcRenderer.invoke("catalog:add-single-file", filePath),
 
     // ============================================================
     // NETTOYAGE DES ÉCOUTEURS (optionnel mais recommandé)

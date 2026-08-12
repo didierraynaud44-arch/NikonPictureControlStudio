@@ -2,6 +2,8 @@
     Nikon Picture Control Studio - Masks Manager
 =========================================================*/
 
+(function () {
+
 let masksList = [];
 let activeMaskId = null;
 let maskIdCounter = 0;
@@ -50,10 +52,8 @@ const DEFAULT_MASK_ADJUSTMENTS = {
 function createMask(type, geometry) {
     beginAction();
     maskIdCounter += 1;
-    
-    // 🛠️ CORRECTION : Donner un léger réglage d'exposition par défaut (+0.3 EV) 
-    // pour que l'effet visuel soit immédiatement décelable à la création du masque.
-    const initialAdjustments = { ...DEFAULT_MASK_ADJUSTMENTS, exposure: 0.3 };
+
+    const initialAdjustments = { ...DEFAULT_MASK_ADJUSTMENTS };
 
     const mask = {
         id: `mask_${Date.now()}_${maskIdCounter}`,
@@ -151,3 +151,5 @@ if (typeof module !== "undefined" && module.exports) {
         clearMasks, displayName, beginAction, undo, redo, canUndo, canRedo, DEFAULT_MASK_ADJUSTMENTS
     };
 }
+
+})();

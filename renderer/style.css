@@ -1,9 +1,51 @@
 /* =========================================================
+   0. POLICES (Inter + JetBrains Mono, fichiers locaux — hors ligne,
+      pas de CDN. Voir renderer/assets/fonts/)
+========================================================= */
+@font-face {
+    font-family: "Inter";
+    src: url("assets/fonts/Inter-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Inter";
+    src: url("assets/fonts/Inter-Medium.woff2") format("woff2");
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Inter";
+    src: url("assets/fonts/Inter-SemiBold.woff2") format("woff2");
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("assets/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("assets/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* =========================================================
    1. RESET & BASE
 ========================================================= */
 :root {
     --header-height: 50px;
     --footer-height: 30px;
+    --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 
 * {
@@ -14,7 +56,7 @@
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: var(--font-ui);
     background-color: #18191c;
     color: #dbdee1;
     height: 100vh;
@@ -22,6 +64,49 @@ body {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+}
+
+/* Les contrôles de formulaire n'héritent pas de body.font-family par
+   défaut (comportement standard des navigateurs) : on le force ici pour
+   qu'Inter s'applique bien aux boutons, champs et menus déroulants. */
+button, input, select, textarea {
+    font-family: inherit;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+}
+
+/* =========================================================
+   1ter. ICÔNES (Lucide, extraites localement — voir renderer/assets/icons)
+   currentColor partout : elles suivent la couleur du texte environnant
+   (gris clair par défaut, accent #5865f2/#8ab4f8 dans les états actifs
+   déjà définis plus bas, sans règle spécifique aux icônes à dupliquer).
+========================================================= */
+.lucide-icon {
+    display: inline-block;
+    vertical-align: -2px;
+    flex-shrink: 0;
+}
+
+.icon-spin {
+    animation: icon-spin 1s linear infinite;
+}
+
+@keyframes icon-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* =========================================================
+   1bis. POLICE MONOSPACE — barre EXIF, valeurs numériques de curseurs,
+   champs de saisie numériques (angle de rotation, dimensions d'impression)
+========================================================= */
+.exif-bar,
+.control-value,
+[data-value-for],
+input[type="number"] {
+    font-family: var(--font-mono);
 }
 
 /* =========================================================
@@ -106,6 +191,30 @@ button:active { background-color: #1e1f22; }
     background-color: #1e1f22;
     border-top: 1px solid #2b2d31;
     width: 100vw;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    box-sizing: border-box;
+    font-size: 11px;
+    color: #999;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.app-footer-left,
+.app-footer-right {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.app-footer-left a {
+    color: #8ab4f8;
+    text-decoration: none;
+}
+
+.app-footer-left a:hover {
+    text-decoration: underline;
 }
 
 /* =========================================================
@@ -457,6 +566,14 @@ canvas {
     font-size: 11px;
     color: #949ba4;
     margin-bottom: 2px;
+    font-weight: 500;
+}
+
+.pc-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 500;
 }
 
 .pc-mini-slider .pc-slider {
@@ -467,7 +584,8 @@ canvas {
 /* =========================================================
    8. PANNEAU MASQUES LOCAUX (Studio)
 ========================================================= */
-#masksPanelStatus h3 {
+#masksPanelStatus h3,
+#retouchPanelStatus h3 {
     font-size: 14px;
     font-weight: 700;
     color: #5865f2;
@@ -951,6 +1069,11 @@ canvas {
     width: 100%;
     height: 100%;
     object-fit: cover;
+}
+
+.grid-card-icon {
+    display: inline-flex;
+    color: #666;
 }
 
 .grid-card .grid-checkbox {

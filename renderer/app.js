@@ -8,6 +8,14 @@ let profileImageProcessor = null;
 let activeProfilePC = null; // Picture Control actif dans le Gestionnaire
 let studioFoldersList = []; // Liste de toutes les structures de dossiers importées
 
+// 🔹 Chemins des dossiers actuellement dépliés dans l'arbre "Dossiers Photos"
+// (racines ET sous-dossiers). Source de vérité pour l'état déplié : mise à
+// jour directement dans les gestionnaires de clic, puis relue par
+// renderStudioFolderTree()/buildTreeHTML() à chaque reconstruction — donc
+// un rafraîchissement de l'arbre (ex: après "Ouvrir avec") ne referme plus
+// les dossiers que l'utilisateur avait ouverts.
+let expandedFolders = new Set();
+
 // Stockage local de la bibliothèque NP3 / Profils
 let np3Library = [];
 try {
@@ -81,14 +89,26 @@ function updateExifBarFromDb(photo) {
     if (photo.exposure_compensation) params.push(`EV ${photo.exposure_compensation}`);
     if (photo.white_balance) params.push(photo.white_balance);
     if (photo.date_time_original) params.push(new Date(photo.date_time_original).toLocaleDateString());
-    
-    // 🔥 AJOUTER LE SHUTTER COUNT
-    const shutterCount = photo.shutter_count || photo.shutterCount;
-    if (shutterCount) {
-        params.push(`🔢 ${shutterCount}`);
-    }
-    
+
+    // params peut contenir du texte EXIF non fiable (white_balance) : on reste sur
+    // .textContent ici (jamais innerHTML) pour ne jamais exécuter du HTML/script
+    // injecté via des métadonnées de fichier malveillantes.
     paramsEl.textContent = params.length > 0 ? params.join(' | ') : 'Aucune EXIF';
+
+    // Le compteur de déclenchements est affiché séparément, construit uniquement
+    // via des éléments DOM sûrs (jamais de chaîne HTML), la valeur étant numérique.
+    const shutterCount = photo.shutter_count || photo.shutterCount;
+    const shutterBadge = document.getElementById('exifShutterBadge');
+    if (shutterBadge) {
+        shutterBadge.innerHTML = "";
+        if (shutterCount && window.lucideIconElement) {
+            shutterBadge.appendChild(window.lucideIconElement("camera", { size: 12 }));
+            shutterBadge.appendChild(document.createTextNode(String(parseInt(shutterCount, 10) || shutterCount)));
+            shutterBadge.style.display = "inline-flex";
+        } else {
+            shutterBadge.style.display = "none";
+        }
+    }
 }
 
 /**
@@ -155,13 +175,20 @@ async function saveCurrentPictureControlSettings(filePath) {
             return;
         }
 
-        const settings = window.imageProcessor.getPictureControl ? 
-            window.imageProcessor.getPictureControl() : 
+        const baseSettings = window.imageProcessor.getPictureControl ?
+            window.imageProcessor.getPictureControl() :
             window.imageProcessor.pictureControl;
 
-        if (!settings) {
+        if (!baseSettings) {
             console.warn("⚠️ Aucun réglage à sauvegarder");
             return;
+        }
+
+        // 🔹 Les retouches (tampon de duplication) sont un champ dédié dans la
+        // même structure JSON, à côté des réglages Picture Control.
+        const settings = { ...baseSettings };
+        if (typeof window.RetouchManager !== "undefined") {
+            settings.retouches = window.RetouchManager.getRetouches();
         }
 
         console.log("💾 Sauvegarde des réglages pour:", filePath);
@@ -188,10 +215,17 @@ async function saveCurrentPictureControlSettings(filePath) {
 async function saveCurrentPhotoSettingsToCatalog() {
     if (!window.currentStudioFilePath) return;
     const currentPC = window.imageProcessor?.pictureControl || activeProfilePC || {};
-    
+
+    // 🔹 Les retouches (tampon de duplication) sont un champ dédié dans la
+    // même structure JSON, à côté des réglages Picture Control.
+    const settingsToSave = { ...currentPC };
+    if (typeof window.RetouchManager !== "undefined") {
+        settingsToSave.retouches = window.RetouchManager.getRetouches();
+    }
+
     if (window.electronAPI && typeof window.electronAPI.savePhotoSettings === "function") {
         try {
-            await window.electronAPI.savePhotoSettings(window.currentStudioFilePath, currentPC);
+            await window.electronAPI.savePhotoSettings(window.currentStudioFilePath, settingsToSave);
             console.log("💾 Réglages sauvegardés automatiquement pour:", window.currentStudioFilePath);
         } catch (err) {
             console.error("❌ Erreur lors de la sauvegarde automatique des réglages :", err);
@@ -331,6 +365,27 @@ function highlightSelectedTreeItem(filePath) {
 }
 window.highlightSelectedTreeItem = highlightSelectedTreeItem;
 
+/**
+ * Cherche le chemin de fichier normalisé dans un noeud de l'arborescence
+ * (récursif), et retourne la chaîne des chemins de dossiers ancêtres
+ * (racine incluse) jusqu'à lui, ou null s'il n'y est pas.
+ */
+function findAncestorFolderPaths(node, normalizedTargetPath, trail = []) {
+    if (!node) return null;
+    const currentTrail = [...trail, node.path];
+
+    if (node.files && node.files.some(f => (f.path || "").replace(/\\/g, "/").toLowerCase() === normalizedTargetPath)) {
+        return currentTrail;
+    }
+    if (node.children) {
+        for (const child of node.children) {
+            const result = findAncestorFolderPaths(child, normalizedTargetPath, currentTrail);
+            if (result) return result;
+        }
+    }
+    return null;
+}
+
 function buildTreeHTML(node) {
     if (!node) return document.createTextNode("");
 
@@ -356,16 +411,25 @@ function buildTreeHTML(node) {
             title.style.fontSize = "12px";
             title.style.padding = "2px 4px";
             title.style.borderRadius = "3px";
-            title.innerHTML = `📁 <span style="user-select:none;">${subFolder.name}</span>`;
+            title.style.display = "flex";
+            title.style.alignItems = "center";
+            title.style.gap = "5px";
+
+            const isExpanded = expandedFolders.has(subFolder.path);
+            title.innerHTML = `<span class="tree-folder-icon">${window.lucideIconHtml(isExpanded ? "folder-open" : "folder", { size: 14 })}</span><span style="user-select:none;">${subFolder.name}</span>`;
 
             const subTreeContainer = document.createElement("div");
-            subTreeContainer.style.display = "none";
+            subTreeContainer.style.display = isExpanded ? "block" : "none";
 
             title.onclick = (e) => {
                 e.stopPropagation();
                 const isHidden = subTreeContainer.style.display === "none";
                 subTreeContainer.style.display = isHidden ? "block" : "none";
-                title.firstChild.textContent = isHidden ? "📂 " : "📁 ";
+                if (isHidden) expandedFolders.add(subFolder.path);
+                else expandedFolders.delete(subFolder.path);
+
+                const iconEl = title.querySelector(".tree-folder-icon");
+                if (iconEl) iconEl.innerHTML = window.lucideIconHtml(isHidden ? "folder-open" : "folder", { size: 14 });
 
                 if (window.gridManager) {
                     const subFiles = collectAllFilesFromFolder(subFolder);
@@ -396,7 +460,10 @@ function buildTreeHTML(node) {
             li.style.overflow = "hidden";
             li.style.textOverflow = "ellipsis";
             li.style.whiteSpace = "nowrap";
-            li.textContent = `🖼️ ${file.name}`;
+            li.style.display = "flex";
+            li.style.alignItems = "center";
+            li.style.gap = "5px";
+            li.innerHTML = `${window.lucideIconHtml("image", { size: 12 })}<span style="overflow:hidden; text-overflow:ellipsis;">${file.name}</span>`;
             li.title = file.path;
             li.dataset.path = file.path; // 🔹 NOUVEAU : pour retrouver l'élément depuis n'importe où (flèches incluses)
 
@@ -468,13 +535,13 @@ function ensureStudioNavigationArrows() {
     const prevBtn = document.createElement("button");
     prevBtn.className = "studio-nav-btn studio-prev-btn";
     prevBtn.title = "Photo précédente (Flèche gauche)";
-    prevBtn.innerHTML = "❮";
+    prevBtn.innerHTML = window.lucideIconHtml("chevron-left", { size: 20 });
     prevBtn.onclick = () => navigateStudioPhoto(-1);
 
     const nextBtn = document.createElement("button");
     nextBtn.className = "studio-nav-btn studio-next-btn";
     nextBtn.title = "Photo suivante (Flèche droite)";
-    nextBtn.innerHTML = "❯";
+    nextBtn.innerHTML = window.lucideIconHtml("chevron-right", { size: 20 });
     nextBtn.onclick = () => navigateStudioPhoto(1);
 
     container.appendChild(prevBtn);
@@ -490,12 +557,26 @@ function renderStudioFolderTree() {
     if (!studioFoldersList || studioFoldersList.length === 0) {
         container.innerHTML = `<p style="color:#777; font-size:11px; font-style:italic; padding:8px; margin:0;">Aucun dossier dans le catalogue</p>`;
         if (window.gridManager) window.gridManager.setImages([]);
+        if (typeof window.updateFooterCatalogStats === "function") window.updateFooterCatalogStats();
         return;
     }
 
     const sortedFoldersList = [...studioFoldersList].sort((a, b) => {
         return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
     });
+
+    // 🔹 Le dossier de la photo active doit toujours rester déplié, même s'il
+    // ne l'était pas explicitement (ex: démarrage direct sur une photo).
+    if (window.currentStudioFilePath) {
+        const normalizedCurrent = window.currentStudioFilePath.replace(/\\/g, "/").toLowerCase();
+        for (const folderStructure of sortedFoldersList) {
+            const trail = findAncestorFolderPaths(folderStructure, normalizedCurrent);
+            if (trail) {
+                trail.forEach(p => expandedFolders.add(p));
+                break;
+            }
+        }
+    }
 
     sortedFoldersList.forEach((folderStructure) => {
         const rootItem = document.createElement("div");
@@ -516,17 +597,23 @@ function renderStudioFolderTree() {
         `;
 
         const rootTitle = document.createElement("div");
-        rootTitle.style.cssText = "font-size: 12px; font-weight: bold; color: #5865f2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
-        rootTitle.innerHTML = `📁 ${folderStructure.name}`;
+        rootTitle.style.cssText = "font-size: 12px; font-weight: bold; color: #5865f2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 5px;";
+
+        const isRootExpanded = expandedFolders.has(folderStructure.path);
+        rootTitle.innerHTML = `<span class="tree-folder-icon">${window.lucideIconHtml(isRootExpanded ? "folder-open" : "folder", { size: 14 })}</span><span>${folderStructure.name}</span>`;
 
         const rootTreeContainer = document.createElement("div");
-        rootTreeContainer.style.display = "none";
+        rootTreeContainer.style.display = isRootExpanded ? "block" : "none";
 
         rootHeader.onclick = (e) => {
             if (e.target.classList.contains("btn-remove-folder")) return;
             const isHidden = rootTreeContainer.style.display === "none";
             rootTreeContainer.style.display = isHidden ? "block" : "none";
-            rootTitle.innerHTML = `${isHidden ? "📂" : "📁"} ${folderStructure.name}`;
+            if (isHidden) expandedFolders.add(folderStructure.path);
+            else expandedFolders.delete(folderStructure.path);
+
+            const iconEl = rootTitle.querySelector(".tree-folder-icon");
+            if (iconEl) iconEl.innerHTML = window.lucideIconHtml(isHidden ? "folder-open" : "folder", { size: 14 });
 
             if (window.gridManager) {
                 const allFolderFiles = collectAllFilesFromFolder(folderStructure);
@@ -537,8 +624,8 @@ function renderStudioFolderTree() {
         const btnRemove = document.createElement("button");
         btnRemove.className = "btn-remove-folder";
         btnRemove.title = "Retirer du catalogue";
-        btnRemove.innerHTML = "🗑️";
-        btnRemove.style.cssText = "background: transparent; border: none; cursor: pointer; font-size: 11px; padding: 2px 4px; margin-left: 6px;";
+        btnRemove.innerHTML = window.lucideIconHtml("trash-2", { size: 13 });
+        btnRemove.style.cssText = "background: transparent; border: none; cursor: pointer; font-size: 11px; padding: 2px 4px; margin-left: 6px; display: inline-flex; align-items: center;";
         
         btnRemove.onclick = (e) => {
             e.stopPropagation();
@@ -558,6 +645,8 @@ function renderStudioFolderTree() {
     if (sortedFoldersList.length > 0 && window.gridManager) {
         window.gridManager.setImages(collectAllFilesFromFolder(sortedFoldersList[0]));
     }
+
+    if (typeof window.updateFooterCatalogStats === "function") window.updateFooterCatalogStats();
 }
 
 async function removeStudioFolder(folderPath) {
@@ -567,14 +656,120 @@ async function removeStudioFolder(folderPath) {
     }
 }
 
+/* =========================================================
+    INDICATEUR DE PROGRESSION D'IMPORT (gros dossiers)
+========================================================= */
+
+let studioImportsInFlight = 0;
+let studioRenderDebounceTimer = null;
+const STUDIO_RENDER_DEBOUNCE_MS = 300;
+
+// Ne déclenche qu'un seul rendu de l'arbre, même si plusieurs imports
+// de dossiers se terminent à quelques centaines de ms d'écart. Le message
+// d'attente ne disparaît qu'ici, une fois l'arbre effectivement redessiné —
+// jamais avant, pour ne jamais laisser un "trou" sans retour visuel.
+function scheduleStudioFolderTreeRender() {
+    if (studioRenderDebounceTimer) clearTimeout(studioRenderDebounceTimer);
+    studioRenderDebounceTimer = setTimeout(() => {
+        studioRenderDebounceTimer = null;
+        renderStudioFolderTree();
+        hideStudioImportProgress();
+    }, STUDIO_RENDER_DEBOUNCE_MS);
+}
+
+function updateStudioImportProgress({ indexed, total, currentFile, folderName }) {
+    const text = document.getElementById("studioImportProgressText");
+    const bar = document.getElementById("studioImportProgressBar");
+    if (text) {
+        text.textContent = total > 0
+            ? `Indexation "${folderName}" : ${indexed} / ${total}${currentFile ? " — " + currentFile : ""}`
+            : `Indexation en cours, veuillez patienter...`;
+    }
+    if (bar) {
+        const pct = total > 0 ? Math.min(100, Math.round((indexed / total) * 100)) : 0;
+        bar.style.width = pct + "%";
+    }
+}
+
+function showStudioImportProgress(folderName) {
+    const box = document.getElementById("studioImportProgress");
+    if (box) box.style.display = "block";
+    updateStudioImportProgress({ indexed: 0, total: 0, currentFile: "", folderName });
+}
+
+// N'est appelée qu'après le rendu final (voir scheduleStudioFolderTreeRender) —
+// jamais directement à la résolution d'un import, pour éviter tout écran
+// "vide" entre la fin du scan et l'apparition réelle du dossier dans l'arbre.
+function hideStudioImportProgress() {
+    if (studioImportsInFlight > 0) return; // un autre import est encore en cours
+    const box = document.getElementById("studioImportProgress");
+    if (box) box.style.display = "none";
+}
+
+if (window.electronAPI && typeof window.electronAPI.onScanProgress === "function") {
+    window.electronAPI.onScanProgress((progress) => updateStudioImportProgress(progress));
+}
+
+/* =========================================================
+    PIED DE PAGE (footer) : lien externe + compteur catalogue
+========================================================= */
+
+const footerSiteLink = document.getElementById("footerSiteLink");
+if (footerSiteLink) {
+    footerSiteLink.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (window.electronAPI && typeof window.electronAPI.openExternalLink === "function") {
+            window.electronAPI.openExternalLink(footerSiteLink.href);
+        }
+    });
+}
+
+// Récupère le total du catalogue et, si un filtre de la grille est actif
+// (note minimale ou statut), affiche "affichées / total" plutôt que le
+// simple total. Appelée au chargement, après chaque import, et après
+// chaque changement de filtre dans GridManager.
+async function updateFooterCatalogStats() {
+    const el = document.getElementById("footerCatalogStats");
+    if (!el) return;
+
+    let totalPhotos = 0;
+    if (window.electronAPI && typeof window.electronAPI.getCatalogStats === "function") {
+        try {
+            const stats = await window.electronAPI.getCatalogStats();
+            totalPhotos = stats?.totalPhotos || 0;
+        } catch (err) {
+            console.error("❌ Erreur récupération des statistiques du catalogue :", err);
+        }
+    }
+
+    const gm = window.gridManager;
+    const filterState = gm?.filterState;
+    const filterActive = !!filterState && (filterState.minRating > 0 || filterState.flagFilter !== "all");
+
+    el.textContent = filterActive
+        ? `${gm.images.length} affichée(s) / ${totalPhotos} au total`
+        : `${totalPhotos} photo${totalPhotos > 1 ? "s" : ""}`;
+}
+window.updateFooterCatalogStats = updateFooterCatalogStats;
+
 async function openStudioFolder() {
     try {
         if (window.electronAPI && typeof window.electronAPI.selectFolderRecursive === "function") {
             const folderData = await window.electronAPI.selectFolderRecursive();
-            if (folderData && folderData.path) {
-                if (typeof window.electronAPI.addCatalogFolder === "function") {
+            if (!folderData || !folderData.path) return;
+
+            if (typeof window.electronAPI.addCatalogFolder === "function") {
+                studioImportsInFlight++;
+                showStudioImportProgress(folderData.name);
+                try {
                     studioFoldersList = await window.electronAPI.addCatalogFolder(folderData);
-                    renderStudioFolderTree();
+                } catch (err) {
+                    console.error("❌ Erreur lors de l'ajout du dossier au catalogue :", err);
+                } finally {
+                    studioImportsInFlight--;
+                    // Toujours planifié, même en erreur : garantit que le message
+                    // d'attente disparaît et ne reste jamais bloqué à l'écran.
+                    scheduleStudioFolderTreeRender();
                 }
             }
         }
@@ -628,8 +823,8 @@ function renderNp3Library() {
         const div = document.createElement("div");
         div.className = "np3-item";
         div.innerHTML = `
-            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px;">📄 ${item.name}</span>
-            <button class="btn-remove-np3" data-index="${index}" title="Supprimer">✕</button>
+            <span style="display:flex; align-items:center; gap:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px;">${window.lucideIconHtml("file", { size: 13 })}${item.name}</span>
+            <button class="btn-remove-np3" data-index="${index}" title="Supprimer">${window.lucideIconHtml("x", { size: 13 })}</button>
         `;
 
         div.onclick = (e) => {
@@ -706,6 +901,19 @@ async function loadImageInStudio(filePath) {
         // 🔥 CHARGER LES RÉGLAGES SAUVEGARDÉS (UN SEUL APPEL !)
         const savedSettings = await loadPictureControlSettings(filePath);
         if (myToken !== currentLoadToken) return;
+
+        // 🔹 Retouches (tampon de duplication) : champ dédié à part des
+        // réglages Picture Control, rechargé par photo comme eux. Retiré de
+        // savedSettings pour ne pas polluer l'objet Picture Control appliqué
+        // plus bas (pcData = savedSettings dans la branche suivante).
+        if (typeof window.RetouchManager !== "undefined") {
+            const savedRetouches = Array.isArray(savedSettings?.retouches) ? savedSettings.retouches : [];
+            if (savedSettings && "retouches" in savedSettings) delete savedSettings.retouches;
+            window.RetouchManager.loadRetouches(savedRetouches);
+            if (window.retouchCanvasController) window.retouchCanvasController.cancelMode();
+            if (typeof window.renderRetouchPanel === "function") window.renderRetouchPanel();
+        }
+
         let pcData = {};
 
         if (savedSettings && Object.keys(savedSettings).length > 0) {
@@ -925,7 +1133,7 @@ function showRawDecodingIndicator(show) {
         if (!el) {
             el = document.createElement("div");
             el.id = "rawDecodingIndicator";
-            el.textContent = "⏳ Décodage RAW en cours...";
+            el.innerHTML = `${window.lucideIconHtml ? window.lucideIconHtml("loader-circle", { size: 14, className: "icon-spin" }) : ""} Décodage RAW en cours...`;
             el.style.cssText = `
                 position: fixed;
                 top: 16px;
@@ -937,6 +1145,9 @@ function showRawDecodingIndicator(show) {
                 border-radius: 6px;
                 font-size: 13px;
                 z-index: 9999;
+                display: flex;
+                align-items: center;
+                gap: 6px;
                 box-shadow: 0 2px 8px rgba(0,0,0,0.4);
             `;
             document.body.appendChild(el);
@@ -1044,6 +1255,242 @@ function initExportModal() {
 }
 
 /* =========================================================
+    PROGRAMMES EXTERNES ("Ouvrir avec...")
+========================================================= */
+
+function truncatePath(p, maxLen = 34) {
+    if (!p || p.length <= maxLen) return p || "";
+    return "..." + p.slice(-(maxLen - 3));
+}
+
+function renderExternalProgramsList(programs) {
+    const container = document.getElementById("externalProgramsList");
+    if (!container) return;
+
+    if (!programs || programs.length === 0) {
+        container.innerHTML = `<p style="color:#888; font-size:12px; font-style:italic; margin:0;">Aucun programme configuré.</p>`;
+        return;
+    }
+
+    container.innerHTML = programs.map(p => `
+        <div style="display:flex; align-items:center; gap:8px; background:#1e1f22; border:1px solid #35373c; border-radius:4px; padding:6px 8px;">
+            <div style="flex:1; overflow:hidden;">
+                <div style="font-size:12px; font-weight:bold;">${p.name}</div>
+                <div style="font-size:10px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${p.execPath}">${truncatePath(p.execPath)}</div>
+            </div>
+            <button class="btn-remove-external-program" data-id="${p.id}" title="Supprimer" style="background:transparent; border:none; color:#aaa; cursor:pointer;">${window.lucideIconHtml("x", { size: 14 })}</button>
+        </div>
+    `).join("");
+
+    container.querySelectorAll(".btn-remove-external-program").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const updated = programs.filter(p => p.id !== btn.dataset.id);
+            await window.electronAPI.saveExternalPrograms(updated);
+            renderExternalProgramsList(updated);
+        });
+    });
+}
+
+async function refreshExternalProgramsList() {
+    if (!window.electronAPI || typeof window.electronAPI.getExternalPrograms !== "function") return [];
+    const programs = await window.electronAPI.getExternalPrograms();
+    renderExternalProgramsList(programs);
+    return programs;
+}
+
+function initExternalProgramsModal() {
+    const modal = document.getElementById("externalProgramsModal");
+    const btnClose = document.getElementById("btnCloseExternalProgramsModal");
+    const btnAdd = document.getElementById("btnAddExternalProgram");
+    const addRow = document.getElementById("externalProgramAddRow");
+    const nameInput = document.getElementById("externalProgramNameInput");
+    const btnBrowse = document.getElementById("btnBrowseExternalProgram");
+    const btnCancelAdd = document.getElementById("btnCancelAddExternalProgram");
+
+    if (btnClose && modal) {
+        btnClose.onclick = () => { modal.style.display = "none"; };
+    }
+
+    if (btnAdd && addRow) {
+        btnAdd.onclick = () => {
+            addRow.style.display = "flex";
+            btnAdd.style.display = "none";
+            if (nameInput) { nameInput.value = ""; nameInput.focus(); }
+        };
+    }
+
+    if (btnCancelAdd && addRow && btnAdd) {
+        btnCancelAdd.onclick = () => {
+            addRow.style.display = "none";
+            btnAdd.style.display = "inline-flex";
+        };
+    }
+
+    if (btnBrowse) {
+        btnBrowse.onclick = async () => {
+            const name = (nameInput?.value || "").trim();
+            if (!name) {
+                alert("Indique un nom pour ce programme.");
+                return;
+            }
+            if (!window.electronAPI || typeof window.electronAPI.browseExecutable !== "function") return;
+
+            const execPath = await window.electronAPI.browseExecutable();
+            if (!execPath) return; // annulé
+
+            const programs = await window.electronAPI.getExternalPrograms();
+            const updated = [...programs, { id: `ext_${Date.now()}`, name, execPath }];
+            await window.electronAPI.saveExternalPrograms(updated);
+            renderExternalProgramsList(updated);
+
+            addRow.style.display = "none";
+            if (btnAdd) btnAdd.style.display = "inline-flex";
+        };
+    }
+
+    window.openExternalProgramsModal = async () => {
+        if (!modal) return;
+        if (addRow) addRow.style.display = "none";
+        if (btnAdd) btnAdd.style.display = "inline-flex";
+        await refreshExternalProgramsList();
+        modal.style.display = "flex";
+    };
+}
+
+function closeOpenWithDropdown() {
+    const dropdown = document.getElementById("openWithDropdown");
+    if (dropdown) dropdown.style.display = "none";
+}
+
+function showOpenWithIndicator(show) {
+    let el = document.getElementById("openWithIndicator");
+
+    if (show) {
+        if (!el) {
+            el = document.createElement("div");
+            el.id = "openWithIndicator";
+            el.innerHTML = `${window.lucideIconHtml ? window.lucideIconHtml("loader-circle", { size: 14, className: "icon-spin" }) : ""} Génération et ouverture...`;
+            el.style.cssText = `
+                position: fixed;
+                top: 16px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #222;
+                color: #fff;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 13px;
+                z-index: 9999;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            `;
+            document.body.appendChild(el);
+        }
+        el.style.display = "flex";
+    } else if (el) {
+        el.style.display = "none";
+    }
+}
+
+async function runOpenInExternalProgram(program) {
+    if (!window.currentStudioFilePath || !window.imageProcessor) {
+        alert("Aucune photo chargée.");
+        return;
+    }
+    if (!window.electronAPI || typeof window.electronAPI.openInExternalProgram !== "function") return;
+
+    showOpenWithIndicator(true);
+    try {
+        const dataUrl = typeof window.imageProcessor.exportProcessedTiff === "function"
+            ? await window.imageProcessor.exportProcessedTiff(window.currentStudioFilePath)
+            : null;
+
+        if (!dataUrl) {
+            alert("❌ Impossible de générer le TIFF pour cette photo.");
+            return;
+        }
+
+        const result = await window.electronAPI.openInExternalProgram({
+            imageDataUrl: dataUrl,
+            originalFilePath: window.currentStudioFilePath,
+            programExecPath: program.execPath,
+            programName: program.name
+        });
+
+        if (!result || !result.success) {
+            alert(`❌ Erreur : ${result?.error || "Échec inconnu"}`);
+            return;
+        }
+
+        // 🔹 Indexe uniquement le nouveau TIFF (pas un rescan complet du dossier,
+        // trop lent) pour qu'il apparaisse dans l'arbre sans réimport manuel.
+        // Ne fait rien si la photo n'appartient à aucun dossier suivi par le
+        // catalogue (arbre inchangé, comportement identique à avant).
+        if (window.electronAPI && typeof window.electronAPI.addSingleFileToCatalog === "function") {
+            const updatedCatalog = await window.electronAPI.addSingleFileToCatalog(result.generatedPath);
+            if (updatedCatalog) {
+                studioFoldersList = updatedCatalog;
+            }
+        }
+        if (typeof window.renderStudioFolderTree === "function") {
+            window.renderStudioFolderTree();
+        }
+    } catch (err) {
+        console.error("❌ Erreur Ouvrir avec:", err);
+        alert(`❌ Erreur : ${err.message || err}`);
+    } finally {
+        showOpenWithIndicator(false);
+    }
+}
+
+function initOpenWithButton() {
+    const btn = document.getElementById("btnOpenWith");
+    const dropdown = document.getElementById("openWithDropdown");
+    if (!btn || !dropdown) return;
+
+    btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+
+        if (dropdown.style.display === "block") {
+            closeOpenWithDropdown();
+            return;
+        }
+
+        const programs = (window.electronAPI && typeof window.electronAPI.getExternalPrograms === "function")
+            ? await window.electronAPI.getExternalPrograms()
+            : [];
+
+        if (!programs.length) {
+            dropdown.innerHTML = `<p style="font-size:11px; color:#aaa; margin:4px; max-width:200px;">Aucun programme configuré. Utilise le menu "Programmes externes" → "Configurer..." pour en ajouter un.</p>`;
+        } else {
+            dropdown.innerHTML = programs.map(p => `
+                <button class="open-with-item" data-id="${p.id}" style="display:block; width:100%; text-align:left; background:transparent; border:none; color:#e8eaed; padding:6px 8px; border-radius:4px; cursor:pointer; font-size:12px;">${p.name}</button>
+            `).join("");
+
+            dropdown.querySelectorAll(".open-with-item").forEach(item => {
+                item.addEventListener("mouseenter", () => { item.style.background = "#35373c"; });
+                item.addEventListener("mouseleave", () => { item.style.background = "transparent"; });
+                item.addEventListener("click", () => {
+                    closeOpenWithDropdown();
+                    const program = programs.find(p => p.id === item.dataset.id);
+                    if (program) runOpenInExternalProgram(program);
+                });
+            });
+        }
+
+        dropdown.style.display = "block";
+    });
+
+    document.addEventListener("click", (e) => {
+        if (dropdown.style.display === "block" && !dropdown.contains(e.target) && e.target !== btn) {
+            closeOpenWithDropdown();
+        }
+    });
+}
+
+/* =========================================================
     INITIALISATION ET EVENEMENTS IHM
 ========================================================= */
 
@@ -1108,7 +1555,7 @@ function updateStudioRatingUI(status) {
         const value = parseInt(starEl.dataset.value, 10);
         const filled = value <= rating;
         starEl.classList.toggle("filled", filled);
-        starEl.textContent = filled ? "★" : "☆";
+        starEl.innerHTML = window.lucideIconHtml("star", { size: 18, filled });
     });
 
     const flag = (status && status.flag) || null;
@@ -1292,6 +1739,10 @@ function initButtons() {
         window.initMasksController(window.imageProcessor);
     }
 
+    if (window.imageProcessor && typeof window.initRetouchController === "function") {
+        window.initRetouchController(window.imageProcessor);
+    }
+
     if (btnStudioOpenFolder) {
         btnStudioOpenFolder.onclick = openStudioFolder;
     }
@@ -1401,9 +1852,15 @@ function initButtons() {
 
     renderStudioFolderTree();
     initExportModal();
+    initExternalProgramsModal();
+    initOpenWithButton();
 
     if (typeof window.renderMasksPanel === "function") {
         window.renderMasksPanel();
+    }
+
+    if (typeof window.renderRetouchPanel === "function") {
+        window.renderRetouchPanel();
     }
 
     ensureStudioNavigationArrows();
@@ -1467,9 +1924,16 @@ if (window.electronAPI?.onMenuImportBackup) {
     window.electronAPI.onMenuImportBackup(() => importCatalogBackup());
 }
 
+if (window.electronAPI?.onMenuOpenExternalProgramsConfig) {
+    window.electronAPI.onMenuOpenExternalProgramsConfig(() => {
+        if (typeof window.openExternalProgramsModal === "function") window.openExternalProgramsModal();
+    });
+}
+
 const initApp = async () => {
     initButtons();
     await loadSavedStudioFolders();
+    if (typeof window.updateFooterCatalogStats === "function") window.updateFooterCatalogStats();
 };
 
 if (document.readyState === "loading") {

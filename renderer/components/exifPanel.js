@@ -15,7 +15,7 @@ function updateExif(info) {
         <p><b>Appareil :</b> ${info.make || ""} ${info.model || "Inconnu"}</p>
         <p><b>Objectif :</b> ${info.lens || "Non renseigné"}</p>
         <p><b>Artiste :</b> ${info.artist || "Non renseigné"}</p>
-        <p><b>Déclenchements :</b> 📸 <strong>${fmtClicks(info.shutterCount)}</strong></p>
+        <p><b>Déclenchements :</b> ${window.lucideIconHtml("camera", { size: 12 })} <strong>${fmtClicks(info.shutterCount)}</strong></p>
 
         <hr style="border:0; border-top: 1px solid #444; margin: 10px 0;">
 

@@ -29,6 +29,13 @@ class ImageProcessor {
         this.maskController = null;
         this.showMaskOverlay = true;
 
+        // 🔹 Retouche (tampon de duplication) : appliquée une fois, en amont du
+        // pipeline. Cache par clé de résolution ("preview"/"fullRes"), invalidé
+        // automatiquement si le buffer source change (nouvelle photo) ou si la
+        // liste de RetouchManager change (RetouchManager.getVersion()).
+        this.retouchController = null;
+        this._retouchCache = {};
+
         // 🔹 NOUVEAU : Histogramme
         this.histogramMode = "luminance"; // "luminance" | "rgb"
         this._lastImageDataForHistogram = null;
@@ -203,9 +210,60 @@ class ImageProcessor {
         if (this.originalRawBuffer) this.render();
     }
 
+    /**
+     * Applique toutes les opérations de RetouchManager (tampon de duplication)
+     * sur une copie de sourceBuffer, AVANT le pipeline Picture Control, pour
+     * que les réglages globaux/masques s'appliquent ensuite normalement
+     * par-dessus la zone corrigée. Résultat mis en cache par cacheKey tant
+     * que sourceBuffer et RetouchManager.getVersion() n'ont pas changé.
+     */
+    _applyRetouches(sourceBuffer, cacheKey) {
+        if (!sourceBuffer) return sourceBuffer;
+        if (typeof RetouchManager === "undefined" || typeof HealEngine === "undefined" || typeof MaskEngine === "undefined") {
+            return sourceBuffer;
+        }
+
+        const ops = RetouchManager.getRetouches();
+        if (!ops.length) return sourceBuffer;
+
+        const version = RetouchManager.getVersion();
+        const cached = this._retouchCache[cacheKey];
+        if (cached && cached.sourceBuffer === sourceBuffer && cached.version === version) {
+            return cached.result;
+        }
+
+        let working = new ImageData(
+            new Uint8ClampedArray(sourceBuffer.data),
+            sourceBuffer.width,
+            sourceBuffer.height
+        );
+
+        for (const op of ops) {
+            const alpha = MaskEngine.computeBrushAlpha(working.width, working.height, op.destGeometry);
+            const dx = op.sourceOffset.dx * working.width;
+            const dy = op.sourceOffset.dy * working.height;
+
+            try {
+                working = HealEngine.poissonBlend(working, alpha, dx, dy);
+            } catch (err) {
+                console.error("❌ Erreur fusion Poisson, repli sur copie simple :", err);
+                try {
+                    working = HealEngine.cloneCopy(working, alpha, dx, dy);
+                } catch (err2) {
+                    console.error("❌ Erreur copie simple de repli :", err2);
+                }
+            }
+        }
+
+        this._retouchCache[cacheKey] = { sourceBuffer, version, result: working };
+        return working;
+    }
+
     render() {
-        const sourceBuffer = this.previewBuffer || this.originalRawBuffer;
-        if (!sourceBuffer || !this.display) return;
+        const rawSourceBuffer = this.previewBuffer || this.originalRawBuffer;
+        if (!rawSourceBuffer || !this.display) return;
+
+        const sourceBuffer = this._applyRetouches(rawSourceBuffer, "preview");
 
         let currentImageData = new ImageData(
             new Uint8ClampedArray(sourceBuffer.data),
@@ -332,8 +390,10 @@ class ImageProcessor {
      * 🔹 Exporte l'image pure traitée (sans le fond ni le conteneur du DisplayCanvas)
      */
     getProcessedImageBlobUrl(quality = 0.95) {
-        const sourceBuffer = this.previewBuffer || this.originalRawBuffer;
-        if (!sourceBuffer) return null;
+        const rawSourceBuffer = this.previewBuffer || this.originalRawBuffer;
+        if (!rawSourceBuffer) return null;
+
+        const sourceBuffer = this._applyRetouches(rawSourceBuffer, "preview");
 
         let currentImageData = new ImageData(
             new Uint8ClampedArray(sourceBuffer.data),
@@ -468,11 +528,13 @@ class ImageProcessor {
             return null;
         }
 
-        // Créer une copie des données originales en pleine résolution
+        // Créer une copie des données originales en pleine résolution (après
+        // application des retouches, mises en cache par résolution)
+        const retouchedBuffer = this._applyRetouches(this.originalRawBuffer, "fullRes");
         let currentImageData = new ImageData(
-            new Uint8ClampedArray(this.originalRawBuffer.data),
-            this.originalRawBuffer.width,
-            this.originalRawBuffer.height
+            new Uint8ClampedArray(retouchedBuffer.data),
+            retouchedBuffer.width,
+            retouchedBuffer.height
         );
 
         // Appliquer le pipeline de traitement (Picture Control, etc.)
@@ -508,6 +570,59 @@ class ImageProcessor {
 
         // Retourner le DataURL
         return tempCanvas.toDataURL(format, quality);
+    }
+
+    /**
+     * 🔹 Même logique qu'exportFullResolution() (pipeline Picture Control,
+     * masques locaux, retouches) mais retourne un PNG sans perte plutôt qu'un
+     * JPEG — utilisé pour générer le TIFF envoyé à un programme externe
+     * ("Ouvrir avec..."), où une compression avec perte serait indésirable.
+     * @param {string} filePath
+     * @returns {Promise<string|null>} - DataURL PNG de l'image traitée
+     */
+    async exportProcessedTiff(filePath) {
+        if (filePath && this.fullResLoadedPath !== filePath) {
+            await this.loadFullResolutionForExport(filePath);
+        }
+
+        if (!this.originalRawBuffer) {
+            console.error("❌ Pas de buffer original pour l'export TIFF");
+            return null;
+        }
+
+        const retouchedBuffer = this._applyRetouches(this.originalRawBuffer, "fullRes");
+        let currentImageData = new ImageData(
+            new Uint8ClampedArray(retouchedBuffer.data),
+            retouchedBuffer.width,
+            retouchedBuffer.height
+        );
+
+        if (this.pictureControl && this.pipeline) {
+            try {
+                const result = this.pipeline.process(currentImageData, this.pictureControl);
+                if (result && result.data) currentImageData = result;
+            } catch (err) {
+                console.error("❌ Erreur pipeline export TIFF :", err);
+            }
+        }
+
+        if (this.enableMasks && typeof MaskEngine !== "undefined" && typeof MasksManager !== "undefined") {
+            try {
+                currentImageData = MaskEngine.applyAllMasks(currentImageData, MasksManager.getMasks(), this.pipeline);
+            } catch (err) {
+                console.error("❌ Erreur masques export TIFF :", err);
+            }
+        }
+
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = currentImageData.width;
+        tempCanvas.height = currentImageData.height;
+        const tempCtx = tempCanvas.getContext("2d");
+
+        this._applyTransformations(tempCtx, tempCanvas.width, tempCanvas.height);
+        tempCtx.putImageData(currentImageData, 0, 0);
+
+        return tempCanvas.toDataURL("image/png");
     }
 
     /**
@@ -555,7 +670,18 @@ class ImageProcessor {
             }
         }
 
-        if (masksToDraw.length === 0) return;
+        // Cercle d'aperçu de la taille du pinceau : dès que l'outil est actif et
+        // survolé, indépendamment de masksToDraw (peut être vide si aucun masque
+        // n'existe encore).
+        const showBrushPreview = !!(controller && controller.mode === "brush" && controller.brushPreviewPos);
+
+        const retouchController = this.retouchController;
+        const showRetouchPreview = !!(retouchController && (
+            (retouchController.isDrawing && retouchController.pendingStroke && retouchController.pendingStroke.length) ||
+            (retouchController.mode === "heal" && retouchController.hoverPos)
+        ));
+
+        if (masksToDraw.length === 0 && !showBrushPreview && !showRetouchPreview) return;
 
         ctx.save();
 
@@ -577,6 +703,78 @@ class ImageProcessor {
             this._drawMaskShape(ctx, imgW, imgH, mask, live, scale);
         }
 
+        if (showBrushPreview) {
+            this._drawBrushPreview(ctx, imgW, imgH, controller, scale);
+        }
+
+        if (showRetouchPreview) {
+            this._drawRetouchPreview(ctx, imgW, imgH, retouchController, scale);
+        }
+
+        ctx.restore();
+    }
+
+    /**
+     * Aperçu du tampon de duplication : cercle plein à la position de
+     * destination (pinceau) et cercle pointillé à la position source
+     * correspondante (décalage figé pendant le tracé en cours).
+     */
+    _drawRetouchPreview(ctx, width, height, controller, scale = 1) {
+        let destPos = null;
+
+        if (controller.isDrawing && controller.pendingStroke && controller.pendingStroke.length) {
+            destPos = controller.pendingStroke[controller.pendingStroke.length - 1];
+        } else if (controller.hoverPos) {
+            destPos = controller.hoverPos;
+        }
+        if (!destPos) return;
+
+        const radiusPx = Math.max(1, controller.brushSize * width);
+        const dcx = destPos.x * width;
+        const dcy = destPos.y * height;
+
+        ctx.save();
+        ctx.lineWidth = 1.5 / scale;
+        ctx.strokeStyle = "#00aaff";
+        ctx.beginPath();
+        ctx.arc(dcx, dcy, radiusPx, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+
+        if (controller.lockedOffset) {
+            const scx = (destPos.x + controller.lockedOffset.dx) * width;
+            const scy = (destPos.y + controller.lockedOffset.dy) * height;
+
+            ctx.save();
+            ctx.lineWidth = 1.25 / scale;
+            ctx.strokeStyle = "#ffd166";
+            ctx.setLineDash([4 / scale, 3 / scale]);
+            ctx.beginPath();
+            ctx.arc(scx, scy, radiusPx, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    /**
+     * Cercle fin, non rempli, à la position survolée par la souris, de rayon
+     * égal à la taille de pinceau actuelle (même conversion que MaskEngine :
+     * radius normalisé * largeur de l'image).
+     */
+    _drawBrushPreview(ctx, width, height, controller, scale = 1) {
+        const pos = controller.brushPreviewPos;
+        if (!pos) return;
+
+        const cx = pos.x * width;
+        const cy = pos.y * height;
+        const radiusPx = Math.max(1, controller.brushSize * width);
+
+        ctx.save();
+        ctx.lineWidth = 1.5 / scale;
+        ctx.strokeStyle = "#00aaff";
+        ctx.beginPath();
+        ctx.arc(cx, cy, radiusPx, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.restore();
     }
 
@@ -632,20 +830,70 @@ class ImageProcessor {
             ctx.fill();
 
         } else if (mask.type === "brush") {
-            const strokes = mask.geometry.strokes || [];
-            ctx.setLineDash([4 / scale, 3 / scale]);
-            for (const stroke of strokes) {
-                if (!stroke.length) continue;
-                ctx.beginPath();
-                ctx.moveTo(stroke[0].x * width, stroke[0].y * height);
-                for (let i = 1; i < stroke.length; i++) {
-                    ctx.lineTo(stroke[i].x * width, stroke[i].y * height);
-                }
-                ctx.stroke();
-            }
+            this._drawBrushMaskFill(ctx, width, height, mask);
         }
 
         ctx.restore();
+    }
+
+    /**
+     * Aplat semi-transparent rouge épousant la vraie forme peinte (mêmes
+     * bords doux que le traitement réel, via MaskEngine.computeBrushAlpha),
+     * plutôt qu'un simple tracé en pointillés suivant les points bruts.
+     */
+    _drawBrushMaskFill(ctx, width, height, mask) {
+        const strokes = mask.geometry.strokes || [];
+        if (!strokes.length) return;
+
+        // Bounding box réel du masque (tous les points, rayon inclus), pour
+        // ne traiter/dessiner qu'une petite zone plutôt que l'image entière
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const stroke of strokes) {
+            for (const p of stroke) {
+                const r = Math.max(1, p.radius * width);
+                const cx = p.x * width, cy = p.y * height;
+                minX = Math.min(minX, cx - r);
+                maxX = Math.max(maxX, cx + r);
+                minY = Math.min(minY, cy - r);
+                maxY = Math.max(maxY, cy + r);
+            }
+        }
+        if (!isFinite(minX)) return;
+
+        minX = Math.max(0, Math.floor(minX));
+        minY = Math.max(0, Math.floor(minY));
+        maxX = Math.min(width, Math.ceil(maxX));
+        maxY = Math.min(height, Math.ceil(maxY));
+        const boxW = maxX - minX;
+        const boxH = maxY - minY;
+        if (boxW <= 0 || boxH <= 0) return;
+
+        // Alpha réel du masque (même fonction que le traitement de l'image,
+        // donc bords doux selon la dureté, identique au résultat final)
+        const alpha = MaskEngine.computeBrushAlpha(width, height, mask.geometry);
+
+        const imgData = new ImageData(boxW, boxH);
+        const data = imgData.data;
+        const OVERLAY_MAX_ALPHA = 130; // ~50% d'opacité max, convention Lightroom
+
+        for (let y = 0; y < boxH; y++) {
+            for (let x = 0; x < boxW; x++) {
+                const srcIdx = (y + minY) * width + (x + minX);
+                const a = alpha[srcIdx];
+                const dstIdx = (y * boxW + x) * 4;
+                data[dstIdx]     = 255; // rouge
+                data[dstIdx + 1] = 40;
+                data[dstIdx + 2] = 40;
+                data[dstIdx + 3] = Math.round(a * OVERLAY_MAX_ALPHA);
+            }
+        }
+
+        const off = document.createElement("canvas");
+        off.width = boxW;
+        off.height = boxH;
+        off.getContext("2d").putImageData(imgData, 0, 0);
+
+        ctx.drawImage(off, minX, minY);
     }
 }
 

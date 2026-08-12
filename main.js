@@ -2,9 +2,10 @@
     Nikon Picture Control Studio - main1.js (Version Complète avec Persistance)
 =========================================================*/
 
-const { app, BrowserWindow, ipcMain, dialog, Menu, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, screen, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { spawn } = require("child_process");
 const exifr = require('exifr');
 const { exiftool } = require('exiftool-vendored');
 
@@ -17,8 +18,10 @@ const {
     addFolderToCatalog,
     getFullCatalog,
     removeFolderFromCatalog,
+    addSingleFileToCatalog,
     savePhotoSettings,
-    getPhotoSettings
+    getPhotoSettings,
+    getCatalogStats
 } = require("./services/catalogService");
 
 // 🔹 Imports pour le décodage RAW (si disponibles)
@@ -70,6 +73,15 @@ const ALL_IMAGE_EXTENSIONS = [
     "nef", "cr2", "cr3", "raf", "arw", "rw2", "dng", "pef", "orf",
     "jpg", "jpeg", "png", "webp", "tif", "tiff"
 ];
+
+function countFilesInTree(node) {
+    if (!node) return 0;
+    let count = node.files ? node.files.length : 0;
+    if (node.children) {
+        for (const child of node.children) count += countFilesInTree(child);
+    }
+    return count;
+}
 
 function scanDirectoryRecursive(dirPath) {
     const name = path.basename(dirPath);
@@ -174,6 +186,26 @@ function createAppMenu() {
                     click: () => {
                         if (mainWindow) mainWindow.webContents.send("menu-import-backup");
                     }
+                }
+            ]
+        },
+        {
+            label: "Programmes externes",
+            submenu: [
+                {
+                    label: "Configurer...",
+                    click: () => {
+                        if (mainWindow) mainWindow.webContents.send("menu-open-external-programs-config");
+                    }
+                }
+            ]
+        },
+        {
+            label: "Aide",
+            submenu: [
+                {
+                    label: "Bientôt disponible",
+                    enabled: false
                 }
             ]
         }
@@ -351,6 +383,7 @@ function createWindow() {
         ...bounds,
         minWidth: MIN_WINDOW_WIDTH,
         minHeight: MIN_WINDOW_HEIGHT,
+        icon: path.join(__dirname, "assets/icons/pixelraw.ico"),
         webPreferences: {
             preload: path.join(__dirname, "preload.js"),
             contextIsolation: true,
@@ -378,7 +411,9 @@ function createWindow() {
     });
 
     mainWindow.loadFile("renderer/index.html");
-    mainWindow.webContents.openDevTools();
+    if (!app.isPackaged) {
+        mainWindow.webContents.openDevTools();
+    }
     console.log("🪟 Fenêtre principale créée.");
 }
 
@@ -387,6 +422,25 @@ function createWindow() {
 // ============================================================
 
 function setupIpcHandlers() {
+
+    // ============================================================
+    // 🔗 OUVERTURE DE LIENS EXTERNES (navigateur système, pas Electron)
+    // ============================================================
+    const ALLOWED_EXTERNAL_HOSTS = ["www.pixelphotographie.com", "pixelphotographie.com"];
+
+    ipcMain.handle("open-external-link", async (event, url) => {
+        try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== "https:" || !ALLOWED_EXTERNAL_HOSTS.includes(parsed.hostname)) {
+                throw new Error("URL non autorisée");
+            }
+            await shell.openExternal(parsed.toString());
+            return { success: true };
+        } catch (err) {
+            console.error("❌ Erreur ouverture lien externe:", err.message);
+            return { success: false, error: err.message };
+        }
+    });
 
     // ============================================================
     // 📁 GESTION DES FICHIERS ET DOSSIERS
@@ -420,7 +474,11 @@ function setupIpcHandlers() {
         });
 
         if (result.canceled || !result.filePaths.length) return null;
-        return scanDirectoryRecursive(result.filePaths[0]);
+
+        const tree = scanDirectoryRecursive(result.filePaths[0]);
+        console.log(`🔍 Dossier scanné : ${result.filePaths[0]} — ${countFilesInTree(tree)} fichier(s) image`);
+
+        return tree;
     });
 
     ipcMain.handle("read-folder-recursive", async (event, folderPath) => {
@@ -1318,7 +1376,11 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
 
     ipcMain.handle("catalog:add-folder", async (event, folderData) => {
         try {
-            return await addFolderToCatalog(folderData);
+            return await addFolderToCatalog(folderData, (progress) => {
+                if (!event.sender.isDestroyed()) {
+                    event.sender.send("catalog:scan-progress", progress);
+                }
+            });
         } catch (err) {
             console.error("❌ Erreur ajout dossier au catalogue:", err);
             return { success: false, error: err.message };
@@ -1331,6 +1393,15 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
         } catch (err) {
             console.error("❌ Erreur récupération catalogue:", err);
             return [];
+        }
+    });
+
+    ipcMain.handle("catalog:get-stats", async () => {
+        try {
+            return await getCatalogStats();
+        } catch (err) {
+            console.error("❌ Erreur récupération statistiques catalogue:", err);
+            return null;
         }
     });
 
@@ -1649,6 +1720,91 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
             
         } catch (err) {
             console.error("❌ Erreur export JPEG:", err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    // ============================================================
+    // 🖥️ PROGRAMMES EXTERNES ("Ouvrir avec...")
+    // ============================================================
+
+    ipcMain.handle("get-external-programs", async () => {
+        return studioPreferencesStore ? studioPreferencesStore.get("externalPrograms", []) : [];
+    });
+
+    ipcMain.handle("save-external-programs", async (event, programs) => {
+        if (!studioPreferencesStore) return { success: false, error: "Store indisponible" };
+        studioPreferencesStore.set("externalPrograms", Array.isArray(programs) ? programs : []);
+        return { success: true };
+    });
+
+    ipcMain.handle("browse-executable", async () => {
+        const result = await dialog.showOpenDialog(mainWindow, {
+            title: "Sélectionner le programme externe",
+            properties: ["openFile"],
+            filters: [{ name: "Exécutable Windows", extensions: ["exe"] }]
+        });
+
+        if (result.canceled || !result.filePaths.length) return null;
+        return result.filePaths[0];
+    });
+
+    // 🔹 Convention de nommage : <nom>_<programme>.tif, puis <nom>-1_<programme>.tif,
+    // <nom>-2_<programme>.tif... si le fichier existe déjà pour cette photo/ce programme.
+    function generateExternalTiffPath(originalFilePath, programName) {
+        const dir = path.dirname(originalFilePath);
+        const baseName = path.basename(originalFilePath, path.extname(originalFilePath));
+        const slug = (programName || "programme").toLowerCase().replace(/\s+/g, "");
+
+        const firstCandidate = path.join(dir, `${baseName}_${slug}.tif`);
+        if (!fs.existsSync(firstCandidate)) return firstCandidate;
+
+        let n = 1;
+        let candidate;
+        do {
+            candidate = path.join(dir, `${baseName}-${n}_${slug}.tif`);
+            n++;
+        } while (fs.existsSync(candidate));
+
+        return candidate;
+    }
+
+    ipcMain.handle("catalog:add-single-file", async (event, filePath) => {
+        try {
+            return await addSingleFileToCatalog(filePath);
+        } catch (err) {
+            console.error("❌ Erreur catalog:add-single-file:", err);
+            return null;
+        }
+    });
+
+    ipcMain.handle("open-in-external-program", async (event, { imageDataUrl, originalFilePath, programExecPath, programName } = {}) => {
+        try {
+            if (!imageDataUrl || !originalFilePath || !programExecPath) {
+                return { success: false, error: "Paramètres manquants" };
+            }
+            if (!fs.existsSync(programExecPath)) {
+                return { success: false, error: `Programme introuvable : ${programExecPath}` };
+            }
+
+            const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, "");
+            const inputBuffer = Buffer.from(base64Data, "base64");
+
+            const sharp = require("sharp");
+            // Sans perte : compression LZW (pas de ré-encodage JPEG-dans-TIFF)
+            const tiffBuffer = await sharp(inputBuffer, { limitInputPixels: false })
+                .tiff({ compression: "lzw" })
+                .toBuffer();
+
+            const generatedPath = generateExternalTiffPath(originalFilePath, programName);
+            fs.writeFileSync(generatedPath, tiffBuffer);
+
+            const child = spawn(programExecPath, [generatedPath], { detached: true, stdio: "ignore" });
+            child.unref();
+
+            return { success: true, generatedPath };
+        } catch (err) {
+            console.error("❌ Erreur ouverture programme externe:", err);
             return { success: false, error: err.message };
         }
     });

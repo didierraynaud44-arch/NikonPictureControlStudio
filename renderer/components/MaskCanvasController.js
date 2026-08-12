@@ -14,6 +14,7 @@ class MaskCanvasController {
 
         this.brushSize = 0.05;
         this.brushHardness = 0.5;
+        this.brushPreviewPos = null; // {x,y} normalisé (0-1) : dernière position survolée en mode pinceau
         this.onMaskChange = null;
 
         this._boundMouseDown = null;
@@ -27,6 +28,7 @@ class MaskCanvasController {
         this.mode = type;
         this.isDrawing = false;
         this.pendingMask = null;
+        this.brushPreviewPos = null;
         this._setCursor("crosshair");
     }
 
@@ -35,7 +37,9 @@ class MaskCanvasController {
         this.isDrawing = false;
         this.pendingMask = null;
         this.editState = null;
+        this.brushPreviewPos = null;
         this._setCursor();
+        this._renderOverlayOnly();
     }
 
     _setCursor(cursor) {
@@ -282,6 +286,21 @@ class MaskCanvasController {
                     const hit = this._hitTest(activeMask, e.clientX, e.clientY);
                     this._setCursor(this._cursorForHit(hit));
                 }
+            }
+
+            // Aperçu du cercle de pinceau : dès que l'outil Pinceau est actif, avant
+            // même le premier clic (survol seul), pour que la taille choisie soit
+            // visible directement sur la photo.
+            if (this.mode === "brush") {
+                const canvas = this.imageProcessor?.display?.canvas;
+                const rect = canvas ? canvas.getBoundingClientRect() : null;
+                const insideCanvas = rect && (
+                    e.clientX >= rect.left && e.clientX <= rect.right &&
+                    e.clientY >= rect.top && e.clientY <= rect.bottom
+                );
+
+                this.brushPreviewPos = insideCanvas ? this._canvasToNormalized(e.clientX, e.clientY) : null;
+                this._renderOverlayOnly();
             }
         };
 

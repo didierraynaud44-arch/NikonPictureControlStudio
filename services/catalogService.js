@@ -251,7 +251,139 @@ async function extractExifData(filePath) {
 /**
  * Ajoute un dossier et ses photos au catalogue avec EXIF
  */
-async function addFolderToCatalog(folderData) {
+function flattenFolderFiles(node, out = []) {
+    if (!node) return out;
+    if (node.files && node.files.length > 0) out.push(...node.files);
+    if (node.children && node.children.length > 0) {
+        for (const child of node.children) flattenFolderFiles(child, out);
+    }
+    return out;
+}
+
+const INDEX_BATCH_SIZE = 50;
+
+// Sérialise les blocs BEGIN/COMMIT sur la connexion SQLite partagée : SQLite
+// n'autorise pas les transactions imbriquées, et deux imports de dossiers
+// peuvent tourner en même temps (l'utilisateur importe un second dossier
+// avant la fin du premier). Cette file d'attente garantit qu'un seul lot
+// écrit à la fois, sans bloquer l'extraction EXIF des autres imports.
+let dbWriteQueue = Promise.resolve();
+
+function runBatchInTransaction(fn) {
+    const run = async () => {
+        await runAsync("BEGIN TRANSACTION");
+        try {
+            const result = await fn();
+            await runAsync("COMMIT");
+            return result;
+        } catch (err) {
+            await runAsync("ROLLBACK").catch(() => {});
+            throw err;
+        }
+    };
+    const resultPromise = dbWriteQueue.then(run, run);
+    dbWriteQueue = resultPromise.then(() => {}, () => {});
+    return resultPromise;
+}
+
+const INSERT_PHOTO_QUERY = `
+    INSERT OR REPLACE INTO catalog_photos (
+        folder_path, file_path, file_name, thumb_path,
+        picture_control_json, transform_json,
+        make, model, lens, focal_length, aperture,
+        shutter_speed, iso, exposure_compensation,
+        white_balance, color_temperature,
+        date_time_original, date_time_digitized,
+        gps_latitude, gps_longitude, gps_altitude,
+        orientation, flash, exposure_mode,
+        metering_mode, focus_mode,
+        image_width, image_height, color_space,
+        keywords, rating, label, raw_exif,
+        shutter_count,
+        added_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+/**
+ * Indexe un fichier (EXIF + upsert SQLite) et retourne true si réussi.
+ * N'ouvre pas sa propre transaction : appelé à l'intérieur d'un batch.
+ */
+async function indexSingleFile(rootFolderPath, file) {
+    const exifData = await extractExifData(file.path);
+
+    // Conserver les réglages existants (Picture Control / transform)
+    const existing = await getPhotoByPath(file.path);
+    const pictureControlJson = existing?.picture_control_json || null;
+    const transformJson = existing?.transform_json || null;
+
+    const params = [
+        rootFolderPath, file.path, file.name, null,
+        pictureControlJson, transformJson,
+        exifData.make || null, exifData.model || null, exifData.lens || null,
+        exifData.focal_length || null, exifData.aperture || null,
+        exifData.shutter_speed || null, exifData.iso || null,
+        exifData.exposure_compensation || null,
+        exifData.white_balance || null, exifData.color_temperature || null,
+        exifData.date_time_original || null, exifData.date_time_digitized || null,
+        exifData.gps_latitude || null, exifData.gps_longitude || null, exifData.gps_altitude || null,
+        exifData.orientation || 1, exifData.flash ? 1 : 0,
+        exifData.exposure_mode || null, exifData.metering_mode || null, exifData.focus_mode || null,
+        exifData.image_width || null, exifData.image_height || null, exifData.color_space || null,
+        exifData.keywords || null, exifData.rating || null, exifData.label || null,
+        exifData.raw_exif || null, exifData.shutter_count || null,
+        null, null // added_at / updated_at (NULL = CURRENT_TIMESTAMP)
+    ];
+
+    await runAsync(INSERT_PHOTO_QUERY, params);
+}
+
+/**
+ * Ajoute UN SEUL fichier au catalogue (ex : TIFF généré par "Ouvrir avec"),
+ * sans rescanner tout le dossier (contrairement à addFolderToCatalog, qui
+ * réextrait l'EXIF de chaque fichier — trop lent à refaire à chaque export).
+ * Retrouve le dossier racine suivi dans catalog_folders dont filePath est un
+ * descendant (le plus profond en cas d'imbrication), puis indexe ce seul
+ * fichier avec ce folder_path racine — cohérent avec indexSingleFile() /
+ * buildFolderHierarchy() qui reconstruisent l'arborescence à partir de ce champ.
+ * Retourne le catalogue complet à jour, ou null si la photo n'appartient à
+ * aucun dossier suivi (rien à faire) ou en cas d'erreur.
+ */
+async function addSingleFileToCatalog(filePath) {
+    try {
+        const folders = await getFolders();
+        const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+
+        let bestMatch = null;
+        for (const folder of folders) {
+            const rootNormalized = folder.folder_path.replace(/\\/g, '/').toLowerCase();
+            if (normalized === rootNormalized || normalized.startsWith(rootNormalized + '/')) {
+                if (!bestMatch || folder.folder_path.length > bestMatch.folder_path.length) {
+                    bestMatch = folder;
+                }
+            }
+        }
+
+        if (!bestMatch) return null;
+
+        await indexSingleFile(bestMatch.folder_path, {
+            name: path.basename(filePath),
+            path: filePath
+        });
+
+        return await getFullCatalog();
+    } catch (err) {
+        console.error("❌ Erreur addSingleFileToCatalog:", err);
+        return null;
+    }
+}
+
+/**
+ * Ajoute un dossier et ses photos au catalogue avec EXIF.
+ * Traite les fichiers par lots (transaction groupée) pour rester rapide sur
+ * les gros dossiers, et notifie onProgress après chaque lot pour permettre
+ * un affichage de progression côté renderer.
+ */
+async function addFolderToCatalog(folderData, onProgress) {
     if (!folderData || !folderData.path) return null;
 
     try {
@@ -261,113 +393,40 @@ async function addFolderToCatalog(folderData) {
             [folderData.path, folderData.name]
         );
 
-        console.log(`📂 Indexation du dossier: ${folderData.name}`);
+        const allFiles = flattenFolderFiles(folderData);
+        const total = allFiles.length;
+        console.log(`📂 Indexation du dossier "${folderData.name}" : ${total} fichier(s)`);
 
-        let indexedCount = 0;
-        let totalFiles = 0;
+        let indexed = 0;
+        if (typeof onProgress === "function") {
+            onProgress({ indexed: 0, total, currentFile: "", folderName: folderData.name });
+        }
 
-        const processNode = async (node) => {
-            if (node.files && node.files.length > 0) {
-                for (const file of node.files) {
-                    totalFiles++;
+        for (let i = 0; i < allFiles.length; i += INDEX_BATCH_SIZE) {
+            const batch = allFiles.slice(i, i + INDEX_BATCH_SIZE);
+
+            await runBatchInTransaction(async () => {
+                for (const file of batch) {
                     try {
-                        // Extraire les EXIF
-                        const exifData = await extractExifData(file.path);
-                        
-                        // Vérifier si la photo existe déjà
-                        const existing = await getPhotoByPath(file.path);
-                        
-                        // Conserver les réglages existants
-                        let pictureControlJson = existing?.picture_control_json || null;
-                        let transformJson = existing?.transform_json || null;
-
-                        // 🔥 REQUÊTE CORRECTE - 36 colonnes
-                        const query = `
-                            INSERT OR REPLACE INTO catalog_photos (
-                                folder_path, file_path, file_name, thumb_path,
-                                picture_control_json, transform_json,
-                                make, model, lens, focal_length, aperture,
-                                shutter_speed, iso, exposure_compensation,
-                                white_balance, color_temperature,
-                                date_time_original, date_time_digitized,
-                                gps_latitude, gps_longitude, gps_altitude,
-                                orientation, flash, exposure_mode,
-                                metering_mode, focus_mode,
-                                image_width, image_height, color_space,
-                                keywords, rating, label, raw_exif,
-                                shutter_count,
-                                added_at, updated_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        `;
-
-                        // 🔥 PARAMÈTRES - 36 valeurs
-                        const params = [
-                            folderData.path,                         // 1. folder_path
-                            file.path,                               // 2. file_path
-                            file.name,                               // 3. file_name
-                            null,                                    // 4. thumb_path
-                            pictureControlJson,                      // 5. picture_control_json
-                            transformJson,                           // 6. transform_json
-                            exifData.make || null,                   // 7. make
-                            exifData.model || null,                  // 8. model
-                            exifData.lens || null,                   // 9. lens
-                            exifData.focal_length || null,           // 10. focal_length
-                            exifData.aperture || null,               // 11. aperture
-                            exifData.shutter_speed || null,          // 12. shutter_speed
-                            exifData.iso || null,                    // 13. iso
-                            exifData.exposure_compensation || null,  // 14. exposure_compensation
-                            exifData.white_balance || null,          // 15. white_balance
-                            exifData.color_temperature || null,      // 16. color_temperature
-                            exifData.date_time_original || null,     // 17. date_time_original
-                            exifData.date_time_digitized || null,    // 18. date_time_digitized
-                            exifData.gps_latitude || null,           // 19. gps_latitude
-                            exifData.gps_longitude || null,          // 20. gps_longitude
-                            exifData.gps_altitude || null,           // 21. gps_altitude
-                            exifData.orientation || 1,               // 22. orientation
-                            exifData.flash ? 1 : 0,                  // 23. flash
-                            exifData.exposure_mode || null,          // 24. exposure_mode
-                            exifData.metering_mode || null,          // 25. metering_mode
-                            exifData.focus_mode || null,             // 26. focus_mode
-                            exifData.image_width || null,            // 27. image_width
-                            exifData.image_height || null,           // 28. image_height
-                            exifData.color_space || null,            // 29. color_space
-                            exifData.keywords || null,               // 30. keywords
-                            exifData.rating || null,                 // 31. rating
-                            exifData.label || null,                  // 32. label
-                            exifData.raw_exif || null,               // 33. raw_exif
-                            exifData.shutter_count || null,          // 34. shutter_count
-                            null,                                    // 35. added_at (NULL = CURRENT_TIMESTAMP)
-                            null                                     // 36. updated_at (NULL = CURRENT_TIMESTAMP)
-                        ];
-
-                        // Vérifier le nombre de paramètres
-                        if (params.length !== 36) {
-                            console.error(`❌ Erreur: ${params.length} valeurs pour 36 colonnes`);
-                            continue;
-                        }
-
-                        await runAsync(query, params);
-                        indexedCount++;
-
-                        if (indexedCount % 10 === 0) {
-                            console.log(`   📸 ${indexedCount} photos indexées...`);
-                        }
+                        await indexSingleFile(folderData.path, file);
+                        indexed++;
                     } catch (err) {
                         console.error(`❌ Erreur indexation ${file.name}:`, err.message);
                     }
                 }
+            });
+
+            if (typeof onProgress === "function") {
+                onProgress({
+                    indexed,
+                    total,
+                    currentFile: batch[batch.length - 1]?.name || "",
+                    folderName: folderData.name
+                });
             }
+        }
 
-            if (node.children && node.children.length > 0) {
-                for (const child of node.children) {
-                    await processNode(child);
-                }
-            }
-        };
-
-        await processNode(folderData);
-
-        console.log(`✅ Indexation terminée: ${indexedCount}/${totalFiles} photos avec EXIF`);
+        console.log(`✅ Indexation terminée : ${indexed}/${total} photos`);
         return await getFullCatalog();
     } catch (err) {
         console.error("❌ Erreur ajout catalogue :", err);
@@ -739,6 +798,7 @@ module.exports = {
     getCatalogStats,
     getFullCatalog,
     removeFolderFromCatalog,
+    addSingleFileToCatalog,
     savePhotoSettings,
     getPhotoSettings,
     saveTransform,

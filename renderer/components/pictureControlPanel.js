@@ -33,7 +33,7 @@ function miniSlider(label, field, value, min, max, step) {
     <div class="pc-mini-slider" data-row="${field}">
         <div class="pc-mini-label">
             <span>${label}</span>
-            <span class="pc-value" data-value-for="${field}">${value ?? 0}</span>
+            <span class="control-value" data-value-for="${field}">${value ?? 0}</span>
         </div>
         <input class="pc-slider" data-field="${field}" type="range" min="${min}" max="${max}" value="${value ?? 0}" step="${step}">
     </div>`;
@@ -68,7 +68,7 @@ function buildNP3SectionHtml(pc) {
     return `
         <div id="np3ExtendedSection" style="margin-top: 20px;">
             <hr style="border: 0; border-top: 2px solid #5865f2; margin: 15px 0;">
-            <h3 style="color:#5865f2;">🎨 Réglages NP3 (Flexible Color)</h3>
+            <h3 style="color:#5865f2;">${window.lucideIconHtml("palette", { size: 15 })} Réglages NP3 (Flexible Color)</h3>
             <p style="font-size:11px; color:#949ba4; margin-bottom:10px;">
                 Ignorés lors d'un export .NCP — pris en compte uniquement pour l'export .NP3 (Z50 II / EXPEED 7).
             </p>
@@ -94,7 +94,7 @@ function createSlider(label, field, value, min, max, step = 1) {
     <div class="pc-row" data-row="${field}">
         <div class="pc-label">
             <span>${label}</span>
-            <span class="pc-value" data-value-for="${field}">${value}</span>
+            <span class="control-value" data-value-for="${field}">${value}</span>
         </div>
         <input
             class="pc-slider"
@@ -150,7 +150,7 @@ function buildSortFilterHtml() {
             <select id="sortBySelect" style="flex:1; background:#222; color:#fff; border:1px solid #555; padding:4px 6px; border-radius:4px; font-size: 11px;">
                 ${sortOptions}
             </select>
-            <button type="button" id="btnSortDir" data-dir="${state.sortDir}" class="btn-tool" style="padding: 3px 8px; font-size: 11px;" title="Inverser l'ordre du tri">${state.sortDir === "desc" ? "⬇️" : "⬆️"}</button>
+            <button type="button" id="btnSortDir" data-dir="${state.sortDir}" class="btn-tool" style="padding: 3px 8px; font-size: 11px;" title="Inverser l'ordre du tri">${window.lucideIconHtml(state.sortDir === "desc" ? "arrow-down" : "arrow-up", { size: 13 })}</button>
         </div>
 
         <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
@@ -174,12 +174,12 @@ function buildPanelHtml(pc, compact, extendedNP3) {
     return `
         ${compact ? "" : `
         <div class="scope-banner scope-global" style="margin-bottom: 12px;">
-            🌍 Réglages GLOBAUX — s'appliquent à <b>toute l'image</b>
+            ${window.lucideIconHtml("globe", { size: 13 })} Réglages GLOBAUX — s'appliquent à <b>toute l'image</b>
         </div>
         `}
 
         <div class="pc-row" style="margin-bottom: 12px;">
-            <label style="font-weight: bold;">Profil :</label>
+            <label style="font-weight: bold; font-size: 12px;">Profil :</label>
             <select data-field="pcProfileSelect" class="pc-select" style="background:#222; color:#fff; border:1px solid #555; padding:4px 8px; border-radius:4px;">
                 <option value="Standard" ${currentName === 'Standard' ? 'selected' : ''}>Standard</option>
                 <option value="Neutral" ${currentName === 'Neutral' ? 'selected' : ''}>Neutre</option>
@@ -210,7 +210,7 @@ function buildPanelHtml(pc, compact, extendedNP3) {
         ${compact ? "" : `
         <div style="margin-bottom: 15px; background: #1e1f22; padding: 10px; border-radius: 6px; border: 1px solid #35373c;">
             <h4 style="color: #5865f2; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">
-                🌡️ Balance des Blancs
+                ${window.lucideIconHtml("thermometer", { size: 12 })} Balance des Blancs
             </h4>
             ${createSlider("Température", "wbTemperature", pc.wbTemperature ?? 0, -100, 100, 1)}
             ${createSlider("Teinte (Tint)", "wbTint", pc.wbTint ?? 0, -100, 100, 1)}
@@ -218,10 +218,10 @@ function buildPanelHtml(pc, compact, extendedNP3) {
         `}
 
         <div data-block="monochrome" style="display: ${isMono ? 'block' : 'none'}; background: #2a2a2a; padding: 10px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #444;">
-            <h4 style="margin-top:0; color: #e0e0e0;">📷 Options Monochrome</h4>
+            <h4 style="margin-top:0; color: #e0e0e0; font-size: 12px;">${window.lucideIconHtml("camera", { size: 13 })} Options Monochrome</h4>
 
             <div class="pc-row" style="margin-bottom: 8px;">
-                <label>Filtre optique :</label>
+                <label style="font-size: 12px;">Filtre optique :</label>
                 <select data-field="filterEffect" class="pc-select" style="background:#111; color:#fff; border:1px solid #555; padding:3px;">
                     <option value="OFF" ${pc.filterEffect === 'OFF' ? 'selected' : ''}>Neutre (OFF)</option>
                     <option value="YELLOW" ${pc.filterEffect === 'YELLOW' ? 'selected' : ''}>Jaune (Y)</option>
@@ -232,7 +232,7 @@ function buildPanelHtml(pc, compact, extendedNP3) {
             </div>
 
             <div class="pc-row" style="margin-bottom: 8px;">
-                <label>Virage :</label>
+                <label style="font-size: 12px;">Virage :</label>
                 <select data-field="toningEffect" class="pc-select" style="background:#111; color:#fff; border:1px solid #555; padding:3px;">
                     <option value="B&W" ${pc.toningEffect === 'B&W' ? 'selected' : ''}>N&B Pur</option>
                     <option value="SEPIA" ${pc.toningEffect === 'SEPIA' ? 'selected' : ''}>Sépia</option>
@@ -245,7 +245,7 @@ function buildPanelHtml(pc, compact, extendedNP3) {
             </div>
 
             <div class="pc-row">
-                <label>Intensité virage : <span data-value-for="toningAmount">${pc.toningAmount || 1}</span></label>
+                <label style="font-size: 12px;">Intensité virage : <span class="control-value" data-value-for="toningAmount">${pc.toningAmount || 1}</span></label>
                 <input type="range" class="pc-slider" data-field="toningAmount" min="1" max="7" step="1" value="${pc.toningAmount || 1}">
             </div>
         </div>
@@ -260,16 +260,16 @@ function buildPanelHtml(pc, compact, extendedNP3) {
 
         ${compact ? "" : `
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
-        <h3 style="margin-bottom: 10px;">Exposition</h3>
+        <h3 style="margin-bottom: 10px; font-size: 13px;">Exposition</h3>
         ${createSlider("Exposition (EV)", "exposure", pc.exposure ?? 0, -3, 3, 0.05)}
 
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
-        <h3 style="margin-bottom: 10px;">Point noir &amp; Point blanc</h3>
+        <h3 style="margin-bottom: 10px; font-size: 13px;">Point noir &amp; Point blanc</h3>
         ${createSlider("Point noir", "blackPoint", pc.blackPoint ?? 0, 0, 250, 1)}
         ${createSlider("Point blanc", "whitePoint", pc.whitePoint ?? 255, 5, 255, 1)}
 
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
-        <h3 style="margin-bottom: 10px;">Traitement de l'image</h3>
+        <h3 style="margin-bottom: 10px; font-size: 13px;">Traitement de l'image</h3>
         ${createSlider("Hautes lumières", "highlights", pc.highlights ?? 0, -5, 5, 0.1)}
         ${createSlider("Ombres", "shadows", pc.shadows ?? 0, -5, 5, 0.1)}
         ${createSlider("Correction du voile", "dehaze", pc.dehaze ?? 0, 0, 10, 0.1)}
@@ -284,7 +284,7 @@ function buildPanelHtml(pc, compact, extendedNP3) {
         ${createSlider("Réduction du bruit", "denoise", pc.denoise ?? 0, 0, 5, 0.1)}
 
         <div class="pc-row" style="margin-top: 10px;">
-            <label>Correction de l'objectif :</label>
+            <label style="font-size: 12px;">Correction de l'objectif :</label>
             <input type="checkbox" data-field="lensCorrection" class="pc-checkbox" ${pc.lensCorrection ? 'checked' : ''}>
         </div>
         `}
@@ -348,8 +348,10 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
     const isMono = currentPC.isMonochrome === true || resolveProfileName(currentPC) === "Monochrome";
     const satRow = container.querySelector('[data-row="saturation"]');
     const hueRow = container.querySelector('[data-row="hue"]');
-    if (satRow) satRow.style.display = isMono ? "none" : "flex";
-    if (hueRow) hueRow.style.display = isMono ? "none" : "flex";
+    // "" (pas "flex") : .pc-row retombe sur son display:block par défaut, identique
+    // aux autres curseurs — "flex" cassait la largeur de .pc-label (voir ci-dessous).
+    if (satRow) satRow.style.display = isMono ? "none" : "";
+    if (hueRow) hueRow.style.display = isMono ? "none" : "";
 
     let toneCurveWidget = null;
     if (!compact && window.ToneCurveWidget) {
@@ -502,7 +504,7 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         btnSortDir.addEventListener("click", () => {
             const newDir = btnSortDir.dataset.dir === "desc" ? "asc" : "desc";
             btnSortDir.dataset.dir = newDir;
-            btnSortDir.textContent = newDir === "desc" ? "⬇️" : "⬆️";
+            btnSortDir.innerHTML = window.lucideIconHtml(newDir === "desc" ? "arrow-down" : "arrow-up", { size: 13 });
             applyGridFilterSort();
         });
     }
@@ -557,8 +559,8 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             const satRow2 = container.querySelector('[data-row="saturation"]');
             const hueRow2 = container.querySelector('[data-row="hue"]');
             if (monoBlock) monoBlock.style.display = isMonoSel ? "block" : "none";
-            if (satRow2) satRow2.style.display = isMonoSel ? "none" : "flex";
-            if (hueRow2) hueRow2.style.display = isMonoSel ? "none" : "flex";
+            if (satRow2) satRow2.style.display = isMonoSel ? "none" : "";
+            if (hueRow2) hueRow2.style.display = isMonoSel ? "none" : "";
 
             if (toneCurveWidget) toneCurveWidget.reset();
 

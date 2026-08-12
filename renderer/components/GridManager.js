@@ -203,12 +203,17 @@ class GridManager {
 
         this.images = filtered;
         this.renderGrid();
+
+        if (typeof window.updateFooterCatalogStats === "function") {
+            window.updateFooterCatalogStats();
+        }
     }
 
     _buildStarsHtml(rating) {
         let html = "";
         for (let i = 1; i <= 5; i++) {
-            html += `<span class="grid-star${i <= rating ? " filled" : ""}" data-value="${i}">${i <= rating ? "★" : "☆"}</span>`;
+            const filled = i <= rating;
+            html += `<span class="grid-star${filled ? " filled" : ""}" data-value="${i}">${window.lucideIconHtml("star", { size: 13, filled })}</span>`;
         }
         return html;
     }
@@ -224,7 +229,7 @@ class GridManager {
         starEls.forEach((el, idx) => {
             const filled = (idx + 1) <= newRating;
             el.classList.toggle("filled", filled);
-            el.textContent = filled ? "★" : "☆";
+            el.innerHTML = window.lucideIconHtml("star", { size: 13, filled });
         });
 
         if (window.electronAPI && typeof window.electronAPI.setPhotoRating === "function") {
@@ -292,14 +297,14 @@ class GridManager {
             card.innerHTML = `
                 <input type="checkbox" class="grid-checkbox" ${this.selectedIds.has(item.id) ? "checked" : ""}>
                 <div class="grid-card-thumb" id="thumb_${item.id}">
-                    <span class="grid-card-icon">⌛</span>
+                    <span class="grid-card-icon">${window.lucideIconHtml("loader-circle", { size: 20, className: "icon-spin" })}</span>
                     <span class="grid-card-name" title="${item.name}">${displayName}</span>
                 </div>
                 <div class="grid-card-rating-bar">
                     <div class="grid-stars">${this._buildStarsHtml(status.rating)}</div>
                     <div class="grid-card-flags">
-                        <button type="button" class="grid-flag-btn grid-flag-validated${status.flag === "validated" ? " active" : ""}" title="Validée">✓</button>
-                        <button type="button" class="grid-flag-btn grid-flag-rejected${status.flag === "rejected" ? " active" : ""}" title="Rejetée">✕</button>
+                        <button type="button" class="grid-flag-btn grid-flag-validated${status.flag === "validated" ? " active" : ""}" title="Validée">${window.lucideIconHtml("check", { size: 12 })}</button>
+                        <button type="button" class="grid-flag-btn grid-flag-rejected${status.flag === "rejected" ? " active" : ""}" title="Rejetée">${window.lucideIconHtml("x", { size: 12 })}</button>
                     </div>
                 </div>
                 <div class="grid-card-overlay-title" title="${item.name}">${displayName}</div>

@@ -2,36 +2,41 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Nikon Picture Control Studio</title>
+    <title>Pixel RAW</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="../assets/icons/pixelraw.ico">
 </head>
 <body>
 
     <!-- En-tête Dynamique -->
     <header class="app-header">
         <div style="display: flex; align-items: center; gap: 10px;">
-            <h1>Nikon Picture Control Studio</h1>
+            <h1>Pixel RAW</h1>
         </div>
 
         <!-- Actions Vue 1 (Studio) -->
         <div id="header-studio-actions" class="header-buttons">
-            <button id="exportJpg" class="btn-action btn-success" style="display: none;">📸 Exporter JPG</button>
-            <button id="btnViewPrint" class="btn-tool" title="Module d'impression">🖨️ Impression</button>
-            <button id="btnFullscreen" class="btn-tool" title="Plein écran">⛶</button>
+            <button id="exportJpg" class="btn-action btn-success" style="display: none;" data-icon="image-down">Exporter JPG</button>
+            <div style="position: relative;">
+                <button id="btnOpenWith" class="btn-tool" title="Ouvrir avec un programme externe" data-icon="upload">Ouvrir avec</button>
+                <div id="openWithDropdown" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:220px; background:#202124; border:1px solid #3c4043; border-radius:6px; padding:6px; z-index:9998; box-shadow:0 4px 12px rgba(0,0,0,0.4);"></div>
+            </div>
+            <button id="btnViewPrint" class="btn-tool" title="Module d'impression" data-icon="printer">Impression</button>
+            <button id="btnFullscreen" class="btn-tool" title="Plein écran" data-icon="maximize"></button>
         </div>
 
         <!-- Actions Vue 2 (Gestionnaire) -->
         <div id="header-profile-actions" class="header-buttons" style="display: none;">
-            <button id="openNP3" class="btn-primary">📂 Importer un NP3</button>
-            <button id="saveNP3" class="btn-action">💾 Exporter pour Z50 II (.NP3)</button>
-            <button id="exportNCP" class="btn-action">💾 Exporter pour Z6 II (.NCP)</button>
-            <button id="btnViewPrintFromProfile" class="btn-tool" title="Module d'impression">🖨️ Impression</button>
+            <button id="openNP3" class="btn-primary" data-icon="folder-open">Importer un NP3</button>
+            <button id="saveNP3" class="btn-action" data-icon="save">Exporter pour Z50 II (.NP3)</button>
+            <button id="exportNCP" class="btn-action" data-icon="save">Exporter pour Z6 II (.NCP)</button>
+            <button id="btnViewPrintFromProfile" class="btn-tool" title="Module d'impression" data-icon="printer">Impression</button>
         </div>
 
         <!-- Actions Vue 3 (Impression) -->
         <div id="header-print-actions" class="header-buttons" style="display: none;">
-            <button id="btnPrintExecute" class="btn-primary">🖨️ Lancer l'impression</button>
-            <button id="btnBackToStudio" class="btn-tool">🖼️ Retour Studio</button>
+            <button id="btnPrintExecute" class="btn-primary" data-icon="printer">Lancer l'impression</button>
+            <button id="btnBackToStudio" class="btn-tool" data-icon="image">Retour Studio</button>
         </div>
     </header>
 
@@ -43,14 +48,25 @@
             <h2 style="font-size: 15px; color: #fff; margin: 0 0 10px 0; border-bottom: 1px solid #444; padding-bottom: 6px;">Catalogue</h2>
             
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h3 style="margin: 0; font-size: 13px; color: #ccc;">📁 Dossiers Photos</h3>
+                <h3 style="margin: 0; font-size: 13px; color: #ccc;" data-icon="folder">Dossiers Photos</h3>
                 <div style="display: flex; gap: 4px;">
-                    <button id="btnStudioOpenFolder" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Importer un dossier">＋ Ouvrir</button>
-                    <button id="btnExportCatalogBackup" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Sauvegarder le catalogue (.db)">💾</button>
-                    <button id="btnImportCatalogBackup" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Restaurer une sauvegarde du catalogue (.db)">📥</button>
+                    <button id="btnStudioOpenFolder" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Importer un dossier" data-icon="folder-open">Ouvrir</button>
+                    <button id="btnExportCatalogBackup" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Sauvegarder le catalogue (.db)" data-icon="save"></button>
+                    <button id="btnImportCatalogBackup" class="btn-tool" style="padding: 3px 6px; font-size: 11px;" title="Restaurer une sauvegarde du catalogue (.db)" data-icon="download"></button>
                 </div>
             </div>
-            
+
+            <!-- Indicateur de progression pendant l'import/indexation d'un dossier -->
+            <div id="studioImportProgress" style="display:none; margin-bottom: 8px; font-size: 11px; color: #ccc;">
+                <div style="display:flex; align-items:center; gap:5px; margin-bottom: 3px;">
+                    <span id="studioImportProgressIcon" data-icon="loader-circle" class="icon-spin" style="display:inline-flex; color:#5865f2;"></span>
+                    <span id="studioImportProgressText" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Indexation en cours, veuillez patienter...</span>
+                </div>
+                <div style="background:#333; border-radius: 3px; height: 6px; overflow: hidden;">
+                    <div id="studioImportProgressBar" style="background:#5865f2; height:100%; width:0%; transition: width 0.15s;"></div>
+                </div>
+            </div>
+
             <!-- Zone de l'arborescence des répertoires et fichiers -->
             <div id="studioFolderTree" class="folder-tree-container" style="flex: 1; overflow-y: auto; background: #1e1e1e; border: 1px solid #333; border-radius: 4px; padding: 6px;">
                 <p style="color:#777; font-size:11px; font-style:italic; padding:8px; margin:0;">Aucun dossier importé</p>
@@ -62,8 +78,8 @@
             <!-- Barre de mode d'affichage unique avec le curseur de taille -->
             <div class="view-mode-toolbar">
                 <div class="view-mode-switch">
-                    <button id="btnViewSingle" class="btn-tool active" title="Affichage unique">🖼️ Photo</button>
-                    <button id="btnViewGrid" class="btn-tool" title="Affichage galerie">⣿ Galerie (<span id="selectedCount">0</span>)</button>
+                    <button id="btnViewSingle" class="btn-tool active" title="Affichage unique" data-icon="image">Photo</button>
+                    <button id="btnViewGrid" class="btn-tool" title="Affichage galerie" data-icon="layout-grid">Galerie (<span id="selectedCount">0</span>)</button>
                 </div>
 
                 <!-- 🔍 Curseur de taille des vignettes (visible uniquement en mode Galerie) -->
@@ -83,8 +99,8 @@
                 </div>
 
                 <div class="view-mode-actions">
-                    <button id="btnBatchExport" class="btn-tool btn-primary" style="display: none;">
-                        💾 Exporter la sélection
+                    <button id="btnBatchExport" class="btn-tool btn-primary" style="display: none;" data-icon="save">
+                        Exporter la sélection
                     </button>
                 </div>
             </div>
@@ -92,7 +108,7 @@
             <!-- Mode Photo Seule (Actuel) -->
             <div id="singleImageContainer" class="canvas-container" style="position: relative;">
                 <!-- Flèche Gauche -->
-                <button class="studio-nav-btn studio-prev-btn" onclick="navigateStudioPhoto(-1)" title="Photo précédente (Flèche gauche)">❮</button>
+                <button class="studio-nav-btn studio-prev-btn" onclick="navigateStudioPhoto(-1)" title="Photo précédente (Flèche gauche)" data-icon="chevron-left" data-icon-size="20"></button>
                 
                 <div class="canvas-stack">
                     <canvas id="previewCanvas"></canvas>
@@ -100,21 +116,21 @@
                 </div>
 
                 <!-- Flèche Droite -->
-                <button class="studio-nav-btn studio-next-btn" onclick="navigateStudioPhoto(1)" title="Photo suivante (Flèche droite)">❯</button>
+                <button class="studio-nav-btn studio-next-btn" onclick="navigateStudioPhoto(1)" title="Photo suivante (Flèche droite)" data-icon="chevron-right" data-icon-size="20"></button>
             </div>
 
             <!-- Barre de notation (étoiles + statut) de la photo affichée en Vue Photo -->
             <div id="ratingBar" class="rating-bar">
                 <div class="rating-stars" id="ratingStars">
-                    <span class="star" data-value="1">☆</span>
-                    <span class="star" data-value="2">☆</span>
-                    <span class="star" data-value="3">☆</span>
-                    <span class="star" data-value="4">☆</span>
-                    <span class="star" data-value="5">☆</span>
+                    <span class="star" data-value="1" data-icon="star" data-icon-size="18"></span>
+                    <span class="star" data-value="2" data-icon="star" data-icon-size="18"></span>
+                    <span class="star" data-value="3" data-icon="star" data-icon-size="18"></span>
+                    <span class="star" data-value="4" data-icon="star" data-icon-size="18"></span>
+                    <span class="star" data-value="5" data-icon="star" data-icon-size="18"></span>
                 </div>
                 <div class="rating-flags">
-                    <button id="btnFlagValidated" type="button" class="flag-btn flag-validated" title="Marquer comme validée">✓ Validée</button>
-                    <button id="btnFlagRejected" type="button" class="flag-btn flag-rejected" title="Marquer comme rejetée">✕ Rejetée</button>
+                    <button id="btnFlagValidated" type="button" class="flag-btn flag-validated" title="Marquer comme validée" data-icon="check">Validée</button>
+                    <button id="btnFlagRejected" type="button" class="flag-btn flag-rejected" title="Marquer comme rejetée" data-icon="x">Rejetée</button>
                 </div>
             </div>
 
@@ -133,6 +149,7 @@
     <span id="exifLens" style="color:#a8dab5;">-</span>
     <span style="color:#555;">|</span>
     <span id="exifParams" style="color:#fdd663;">-</span>
+    <span id="exifShutterBadge" style="display:none; align-items:center; gap:4px; color:#fdd663; margin-left:8px;"></span>
 </div>
         </section>
 
@@ -140,6 +157,7 @@
         <aside class="sidebar-panel">
             <div id="pictureControlStatus" class="card-panel"></div>
             <div id="masksPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
+            <div id="retouchPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
 
             <!-- Panneau Outils de Rotation & Miroir -->
             <div class="panel-section card-panel" id="panel-rotation" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #333;">
@@ -147,10 +165,10 @@
                 
                 <!-- Boutons d'action rapide -->
                 <div class="rotation-buttons" style="display: flex; gap: 6px; margin-bottom: 12px;">
-                    <button id="btnRotateLeft" class="btn-tool" title="Rotation 90° Gauche">⟲ -90°</button>
-                    <button id="btnRotateRight" class="btn-tool" title="Rotation 90° Droite">⟳ +90°</button>
-                    <button id="btnFlipH" class="btn-tool" title="Inversion Horizontale">⇄ Miroir H</button>
-                    <button id="btnFlipV" class="btn-tool" title="Inversion Verticale">⇅ Miroir V</button>
+                    <button id="btnRotateLeft" class="btn-tool" title="Rotation 90° Gauche" data-icon="rotate-ccw">-90°</button>
+                    <button id="btnRotateRight" class="btn-tool" title="Rotation 90° Droite" data-icon="rotate-cw">+90°</button>
+                    <button id="btnFlipH" class="btn-tool" title="Inversion Horizontale" data-icon="flip-horizontal-2">Miroir H</button>
+                    <button id="btnFlipV" class="btn-tool" title="Inversion Verticale" data-icon="flip-vertical-2">Miroir V</button>
                 </div>
 
                 <!-- Ajustement fin avec curseur et saisie numérique -->
@@ -206,7 +224,7 @@
 
         <!-- Colonne Droite : Paramètres d'impression -->
         <aside class="sidebar-panel" style="width: 400px; min-width: 400px;">
-            <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 15px; color: #5865f2; border-bottom: 1px solid #333; padding-bottom: 6px;">🖨️ Paramètres d'Impression</h3>
+            <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 15px; color: #5865f2; border-bottom: 1px solid #333; padding-bottom: 6px;" data-icon="printer">Paramètres d'Impression</h3>
 
             <div class="control-group" style="margin-bottom: 14px;">
                 <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px; color: #aaa;">Format de papier :</label>
@@ -335,13 +353,19 @@
     </main>
 
     <!-- Pied de page (visible sur toutes les vues) -->
-    <footer id="appFooter" class="app-footer"></footer>
+    <footer id="appFooter" class="app-footer">
+        <div class="app-footer-left">
+            Pixel RAW 2026 · Auteur : Didier Raynaud · Site :
+            <a id="footerSiteLink" href="https://www.pixelphotographie.com" target="_blank" rel="noopener noreferrer">pixelphotographie.com</a>
+        </div>
+        <div class="app-footer-right" id="footerCatalogStats">0 photo</div>
+    </footer>
 
     <!-- MODALE D'EXPORTATION CONFIGURABLE -->
     <div id="exportModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
-        <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:460px; color:#e8eaed; font-family:sans-serif;">
-            <button id="btnCloseExportModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer">✕</button>
-            <h3 style="margin-top:0; color:#5865f2; font-size:16px;">📤 Exporter l'image</h3>
+        <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:460px; color:#e8eaed;">
+            <button id="btnCloseExportModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer" data-icon="x"></button>
+            <h3 style="margin-top:0; color:#5865f2; font-size:16px;" data-icon="upload">Exporter l'image</h3>
             <div style="margin-bottom:12px;">
                 <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:4px;">1. Dossier de destination :</label>
                 <div style="display:flex; gap:6px;">
@@ -396,6 +420,31 @@
         </div>
     </div>
 
+    <!-- MODALE CONFIGURATION DES PROGRAMMES EXTERNES -->
+    <div id="externalProgramsModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
+        <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:440px; color:#e8eaed;">
+            <button id="btnCloseExternalProgramsModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer" data-icon="x"></button>
+            <h3 style="margin-top:0; color:#5865f2; font-size:16px;" data-icon="upload">Programmes externes</h3>
+            <p style="font-size:11px; color:#949ba4; margin-bottom:12px;">
+                "Ouvrir avec" génère un TIFF sans perte (réglages + masques + retouches appliqués) dans le dossier de la photo, puis lance le programme dessus.
+            </p>
+
+            <div id="externalProgramsList" style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;"></div>
+
+            <div id="externalProgramAddRow" style="display:none; gap:6px; margin-bottom:12px;">
+                <input type="text" id="externalProgramNameInput" placeholder="Nom (ex : Photoshop)" style="flex:1; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px; font-size:12px;">
+                <button id="btnBrowseExternalProgram" style="background:#3c4043; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px;">Parcourir...</button>
+                <button id="btnCancelAddExternalProgram" style="background:transparent; border:1px solid #555; color:#fff; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:12px;">Annuler</button>
+            </div>
+
+            <button id="btnAddExternalProgram" style="background:#5865f2; border:none; color:#fff; padding:6px 14px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px;">+ Ajouter</button>
+        </div>
+    </div>
+
+    <!-- Icônes (Lucide, extraites localement - voir renderer/assets/icons) -->
+    <script src="assets/icons/lucide-icons.js"></script>
+    <script src="assets/icons/hydrate-icons.js"></script>
+
     <!-- Core Scripts -->
     <script src="core/ImageBuffer.js"></script>
     <script src="core/DisplayCanvas.js"></script>
@@ -437,8 +486,14 @@
     <script src="core/MasksManager.js"></script>
     <script src="components/MaskCanvasController.js"></script>
     <script src="components/masksPanel.js"></script>
+
+    <!-- Retouche (tampon de duplication, fusion Poisson) -->
+    <script src="core/HealEngine.js"></script>
+    <script src="components/RetouchManager.js"></script>
+    <script src="components/RetouchCanvasController.js"></script>
+    <script src="components/retouchPanel.js"></script>
+
 	<script src="components/PrintManager.js"></script>
-    <script src="catalogRenderer.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

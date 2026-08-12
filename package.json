@@ -1,6 +1,6 @@
 {
-  "name": "nikon-picture-control-studio",
-  "version": "0.2.25",
+  "name": "PixelRaw",
+  "version": "0.2.26",
   "description": "Éditeur Nikon Picture Control",
   "main": "main.js",
   "scripts": {
@@ -12,7 +12,7 @@
   "license": "MIT",
   "build": {
     "appId": "com.didierraynaud.nikonpcstudio",
-    "productName": "Nikon Picture Control Studio",
+    "productName": "Pixel Raw",
     "directories": {
       "output": "dist"
     },
@@ -43,19 +43,23 @@
       "target": [
         "nsis",
         "portable"
-      ]
+      ],
+      "icon": "assets/icons/pixelraw.ico"
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
       "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "Nikon PC Studio"
+      "createStartMenuShortcut": true,
+      "runAfterFinish": false
     }
   },
   "devDependencies": {
     "electron": "^37.10.3",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "lucide": "^1.31.0"
   },
   "dependencies": {
     "electron-store": "^10",

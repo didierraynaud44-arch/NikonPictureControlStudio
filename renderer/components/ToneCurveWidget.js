@@ -56,7 +56,7 @@ class ToneCurveWidget {
         // Sécurité : Si le widget est déjà injecté dans le container, on ne le détruit pas
         if (!this.container.querySelector("#curveCanvas")) {
             this.container.innerHTML = `
-                <div class="tone-curve-widget" style="background:#1e1e1e; padding:10px; border-radius:6px; border:1px solid #444; width:${this.size}px; margin: 10px auto; font-family: sans-serif; box-sizing: content-box;">
+                <div class="tone-curve-widget" style="background:#1e1e1e; padding:10px; border-radius:6px; border:1px solid #444; width:${this.size}px; margin: 10px auto; box-sizing: content-box;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                         <span style="font-size:11px; color:#aaa;">Canal :</span>
                         <select id="curveChannelSelect" style="background:#2a2a2a; color:#fff; border:1px solid #555; padding:2px 4px; font-size:11px; border-radius:3px; outline:none; cursor:pointer;">
@@ -81,7 +81,7 @@ class ToneCurveWidget {
                     </div>
 
                     <button id="btnPickerPoint" style="width:100%; background:#2d3748; color:#319795; border:1px solid #319795; padding:4px 0; font-size:10px; border-radius:3px; cursor:pointer; margin-bottom:8px; font-weight:bold; transition:all 0.2s;">
-                        🎯 Pipette : Point depuis photo
+                        ${window.lucideIconHtml("pipette", { size: 12 })} Pipette : Point depuis photo
                     </button>
 
                     <canvas id="curveCanvas" width="${this.size}" height="${this.size}" style="background:#111; border:1px solid #333; cursor:crosshair; border-radius:4px; display:block; margin:0 auto;"></canvas>
@@ -242,7 +242,7 @@ class ToneCurveWidget {
             pickerBtn.style.background = "#e53e3e";
             pickerBtn.style.borderColor = "#fc8181";
             pickerBtn.style.color = "#fff";
-            pickerBtn.innerText = "🎯 Cliquez sur la photo...";
+            pickerBtn.innerHTML = `${window.lucideIconHtml("pipette", { size: 12 })} Cliquez sur la photo...`;
         }
 
         const handleImageClick = (e) => {
@@ -277,7 +277,7 @@ class ToneCurveWidget {
                 pickerBtn.style.background = "#2d3748";
                 pickerBtn.style.borderColor = "#319795";
                 pickerBtn.style.color = "#319795";
-                pickerBtn.innerText = "🎯 Pipette : Point depuis photo";
+                pickerBtn.innerHTML = `${window.lucideIconHtml("pipette", { size: 12 })} Pipette : Point depuis photo`;
             }
         };
 
