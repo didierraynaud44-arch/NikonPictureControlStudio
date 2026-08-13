@@ -16,7 +16,20 @@ class ImageProcessor {
         this.loadedImage = null;
         this.currentOrientation = 1;
         this.currentLensInfo = null;
+
+        // 🔹 Chemin de la photo actuellement affichée dans le Studio (mis à jour par
+        // l'appelant, voir app.js/loadImageInStudio) et flag indiquant si l'affichage
+        // doit utiliser this.originalRawBuffer en pleine résolution plutôt que
+        // this.previewBuffer (voir ensureFullResolutionLoaded, zoom > seuil).
+        this.currentFilePath = null;
+        this.useFullResForDisplay = false;
+
         this.display = new DisplayCanvas(canvasId);
+        this.display.onRequestFullRes = async () => {
+            if (!this.currentFilePath) return;
+            await this.ensureFullResolutionLoaded(this.currentFilePath);
+            this.render();
+        };
 
         this.overlayCanvas = document.getElementById("maskOverlayCanvas");
         this.overlayCtx = this.overlayCanvas ? this.overlayCanvas.getContext("2d") : null;
@@ -29,6 +42,11 @@ class ImageProcessor {
         this.maskController = null;
         this.showMaskOverlay = true;
 
+        // 🔹 Gomme du module Monochrome : contrôleur dédié (voir
+        // MonochromeMaskCanvasController.js), même rôle que maskController/
+        // retouchController pour l'aperçu du cercle de pinceau en survol.
+        this.monochromeMaskController = null;
+
         // 🔹 Retouche (tampon de duplication) : appliquée une fois, en amont du
         // pipeline. Cache par clé de résolution ("preview"/"fullRes"), invalidé
         // automatiquement si le buffer source change (nouvelle photo) ou si la
@@ -39,6 +57,26 @@ class ImageProcessor {
         // 🔹 NOUVEAU : Histogramme
         this.histogramMode = "luminance"; // "luminance" | "rgb"
         this._lastImageDataForHistogram = null;
+
+        // 🔹 Simulation Pellicule (grain, halation, Hald-CLUT) : réglages séparés
+        // de this.pictureControl (et non fusionnés dedans), car readState() du
+        // panneau Picture Control reconstruit un objet ne contenant QUE les champs
+        // Picture Control connus à chaque changement de curseur — les stocker dans
+        // pictureControl les ferait donc écraser au premier réglage PC modifié.
+        // Même principe que RetouchManager pour les retouches. Les pixels bruts du
+        // Hald-CLUT chargé (haldClutState) ne sont eux jamais persistés : seul le
+        // chemin (filmSettings.haldClutPath) l'est, et le LUT est rechargé depuis
+        // le disque via setFilmSettings() à la réouverture de la photo.
+        this.filmSettings = {
+            grainIntensity: 0,
+            grainSize: 1,
+            halationIntensity: 0,
+            halationThreshold: 200,
+            halationRadius: 8,
+            haldClutPath: null,
+            haldClutIntensity: 100
+        };
+        this.haldClutState = null; // { path, imageData, side }
 
         if (typeof WhiteBalanceFilter !== "undefined") this.pipeline.add(new WhiteBalanceFilter());
         if (typeof SharpenFilter !== "undefined") this.pipeline.add(new SharpenFilter());
@@ -55,12 +93,219 @@ class ImageProcessor {
         if (typeof ColorBlenderFilter !== "undefined") this.pipeline.add(new ColorBlenderFilter());
         if (typeof ColorGradingFilter !== "undefined") this.pipeline.add(new ColorGradingFilter());
         if (typeof MonochromeFilter !== "undefined") this.pipeline.add(new MonochromeFilter());
+
+        // 🔹 Module Monochrome dédié du Studio (mixeur N&B -> Lumière tamisée ->
+        // Dodge & Burn), indépendant du profil Nikon Monochrome ci-dessus. La
+        // Gomme locale (voir _buildRenderSettings) réduit l'effet de CHAQUE
+        // réglage indépendamment via des cartes de multiplicateur transmises
+        // en settings — ces 3 filtres restent donc de simples filtres du
+        // pipeline, exécutés en une seule passe comme tous les autres.
+        if (typeof MonochromeMixerFilter !== "undefined") this.pipeline.add(new MonochromeMixerFilter());
+        if (typeof SoftLightPunchFilter !== "undefined") this.pipeline.add(new SoftLightPunchFilter());
+        if (typeof DodgeBurnFilter !== "undefined") this.pipeline.add(new DodgeBurnFilter());
+
         if (typeof DehazeFilter !== "undefined") this.pipeline.add(new DehazeFilter());
         if (typeof VibranceFilter !== "undefined") this.pipeline.add(new VibranceFilter());
         if (typeof SCurveFilter !== "undefined") this.pipeline.add(new SCurveFilter());
         if (typeof LensCorrectionFilter !== "undefined") this.pipeline.add(new LensCorrectionFilter());
         if (typeof VignetteFilter !== "undefined") this.pipeline.add(new VignetteFilter());
         if (typeof DenoiseFilter !== "undefined") this.pipeline.add(new DenoiseFilter());
+
+        // 🔹 Simulation Pellicule : toute fin du pipeline, après Picture Control/
+        // Monochrome/masques. Ordre développement -> halation optique -> grain du
+        // support, cohérent avec un vrai process argentique.
+        if (typeof HaldClutFilter !== "undefined") this.pipeline.add(new HaldClutFilter());
+        if (typeof HalationFilter !== "undefined") this.pipeline.add(new HalationFilter());
+        if (typeof FilmGrainFilter !== "undefined") this.pipeline.add(new FilmGrainFilter());
+    }
+
+    /**
+     * Fusionne pictureControl et filmSettings en un seul objet de réglages pour
+     * le pipeline, en y injectant les pixels du Hald-CLUT actuellement chargé en
+     * mémoire (jamais persistés, voir le commentaire du constructeur).
+     * @param {number} [width] - Dimensions de l'image à traiter, nécessaires pour
+     *        calculer les cartes de multiplicateur local de la Gomme locale
+     *        (voir _injectMonoLocalMultipliers). Omises : pas de gomme locale
+     *        (ex. aperçus sans dimensions connues à l'avance).
+     * @param {number} [height]
+     * @private
+     */
+    _buildRenderSettings(width, height) {
+        const settings = { ...(this.pictureControl || {}), ...(this.filmSettings || {}) };
+        if (this.haldClutState) {
+            settings.haldClutData = this.haldClutState.imageData;
+            settings.haldClutSide = this.haldClutState.side;
+        }
+
+        // 🔹 Module Monochrome dédié : réglages lus directement depuis
+        // MonochromeManager (état global, comme MasksManager.getMasks()), pas
+        // stockés sur l'instance. N'injecte les réglages QUE si le module est
+        // activé — c'est ce qui fait de monoMixerEnabled un vrai interrupteur
+        // maître pour les 3 filtres à la fois : désactivé, aucune des clés
+        // (softLightIntensity, dodgeBurnWhite...) n'est présente dans settings,
+        // donc chaque filtre s'arrête tout seul via son propre court-circuit,
+        // sans qu'on ait à modifier leur logique individuelle.
+        if (typeof MonochromeManager !== "undefined") {
+            const monoSettings = MonochromeManager.getSettings();
+            if (monoSettings && monoSettings.monoMixerEnabled) {
+                Object.assign(settings, monoSettings);
+                if (width && height) {
+                    this._injectMonoLocalMultipliers(settings, monoSettings, width, height);
+                }
+            }
+        }
+
+        return settings;
+    }
+
+    /**
+     * Gomme locale du module Monochrome : calcule, pour chacune des 10 cibles
+     * (8 canaux du mixeur + Dodge & Burn + Punch) ayant au moins un trait
+     * peint, une carte Float32Array où chaque pixel vaut :
+     *     1 - (MaskEngine.computeBrushAlpha(...) × (intensité / 100))
+     * soit 1.0 = effet plein, 0 = effet totalement supprimé à ce pixel, pour
+     * cette cible précise. Transmises aux filtres via settings.
+     * channelLocalMultipliers/dodgeBurnLocalMultiplier/punchLocalMultiplier —
+     * l'image reste N&B partout, seule L'INTENSITÉ du réglage ciblé varie
+     * localement (contrairement à l'ancienne "Gomme couleur" qui révélait la
+     * couleur d'origine, entièrement retirée).
+     * @private
+     */
+    _injectMonoLocalMultipliers(settings, monoSettings, width, height) {
+        if (typeof MaskEngine === "undefined") return;
+        const masks = monoSettings.monoEraseMasks;
+        if (!masks) return;
+
+        const channelKeys = typeof MonochromeMixerFilter !== "undefined" ? MonochromeMixerFilter.CHANNEL_KEYS : [];
+        const channelMultipliers = {};
+        let hasChannelMultiplier = false;
+        for (const key of channelKeys) {
+            const mult = this._computeLocalMultiplier(masks[key], width, height);
+            if (mult) {
+                channelMultipliers[key] = mult;
+                hasChannelMultiplier = true;
+            }
+        }
+        if (hasChannelMultiplier) settings.channelLocalMultipliers = channelMultipliers;
+
+        const dodgeBurnMult = this._computeLocalMultiplier(masks.dodgeBurn, width, height);
+        if (dodgeBurnMult) settings.dodgeBurnLocalMultiplier = dodgeBurnMult;
+
+        const punchMult = this._computeLocalMultiplier(masks.punch, width, height);
+        if (punchMult) settings.punchLocalMultiplier = punchMult;
+    }
+
+    /**
+     * @param {{geometry:{strokes:Array}, intensity:number}} entry - une entrée de monoEraseMasks
+     * @returns {Float32Array|null} null si rien de peint (ou intensité nulle) pour cette cible
+     * @private
+     */
+    _computeLocalMultiplier(entry, width, height) {
+        if (!entry || !entry.geometry || !Array.isArray(entry.geometry.strokes) || !entry.geometry.strokes.length) {
+            return null;
+        }
+        const intensity = Math.max(0, Math.min(100, entry.intensity ?? 100)) / 100;
+        if (intensity <= 0) return null;
+
+        const alpha = MaskEngine.computeBrushAlpha(width, height, entry.geometry);
+        const mult = new Float32Array(alpha.length);
+        for (let i = 0; i < alpha.length; i++) mult[i] = 1 - alpha[i] * intensity;
+        return mult;
+    }
+
+    /**
+     * Réglages Simulation Pellicule actuellement actifs.
+     */
+    getFilmSettings() {
+        return this.filmSettings;
+    }
+
+    /**
+     * Remplace tous les réglages Simulation Pellicule (rechargement d'une photo).
+     * Recharge automatiquement le Hald-CLUT depuis son chemin si celui-ci diffère
+     * du LUT actuellement en mémoire (fire-and-forget : re-rendu une fois chargé).
+     */
+    setFilmSettings(settings) {
+        this.filmSettings = {
+            grainIntensity: 0,
+            grainSize: 1,
+            halationIntensity: 0,
+            halationThreshold: 200,
+            halationRadius: 8,
+            haldClutPath: null,
+            haldClutIntensity: 100,
+            ...(settings || {})
+        };
+
+        const newPath = this.filmSettings.haldClutPath || null;
+        const currentPath = this.haldClutState ? this.haldClutState.path : null;
+        if (newPath !== currentPath) {
+            if (newPath) {
+                this.loadHaldClutFile(newPath).catch(err => {
+                    console.warn("⚠️ Impossible de recharger le Hald-CLUT :", newPath, err);
+                });
+            } else {
+                this.haldClutState = null;
+            }
+        }
+
+        if (this.originalRawBuffer) this.render();
+    }
+
+    /**
+     * Modifie un seul réglage Simulation Pellicule (curseur en direct dans filmPanel.js).
+     */
+    updateFilmSetting(field, value) {
+        if (!this.filmSettings) this.filmSettings = {};
+        this.filmSettings[field] = value;
+        if (this.originalRawBuffer) this.render();
+    }
+
+    /**
+     * Charge un fichier Hald-CLUT (PNG) depuis le disque et le décode en ImageData
+     * via un canvas temporaire (même approche que le reste de l'app pour charger
+     * une image locale). Seul le CHEMIN est conservé dans filmSettings pour la
+     * persistance par photo — les pixels restent en mémoire (this.haldClutState).
+     */
+    async loadHaldClutFile(filePath) {
+        if (!filePath) return null;
+
+        const imageData = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement("canvas");
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0);
+                try {
+                    resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            img.onerror = () => reject(new Error(`Impossible de charger l'image : ${filePath}`));
+            const formatted = filePath.toString().replace(/\\/g, "/");
+            img.src = formatted.startsWith("/") ? `file://${formatted}` : `file:///${formatted}`;
+        });
+
+        this.haldClutState = { path: filePath, imageData, side: imageData.width };
+
+        if (!this.filmSettings) this.filmSettings = {};
+        this.filmSettings.haldClutPath = filePath;
+        if (this.filmSettings.haldClutIntensity === undefined) this.filmSettings.haldClutIntensity = 100;
+
+        if (this.originalRawBuffer) this.render();
+        return this.haldClutState;
+    }
+
+    /**
+     * Retire le Hald-CLUT actuellement chargé (mémoire + chemin persisté).
+     */
+    clearHaldClut() {
+        this.haldClutState = null;
+        if (this.filmSettings) this.filmSettings.haldClutPath = null;
+        if (this.originalRawBuffer) this.render();
     }
 
     setTransform({ rotation, flipH, flipV }) {
@@ -136,6 +381,8 @@ class ImageProcessor {
                 // Ce buffer est la vignette basse résolution : un éventuel chargement
                 // pleine résolution précédent pour ce fichier n'est plus le buffer actif.
                 this.fullResLoadedPath = null;
+                this.useFullResForDisplay = false;
+                this.currentFilePath = null;
 
                 const previewCanvas = this.createRotatedCanvas(img, this.currentOrientation, 1600);
                 const previewCtx = previewCanvas.getContext("2d");
@@ -260,10 +507,19 @@ class ImageProcessor {
     }
 
     render() {
-        const rawSourceBuffer = this.previewBuffer || this.originalRawBuffer;
+        // 🔹 Zoom pleine résolution (Studio) : une fois ensureFullResolutionLoaded()
+        // résolu pour LA PHOTO ACTUELLEMENT AFFICHÉE, l'affichage bascule sur
+        // this.originalRawBuffer (pleine résolution) plutôt que this.previewBuffer.
+        // La vérification fullResLoadedPath === currentFilePath évite d'utiliser
+        // par erreur un buffer pleine résolution d'une AUTRE photo déjà en cache.
+        const usingFullRes = this.useFullResForDisplay
+            && this.fullResLoadedPath === this.currentFilePath
+            && !!this.originalRawBuffer;
+
+        const rawSourceBuffer = usingFullRes ? this.originalRawBuffer : (this.previewBuffer || this.originalRawBuffer);
         if (!rawSourceBuffer || !this.display) return;
 
-        const sourceBuffer = this._applyRetouches(rawSourceBuffer, "preview");
+        const sourceBuffer = this._applyRetouches(rawSourceBuffer, usingFullRes ? "fullRes" : "preview");
 
         let currentImageData = new ImageData(
             new Uint8ClampedArray(sourceBuffer.data),
@@ -271,9 +527,9 @@ class ImageProcessor {
             sourceBuffer.height
         );
 
-        if (this.pictureControl && this.pipeline) {
+        if (this.pipeline) {
             try {
-                const result = this.pipeline.process(currentImageData, this.pictureControl);
+                const result = this.pipeline.process(currentImageData, this._buildRenderSettings(currentImageData.width, currentImageData.height));
                 if (result && result.data) currentImageData = result;
             } catch (err) {
                 console.error("❌ Erreur pipeline :", err);
@@ -292,7 +548,7 @@ class ImageProcessor {
             this.display.setTransform(this.transform);
         }
 
-        this.display.draw(currentImageData);
+        this.display.draw(currentImageData, { preserveView: usingFullRes });
         if (this.enableMasks) this.renderMaskOverlay();
 
         // 🔹 NOUVEAU : Histogramme mis à jour à chaque rendu (donc en temps réel
@@ -401,9 +657,9 @@ class ImageProcessor {
             sourceBuffer.height
         );
 
-        if (this.pictureControl && this.pipeline) {
+        if (this.pipeline) {
             try {
-                const result = this.pipeline.process(currentImageData, this.pictureControl);
+                const result = this.pipeline.process(currentImageData, this._buildRenderSettings(currentImageData.width, currentImageData.height));
                 if (result && result.data) currentImageData = result;
             } catch (err) {
                 console.error("❌ Erreur pipeline export :", err);
@@ -425,6 +681,24 @@ class ImageProcessor {
         tempCtx.putImageData(currentImageData, 0, 0);
 
         return tempCanvas.toDataURL("image/jpeg", quality);
+    }
+
+    /**
+     * 🔹 Charge la pleine résolution pour l'AFFICHAGE Studio (zoom au-delà du seuil,
+     * voir DisplayCanvas.ZOOM_FULLRES_THRESHOLD / onRequestFullRes). Réutilise
+     * EXACTEMENT le même cache par filePath que loadFullResolutionForExport()
+     * (export/impression) : ne décode qu'une seule fois par photo pendant la
+     * session, que ce soit le zoom, l'export ou l'impression qui déclenche le
+     * premier chargement. Si déjà en cache, retourne immédiatement.
+     * @param {string} filePath
+     * @returns {Promise<ImageData|null>}
+     */
+    async ensureFullResolutionLoaded(filePath) {
+        if (!filePath) return null;
+
+        const imageData = await this.loadFullResolutionForExport(filePath);
+        if (imageData) this.useFullResForDisplay = true;
+        return imageData;
     }
 
     /**
@@ -516,9 +790,12 @@ class ImageProcessor {
      *        résolution s'il n'est pas déjà chargé (voir loadFullResolutionForExport)
      * @param {number} quality - Qualité JPEG (0.0 à 1.0)
      * @param {string} format - Format de sortie ("image/jpeg" ou "image/png")
+     * @param {{enabled:boolean, color:string, widthPercent:number}} [frameOptions] - Encadrement
+     *        optionnel (voir FrameUtils.js), appliqué en toute dernière étape. Absent/non fourni
+     *        par défaut : n'affecte donc PAS exportProcessedTiff ("Ouvrir avec"), qui n'en passe pas.
      * @returns {Promise<string|null>} - DataURL de l'image exportée
      */
-    async exportFullResolution(filePath, quality = 0.95, format = "image/jpeg") {
+    async exportFullResolution(filePath, quality = 0.95, format = "image/jpeg", frameOptions = null) {
         if (filePath && this.fullResLoadedPath !== filePath) {
             await this.loadFullResolutionForExport(filePath);
         }
@@ -538,9 +815,9 @@ class ImageProcessor {
         );
 
         // Appliquer le pipeline de traitement (Picture Control, etc.)
-        if (this.pictureControl && this.pipeline) {
+        if (this.pipeline) {
             try {
-                const result = this.pipeline.process(currentImageData, this.pictureControl);
+                const result = this.pipeline.process(currentImageData, this._buildRenderSettings(currentImageData.width, currentImageData.height));
                 if (result && result.data) currentImageData = result;
             } catch (err) {
                 console.error("❌ Erreur pipeline export full res :", err);
@@ -554,6 +831,13 @@ class ImageProcessor {
             } catch (err) {
                 console.error("❌ Erreur masques export full res :", err);
             }
+        }
+
+        // Encadrement : toute dernière étape, après pipeline + masques, avant la
+        // mise en canvas finale (voir FrameUtils.js — agrandit le canevas, ne
+        // recadre jamais dans la photo).
+        if (frameOptions && typeof applyFrame === "function") {
+            currentImageData = applyFrame(currentImageData, frameOptions);
         }
 
         // Créer un canvas temporaire en pleine résolution
@@ -597,9 +881,9 @@ class ImageProcessor {
             retouchedBuffer.height
         );
 
-        if (this.pictureControl && this.pipeline) {
+        if (this.pipeline) {
             try {
-                const result = this.pipeline.process(currentImageData, this.pictureControl);
+                const result = this.pipeline.process(currentImageData, this._buildRenderSettings(currentImageData.width, currentImageData.height));
                 if (result && result.data) currentImageData = result;
             } catch (err) {
                 console.error("❌ Erreur pipeline export TIFF :", err);
@@ -681,7 +965,12 @@ class ImageProcessor {
             (retouchController.mode === "heal" && retouchController.hoverPos)
         ));
 
-        if (masksToDraw.length === 0 && !showBrushPreview && !showRetouchPreview) return;
+        // Gomme couleur du module Monochrome : même logique de survol que le
+        // Tampon de duplication (simple cercle, pas d'aplat semi-transparent).
+        const monochromeMaskController = this.monochromeMaskController;
+        const showErasePreview = !!(monochromeMaskController && monochromeMaskController.mode === "erase" && monochromeMaskController.hoverPos);
+
+        if (masksToDraw.length === 0 && !showBrushPreview && !showRetouchPreview && !showErasePreview) return;
 
         ctx.save();
 
@@ -709,6 +998,10 @@ class ImageProcessor {
 
         if (showRetouchPreview) {
             this._drawRetouchPreview(ctx, imgW, imgH, retouchController, scale);
+        }
+
+        if (showErasePreview) {
+            this._drawBrushPreview(ctx, imgW, imgH, { brushPreviewPos: monochromeMaskController.hoverPos, brushSize: monochromeMaskController.brushSize }, scale);
         }
 
         ctx.restore();

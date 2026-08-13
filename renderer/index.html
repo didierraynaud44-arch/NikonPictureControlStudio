@@ -155,14 +155,10 @@
 
         <!-- Colonne Droite : Réglages Picture Control + Masques + Rotation -->
         <aside class="sidebar-panel">
-            <div id="pictureControlStatus" class="card-panel"></div>
-            <div id="masksPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
-            <div id="retouchPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
-
             <!-- Panneau Outils de Rotation & Miroir -->
-            <div class="panel-section card-panel" id="panel-rotation" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #333;">
+            <div class="panel-section card-panel" id="panel-rotation" style="padding-top: 15px;">
                 <h3 style="font-size: 13px; color: #ccc; margin-bottom: 10px;">Orientation & Rotation</h3>
-                
+
                 <!-- Boutons d'action rapide -->
                 <div class="rotation-buttons" style="display: flex; gap: 6px; margin-bottom: 12px;">
                     <button id="btnRotateLeft" class="btn-tool" title="Rotation 90° Gauche" data-icon="rotate-ccw">-90°</button>
@@ -176,7 +172,7 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom: 6px;">
                         <label for="rangeRotationDegree">Angle fin :</label>
                         <div style="display:flex; align-items:center; gap:3px;">
-                            <input type="number" id="inputRotationDegree" min="-45" max="45" step="0.1" value="0" 
+                            <input type="number" id="inputRotationDegree" min="-45" max="45" step="0.1" value="0"
                                    style="width: 55px; background: #1e1e1e; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px 4px; text-align: right; font-size: 12px;">
                             <span style="color: #aaa; font-size: 12px;">°</span>
                         </div>
@@ -185,6 +181,12 @@
                     <button id="btnResetRotation" class="btn-secondary" style="margin-top: 8px; width: 100%; font-size: 11px;">Réinitialiser la rotation</button>
                 </div>
             </div>
+
+            <div id="retouchPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
+            <div id="pictureControlStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
+            <div id="masksPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
+            <div id="monochromePanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
+            <div id="filmPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
         </aside>
 
     </main>
@@ -305,15 +307,19 @@
             </div>
 
             <div style="border-top: 1px solid #333; padding-top: 10px; margin-bottom: 14px;">
-                <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 6px; color: #aaa;">Cadre / Filet :</label>
-                <div style="display: flex; flex-direction: column; gap: 8px; font-size: 12px;">
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                        <input type="checkbox" id="printEnableBorder"> Activer le contour du cadre
-                    </label>
-                    <div style="display: flex; align-items: center; justify-content: space-between;">
-                        <span style="font-size: 11px; color: #ccc;">Épaisseur du filet (px) :</span>
-                        <input type="number" id="printBorderWidth" value="2" min="1" max="20" style="width: 60px; background: #171717; border: 1px solid #444; color: #fff; padding: 4px; border-radius: 4px; font-size: 11px; text-align: right;">
+                <label style="font-size: 11px; font-weight: bold; display: flex; align-items: center; gap: 6px; cursor: pointer; margin-bottom: 8px; color: #aaa;">
+                    <input type="checkbox" id="printFrameEnabled"> Ajouter un cadre
+                </label>
+                <div id="printFrameOptions" style="display: none; flex-direction: column; gap: 6px;">
+                    <select id="printFrameColor" style="width: 100%; background: #171717; border: 1px solid #444; color: #fff; padding: 6px; border-radius: 4px; font-size: 12px;">
+                        <option value="white">Blanc</option>
+                        <option value="black">Noir</option>
+                    </select>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: #aaa;">
+                        <span>Largeur du cadre</span>
+                        <span id="printFrameWidthVal">5%</span>
                     </div>
+                    <input type="range" id="printFrameWidth" min="0" max="15" step="0.5" value="5" style="width: 100%;">
                 </div>
             </div>
 
@@ -407,11 +413,30 @@
                     </div>
                 </div>
             </div>
-            <div style="margin-bottom:18px; border-top:1px solid #333; padding-top:10px;">
+            <div style="margin-bottom:12px; border-top:1px solid #333; padding-top:10px;">
                 <label style="font-size:12px; cursor:pointer; display:flex; align-items:center; gap:8px;">
                     <input type="checkbox" id="expStripExif">
                     <span>5. Supprimer les métadonnées (EXIF)</span>
                 </label>
+            </div>
+            <div style="margin-bottom:18px; border-top:1px solid #333; padding-top:10px;">
+                <label style="font-size:12px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                    <input type="checkbox" id="expFrameEnabled">
+                    <span>6. Ajouter un cadre</span>
+                </label>
+                <div id="expFrameOptions" style="display:none; gap:8px; align-items:center;">
+                    <div style="display:flex; gap:8px; margin-bottom:8px;">
+                        <select id="expFrameColor" style="flex:1; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px; font-size:12px;">
+                            <option value="white">Blanc</option>
+                            <option value="black">Noir</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-size:11px; color:#aaa; margin-bottom:4px;">
+                        <span>Largeur du cadre</span>
+                        <span id="expFrameWidthVal">5%</span>
+                    </div>
+                    <input type="range" id="expFrameWidth" min="0" max="15" step="0.5" value="5" style="width:100%;">
+                </div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px;">
                 <button id="btnCancelExport" style="background:transparent; border:1px solid #555; color:#fff; padding:6px 14px; border-radius:4px; cursor:pointer;">Annuler</button>
@@ -450,6 +475,7 @@
     <script src="core/DisplayCanvas.js"></script>
     <script src="core/RenderPipeline.js"></script>
     <script src="core/BaseFilter.js"></script>
+    <script src="core/FrameUtils.js"></script>
 
     <!-- Filtres -->
     <script src="filters/WhiteBalanceFilter.js"></script>
@@ -467,11 +493,17 @@
     <script src="filters/ColorBlenderFilter.js"></script>
     <script src="filters/ColorGradingFilter.js"></script>
     <script src="filters/MonochromeFilter.js"></script>
+    <script src="filters/MonochromeMixerFilter.js"></script>
+    <script src="filters/SoftLightPunchFilter.js"></script>
+    <script src="filters/DodgeBurnFilter.js"></script>
     <script src="filters/DehazeFilter.js"></script>
     <script src="filters/VibranceFilter.js"></script>
     <script src="filters/SCurveFilter.js"></script>
     <script src="filters/VignetteFilter.js"></script>
     <script src="filters/DenoiseFilter.js"></script>
+    <script src="filters/HaldClutFilter.js"></script>
+    <script src="filters/HalationFilter.js"></script>
+    <script src="filters/FilmGrainFilter.js"></script>
 
     <!-- UI & Moteur -->
     <script src="components/ToneCurveWidget.js"></script>
@@ -492,6 +524,14 @@
     <script src="components/RetouchManager.js"></script>
     <script src="components/RetouchCanvasController.js"></script>
     <script src="components/retouchPanel.js"></script>
+
+    <!-- Simulation Pellicule (grain, halation, Hald-CLUT) -->
+    <script src="components/filmPanel.js"></script>
+
+    <!-- Module Monochrome dédié (mixeur N&B, Lumière tamisée, Dodge & Burn, Gomme couleur) -->
+    <script src="core/MonochromeManager.js"></script>
+    <script src="components/MonochromeMaskCanvasController.js"></script>
+    <script src="components/monochromePanel.js"></script>
 
 	<script src="components/PrintManager.js"></script>
     <script src="app.js"></script>

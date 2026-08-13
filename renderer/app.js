@@ -184,11 +184,18 @@ async function saveCurrentPictureControlSettings(filePath) {
             return;
         }
 
-        // 🔹 Les retouches (tampon de duplication) sont un champ dédié dans la
-        // même structure JSON, à côté des réglages Picture Control.
+        // 🔹 Les retouches (tampon de duplication) et les réglages Simulation
+        // Pellicule sont des champs dédiés dans la même structure JSON, à côté
+        // des réglages Picture Control.
         const settings = { ...baseSettings };
         if (typeof window.RetouchManager !== "undefined") {
             settings.retouches = window.RetouchManager.getRetouches();
+        }
+        if (window.imageProcessor && typeof window.imageProcessor.getFilmSettings === "function") {
+            settings.filmSettings = window.imageProcessor.getFilmSettings();
+        }
+        if (typeof window.MonochromeManager !== "undefined") {
+            settings.monochromeStudio = window.MonochromeManager.getSettings();
         }
 
         console.log("💾 Sauvegarde des réglages pour:", filePath);
@@ -216,11 +223,18 @@ async function saveCurrentPhotoSettingsToCatalog() {
     if (!window.currentStudioFilePath) return;
     const currentPC = window.imageProcessor?.pictureControl || activeProfilePC || {};
 
-    // 🔹 Les retouches (tampon de duplication) sont un champ dédié dans la
-    // même structure JSON, à côté des réglages Picture Control.
+    // 🔹 Les retouches (tampon de duplication) et les réglages Simulation
+    // Pellicule sont des champs dédiés dans la même structure JSON, à côté des
+    // réglages Picture Control.
     const settingsToSave = { ...currentPC };
     if (typeof window.RetouchManager !== "undefined") {
         settingsToSave.retouches = window.RetouchManager.getRetouches();
+    }
+    if (window.imageProcessor && typeof window.imageProcessor.getFilmSettings === "function") {
+        settingsToSave.filmSettings = window.imageProcessor.getFilmSettings();
+    }
+    if (typeof window.MonochromeManager !== "undefined") {
+        settingsToSave.monochromeStudio = window.MonochromeManager.getSettings();
     }
 
     if (window.electronAPI && typeof window.electronAPI.savePhotoSettings === "function") {
@@ -914,6 +928,27 @@ async function loadImageInStudio(filePath) {
             if (typeof window.renderRetouchPanel === "function") window.renderRetouchPanel();
         }
 
+        // 🔹 Simulation Pellicule : même principe que les retouches, champ dédié
+        // retiré de savedSettings pour ne pas polluer l'objet Picture Control
+        // (pcData = savedSettings dans la branche suivante).
+        if (window.imageProcessor && typeof window.imageProcessor.setFilmSettings === "function") {
+            const savedFilmSettings = (savedSettings && savedSettings.filmSettings) || {};
+            if (savedSettings && "filmSettings" in savedSettings) delete savedSettings.filmSettings;
+            window.imageProcessor.setFilmSettings(savedFilmSettings);
+            if (typeof window.renderFilmPanel === "function") window.renderFilmPanel();
+        }
+
+        // 🔹 Module Monochrome dédié : même principe, champ dédié retiré de
+        // savedSettings pour ne pas polluer l'objet Picture Control. Repart
+        // toujours de zéro (pas d'historique conservé d'une photo à l'autre),
+        // comme RetouchManager.loadRetouches().
+        if (typeof window.MonochromeManager !== "undefined") {
+            const savedMonochromeStudio = (savedSettings && savedSettings.monochromeStudio) || {};
+            if (savedSettings && "monochromeStudio" in savedSettings) delete savedSettings.monochromeStudio;
+            window.MonochromeManager.loadSettings(savedMonochromeStudio);
+            if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
+        }
+
         let pcData = {};
 
         if (savedSettings && Object.keys(savedSettings).length > 0) {
@@ -1030,6 +1065,10 @@ if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
             );
 
             if (myToken !== currentLoadToken) return;
+
+            // 🔹 Chemin de la photo pour le zoom pleine résolution (voir
+            // ImageProcessor.ensureFullResolutionLoaded / DisplayCanvas.onRequestFullRes).
+            window.imageProcessor.currentFilePath = filePath;
 
             // 🔥 APPLIQUER LES RÉGLAGES CHARGÉS
             window.imageProcessor.setPictureControl(pcData);
@@ -1158,6 +1197,56 @@ function showRawDecodingIndicator(show) {
     }
 }
 
+/**
+ * 🔹 Encadrement (cadre blanc/noir, export ET impression) : préférence GLOBALE
+ * persistée via electron-store (pas par photo, voir main.js get/save-frame-settings).
+ * Charge l'état sauvegardé dans les contrôles de la modale d'export, et
+ * persiste immédiatement tout changement (retrouvé tel quel côté Impression,
+ * voir PrintManager.initFramePrintControls dans PrintManager.js).
+ */
+async function initExportFrameControls() {
+    const enabledEl = document.getElementById("expFrameEnabled");
+    const colorEl = document.getElementById("expFrameColor");
+    const widthEl = document.getElementById("expFrameWidth");
+    const widthLabel = document.getElementById("expFrameWidthVal");
+    const optionsBlock = document.getElementById("expFrameOptions");
+    if (!enabledEl || !colorEl || !widthEl) return;
+
+    const applyToUi = (settings) => {
+        enabledEl.checked = !!settings.enabled;
+        colorEl.value = settings.color === "black" ? "black" : "white";
+        widthEl.value = settings.widthPercent ?? 5;
+        if (widthLabel) widthLabel.textContent = `${widthEl.value}%`;
+        if (optionsBlock) optionsBlock.style.display = enabledEl.checked ? "flex" : "none";
+        if (optionsBlock) optionsBlock.style.flexDirection = "column";
+    };
+
+    if (window.electronAPI && typeof window.electronAPI.getFrameSettings === "function") {
+        try {
+            const settings = await window.electronAPI.getFrameSettings();
+            applyToUi(settings || { enabled: false, color: "white", widthPercent: 5 });
+        } catch (err) {
+            console.error("❌ Erreur chargement réglages cadre :", err);
+        }
+    }
+
+    const persist = () => {
+        if (optionsBlock) optionsBlock.style.display = enabledEl.checked ? "flex" : "none";
+        if (widthLabel) widthLabel.textContent = `${widthEl.value}%`;
+        if (window.electronAPI && typeof window.electronAPI.saveFrameSettings === "function") {
+            window.electronAPI.saveFrameSettings({
+                enabled: enabledEl.checked,
+                color: colorEl.value,
+                widthPercent: parseFloat(widthEl.value) || 0
+            });
+        }
+    };
+
+    enabledEl.addEventListener("change", persist);
+    colorEl.addEventListener("change", persist);
+    widthEl.addEventListener("input", persist);
+}
+
 function initExportModal() {
     const modal = document.getElementById("exportModal");
     const btnBrowse = document.getElementById("btnBrowseExpFolder");
@@ -1172,6 +1261,11 @@ function initExportModal() {
             qualityLabel.textContent = `${e.target.value}%`;
         };
     }
+
+    // 🔹 Encadrement : préférence GLOBALE (electron-store), pas par photo —
+    // partagée avec le panneau Impression (voir PrintManager.js). Chargée au
+    // démarrage puis tenue à jour localement ; persistée à chaque changement.
+    initExportFrameControls();
 
     if (btnBrowse && folderInput) {
         btnBrowse.onclick = async () => {
@@ -1190,6 +1284,12 @@ function initExportModal() {
 
     if (btnConfirm && modal) {
         btnConfirm.onclick = async () => {
+            const frameOptions = {
+                enabled: document.getElementById("expFrameEnabled")?.checked || false,
+                color: document.getElementById("expFrameColor")?.value || "white",
+                widthPercent: parseFloat(document.getElementById("expFrameWidth")?.value) || 0
+            };
+
             const config = {
                 folder: folderInput ? folderInput.value : "",
                 format: document.getElementById("expFormat")?.value || "image/jpeg",
@@ -1197,7 +1297,8 @@ function initExportModal() {
                 width: parseInt(document.getElementById("expWidth")?.value) || null,
                 height: parseInt(document.getElementById("expHeight")?.value) || null,
                 dpi: parseInt(document.getElementById("expDpi")?.value) || 300,
-                stripExif: document.getElementById("expStripExif")?.checked || false
+                stripExif: document.getElementById("expStripExif")?.checked || false,
+                frame: frameOptions
             };
 
             if (!config.folder) {
@@ -1221,7 +1322,7 @@ function initExportModal() {
                     let dataUrl;
                     try {
                         dataUrl = window.imageProcessor.exportFullResolution ?
-                            await window.imageProcessor.exportFullResolution(window.currentStudioFilePath, config.quality, config.format) :
+                            await window.imageProcessor.exportFullResolution(window.currentStudioFilePath, config.quality, config.format, frameOptions) :
                             null;
                     } finally {
                         showRawDecodingIndicator(false);
@@ -1743,6 +1844,17 @@ function initButtons() {
         window.initRetouchController(window.imageProcessor);
     }
 
+    // 🔹 Gomme couleur (module Monochrome) : try/catch explicite — un contrôleur
+    // qui échoue à s'initialiser ici (script manquant, classe indisponible...)
+    // ne doit pas interrompre le reste de initButtons().
+    if (window.imageProcessor && typeof window.initMonochromeMaskController === "function") {
+        try {
+            window.initMonochromeMaskController(window.imageProcessor);
+        } catch (err) {
+            console.error("❌ Erreur initialisation du contrôleur Gomme couleur (Monochrome) :", err);
+        }
+    }
+
     if (btnStudioOpenFolder) {
         btnStudioOpenFolder.onclick = openStudioFolder;
     }
@@ -1861,6 +1973,14 @@ function initButtons() {
 
     if (typeof window.renderRetouchPanel === "function") {
         window.renderRetouchPanel();
+    }
+
+    if (typeof window.renderFilmPanel === "function") {
+        window.renderFilmPanel();
+    }
+
+    if (typeof window.renderMonochromePanel === "function") {
+        window.renderMonochromePanel();
     }
 
     ensureStudioNavigationArrows();

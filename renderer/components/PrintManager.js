@@ -12,7 +12,13 @@ class PrintManager {
         this.currentPictureControl = null;
         this.currentImageData = null; // Pour l'aperçu
 
+        // 🔹 Encadrement (cadre blanc/noir) : préférence GLOBALE partagée avec
+        // l'export (voir app.js initExportFrameControls / main.js get/save-frame-
+        // settings), pas par photo. Chargée de façon asynchrone dans initFrameControls().
+        this.frameSettings = { enabled: false, color: "white", widthPercent: 5 };
+
         this.initListeners();
+        this.initFrameControls();
 
         // Écouter les changements d'image depuis le Studio
         window.addEventListener('imageLoadedForPrint', (e) => {
@@ -20,6 +26,63 @@ class PrintManager {
                 this.setImage(e.detail.imagePath, e.detail.pictureControl);
             }
         });
+    }
+
+    /**
+     * 🔹 Charge la préférence globale d'encadrement et lie les contrôles du
+     * panneau Impression. Remplace l'ancien "Cadre / Filet" (contour dessiné
+     * uniquement sur le canvas d'aperçu, jamais transmis à l'impression réelle) :
+     * ce nouveau cadre est appliqué via applyFrame() dans getLiveImageDataUrl(),
+     * donc identique pour l'aperçu ET le résultat imprimé/PDF.
+     */
+    async initFrameControls() {
+        const enabledEl = document.getElementById("printFrameEnabled");
+        const colorEl = document.getElementById("printFrameColor");
+        const widthEl = document.getElementById("printFrameWidth");
+        const widthLabel = document.getElementById("printFrameWidthVal");
+        const optionsBlock = document.getElementById("printFrameOptions");
+        if (!enabledEl || !colorEl || !widthEl) return;
+
+        const applyToUi = (settings) => {
+            this.frameSettings = {
+                enabled: !!settings.enabled,
+                color: settings.color === "black" ? "black" : "white",
+                widthPercent: settings.widthPercent ?? 5
+            };
+            enabledEl.checked = this.frameSettings.enabled;
+            colorEl.value = this.frameSettings.color;
+            widthEl.value = this.frameSettings.widthPercent;
+            if (widthLabel) widthLabel.textContent = `${this.frameSettings.widthPercent}%`;
+            if (optionsBlock) optionsBlock.style.display = this.frameSettings.enabled ? "flex" : "none";
+        };
+
+        if (window.electronAPI && typeof window.electronAPI.getFrameSettings === "function") {
+            try {
+                const settings = await window.electronAPI.getFrameSettings();
+                applyToUi(settings || this.frameSettings);
+            } catch (err) {
+                console.error("❌ Erreur chargement réglages cadre (impression) :", err);
+            }
+        }
+
+        const persistAndRender = () => {
+            this.frameSettings = {
+                enabled: enabledEl.checked,
+                color: colorEl.value,
+                widthPercent: parseFloat(widthEl.value) || 0
+            };
+            if (widthLabel) widthLabel.textContent = `${this.frameSettings.widthPercent}%`;
+            if (optionsBlock) optionsBlock.style.display = this.frameSettings.enabled ? "flex" : "none";
+
+            if (window.electronAPI && typeof window.electronAPI.saveFrameSettings === "function") {
+                window.electronAPI.saveFrameSettings(this.frameSettings);
+            }
+            this.render();
+        };
+
+        enabledEl.addEventListener("change", persistAndRender);
+        colorEl.addEventListener("change", persistAndRender);
+        widthEl.addEventListener("input", persistAndRender);
     }
 
     /**
@@ -40,8 +103,7 @@ class PrintManager {
             "printPaperFormat", "printCustomWidth", "printCustomHeight", 
             "printOrientation", "printZoomFill",
             "printImgWidth", "printImgHeight", "printLockAspect",
-            "printEnableBorder", "printBorderWidth", 
-            "printInfoType", "printCustomText", "printDpi", 
+            "printInfoType", "printCustomText", "printDpi",
             "printWatermarkText", "printWatermarkPos", "printIccProfile"
         ];
 
@@ -191,8 +253,6 @@ class PrintManager {
             format: document.getElementById("printPaperFormat")?.value || "A4",
             orientation: document.getElementById("printOrientation")?.value || "portrait",
             zoomFill: document.getElementById("printZoomFill")?.checked || false,
-            enableBorder: document.getElementById("printEnableBorder")?.checked || false,
-            borderWidth: parseInt(document.getElementById("printBorderWidth")?.value) || 2,
             infoType: document.getElementById("printInfoType")?.value || "none",
             customText: document.getElementById("printCustomText")?.value || "",
             watermarkText: document.getElementById("printWatermarkText")?.value || "",
@@ -227,12 +287,15 @@ class PrintManager {
      * ⚠️ Ne PAS utiliser previewCanvas.toDataURL() directement en source principale :
      * ce canvas d'affichage peut contenir des marges/un fond autour de la photo,
      * ce qui imprimerait "toute la page" au lieu de la photo seule.
+     * 🔹 L'encadrement (this.frameSettings) est appliqué ICI, en amont de tout —
+     * donc identique pour l'aperçu (render()) ET l'impression/PDF réels
+     * (handlePrintOrPdf()), qui appellent tous deux cette même méthode.
      */
     async getLiveImageDataUrl() {
         if (window.imageProcessor && typeof window.imageProcessor.exportFullResolution === "function") {
             if (typeof showRawDecodingIndicator === "function") showRawDecodingIndicator(true);
             try {
-                const dataUrl = await window.imageProcessor.exportFullResolution(this.currentImagePath, 1, "image/jpeg");
+                const dataUrl = await window.imageProcessor.exportFullResolution(this.currentImagePath, 1, "image/jpeg", this.frameSettings);
                 if (dataUrl) {
                     console.log("✅ Image à jour récupérée via exportFullResolution (avec réglages)");
                     return dataUrl;
@@ -425,14 +488,12 @@ class PrintManager {
             this.ctx.lineWidth = 2;
             this.ctx.strokeRect(frameX, frameY, targetW, targetH);
 
-            // Bordure
-            const enableBorder = document.getElementById("printEnableBorder")?.checked || false;
-            if (enableBorder) {
-                const borderWidth = parseInt(document.getElementById("printBorderWidth")?.value) || 2;
-                this.ctx.strokeStyle = "#000000";
-                this.ctx.lineWidth = borderWidth * (dpi / 300) * (previewWidth / canvasWidth);
-                this.ctx.strokeRect(drawX, drawY, drawW, drawH);
-            }
+            // 🔹 L'encadrement (cadre blanc/noir) est désormais appliqué en amont,
+            // directement dans les pixels renvoyés par getLiveImageDataUrl() (voir
+            // applyFrame() / this.frameSettings) — donc déjà visible dans `img`
+            // ci-dessus, identique pour l'aperçu et l'impression réelle. L'ancien
+            // contour dessiné ici (uniquement sur ce canvas d'aperçu, jamais
+            // transmis à l'impression réelle) a été retiré.
 
             // Filigrane
             const watermarkText = document.getElementById("printWatermarkText")?.value || "";

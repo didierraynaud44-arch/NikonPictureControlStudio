@@ -15,9 +15,30 @@ class DisplayCanvas {
 
         this.scale = 1;
         this.minScale = 0.05;
-        this.maxScale = 10;
+        this.maxScale = 5; // 500% : cohérent avec le max du slider, pleinement exploitable net grâce au zoom pleine résolution
         this.panX = 0;
         this.panY = 0;
+
+        // 🔹 Zoom pleine résolution : au-delà de ce seuil, on demande à l'appelant
+        // (voir this.onRequestFullRes, branché par ImageProcessor) de charger la
+        // source en pleine résolution plutôt que l'aperçu réduit, pour éviter le
+        // flou d'agrandissement. this.onRequestFullRes doit retourner une Promise ;
+        // ce fichier reste centré sur l'affichage, pas le chargement de données.
+        this.ZOOM_FULLRES_THRESHOLD = 1.5;
+        this.onRequestFullRes = null;
+        this._fullResRequested = false;
+        this._fullResIndicator = null;
+
+        // 🔹 Référence FIXE (largeur/hauteur de l'aperçu au moment où la photo est
+        // chargée), établie une seule fois par photo dans draw() et JAMAIS modifiée
+        // par un swap aperçu -> pleine résolution. this.scale est TOUJOURS exprimé en
+        // pourcentage de CETTE référence (voir _getRenderScale) : c'est ce qui garantit
+        // qu'un même pourcentage affiché (ex: 172%) correspond en permanence au même
+        // cadrage visuel, que la source active soit l'aperçu réduit ou la pleine
+        // résolution. Sans ça, this.scale appliqué directement à offscreenCanvas.width
+        // change de sens dès que ce buffer change de taille (bug de cadrage).
+        this._refWidth = null;
+        this._refHeight = null;
 
         this.transform = { rotation: 0, flipH: false, flipV: false };
 
@@ -120,6 +141,36 @@ class DisplayCanvas {
         }
     }
 
+    /**
+     * 🔹 Point centralisé UNIQUE de modification de this.scale (voir point 3) :
+     * garantit que le curseur/texte de pourcentage (updateZoomUI) reste TOUJOURS
+     * synchronisé avec this.scale, quel que soit l'appelant (molette, curseur,
+     * resetZoom...). Aucun autre endroit du fichier ne doit écrire this.scale
+     * directement.
+     */
+    _setScale(value) {
+        this.scale = value;
+        this.updateZoomUI();
+    }
+
+    /**
+     * 🔹 Convertit this.scale (pourcentage STABLE, relatif à this._refWidth, voir
+     * constructeur) en scale RÉEL à appliquer par ctx.scale()/drawImage() sur le
+     * buffer actuellement chargé (this.offscreenCanvas, aperçu OU pleine résolution).
+     * this._refWidth ne bouge jamais après le chargement de la photo, donc quand
+     * offscreenCanvas.width change (swap de résolution), ce facteur de conversion
+     * absorbe intégralement le changement : this.scale n'a JAMAIS besoin d'être
+     * réajusté au moment du swap, et un même pourcentage revisité plus tard
+     * redonne exactement le même cadrage visuel.
+     */
+    _getRenderScale(scaleOverride = null) {
+        const imgW = this.offscreenCanvas.width;
+        const s = scaleOverride !== null ? scaleOverride : this.scale;
+        if (!imgW) return s;
+        const refW = this._refWidth || imgW;
+        return s * (refW / imgW);
+    }
+
     setZoomScale(targetScale, focalX = null, focalY = null) {
         if (!this.offscreenCanvas.width || !this.canvas.width) return;
 
@@ -131,25 +182,79 @@ class DisplayCanvas {
             const imgW = this.offscreenCanvas.width;
             const imgH = this.offscreenCanvas.height;
 
-            const oldDrawX = (w - imgW * this.scale) / 2 + this.panX;
-            const oldDrawY = (h - imgH * this.scale) / 2 + this.panY;
+            const oldRenderScale = this._getRenderScale();
+            const oldDrawX = (w - imgW * oldRenderScale) / 2 + this.panX;
+            const oldDrawY = (h - imgH * oldRenderScale) / 2 + this.panY;
 
-            const imgMouseX = (focalX - oldDrawX) / this.scale;
-            const imgMouseY = (focalY - oldDrawY) / this.scale;
+            const imgMouseX = (focalX - oldDrawX) / oldRenderScale;
+            const imgMouseY = (focalY - oldDrawY) / oldRenderScale;
 
-            this.scale = safeScale;
+            this._setScale(safeScale);
+            const newRenderScale = this._getRenderScale();
 
-            const newDrawX = focalX - imgMouseX * this.scale;
-            const newDrawY = focalY - imgMouseY * this.scale;
+            const newDrawX = focalX - imgMouseX * newRenderScale;
+            const newDrawY = focalY - imgMouseY * newRenderScale;
 
-            this.panX = newDrawX - (w - imgW * this.scale) / 2;
-            this.panY = newDrawY - (h - imgH * this.scale) / 2;
+            this.panX = newDrawX - (w - imgW * newRenderScale) / 2;
+            this.panY = newDrawY - (h - imgH * newRenderScale) / 2;
         } else {
-            this.scale = safeScale;
+            this._setScale(safeScale);
         }
 
-        this.updateZoomUI();
         this.requestRender();
+        this._maybeRequestFullRes();
+    }
+
+    /**
+     * 🔹 Déclenche this.onRequestFullRes() une seule fois par photo lorsque le
+     * zoom dépasse ZOOM_FULLRES_THRESHOLD (flag this._fullResRequested, remis à
+     * zéro uniquement pour une NOUVELLE photo, voir draw()) — pas de rechargement
+     * en boucle pendant qu'on tourne la molette au-dessus du seuil.
+     */
+    _maybeRequestFullRes() {
+        if (this.scale <= this.ZOOM_FULLRES_THRESHOLD) return;
+        if (this._fullResRequested) return;
+        if (typeof this.onRequestFullRes !== "function") return;
+
+        this._fullResRequested = true;
+        this._setFullResLoading(true);
+
+        Promise.resolve(this.onRequestFullRes())
+            .catch((err) => console.error("❌ Erreur chargement pleine résolution (zoom) :", err))
+            .finally(() => this._setFullResLoading(false));
+    }
+
+    _ensureFullResIndicator() {
+        if (this._fullResIndicator) return this._fullResIndicator;
+
+        const parent = this.canvas.parentElement;
+        if (!parent) return null;
+
+        const el = document.createElement("div");
+        el.className = "fullres-loading-indicator";
+        el.textContent = "Chargement pleine résolution...";
+        el.style.cssText = `
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.75);
+            color: #fff;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            z-index: 5;
+        `;
+        parent.appendChild(el);
+        this._fullResIndicator = el;
+        return el;
+    }
+
+    _setFullResLoading(isLoading) {
+        const el = this._ensureFullResIndicator();
+        if (el) el.style.display = isLoading ? "block" : "none";
     }
 
     updateZoomUI() {
@@ -210,10 +315,19 @@ class DisplayCanvas {
         });
     }
 
-    draw(imageData) {
+    draw(imageData, opts = {}) {
         if (!imageData) return;
 
         const isNewImage = (this.offscreenCanvas.width !== imageData.width || this.offscreenCanvas.height !== imageData.height);
+
+        // 🔹 preserveView : la source change de résolution (aperçu -> pleine résolution,
+        // voir ImageProcessor.render()/onRequestFullRes) mais reste la MÊME photo — on
+        // garde le cadrage actuel plutôt que de recentrer/dézoomer comme pour une
+        // nouvelle photo. Aucun recalcul de this.scale n'est nécessaire ici : this._refWidth
+        // (voir constructeur) reste fixé à la résolution de l'aperçu initial, donc
+        // _getRenderScale() absorbe seul le changement de offscreenCanvas.width et le
+        // cadrage visuel reste identique automatiquement.
+        const isResolutionSwap = isNewImage && !!opts.preserveView && this.offscreenCanvas.width > 0;
 
         this.offscreenCanvas.width = imageData.width;
         this.offscreenCanvas.height = imageData.height;
@@ -229,7 +343,16 @@ class DisplayCanvas {
             }
         }
 
-        if (isNewImage || !this.scale) {
+        if (isResolutionSwap) {
+            this.requestRender();
+        } else if (isNewImage || !this.scale) {
+            this._fullResRequested = false;
+            // 🔹 Référence figée UNE SEULE FOIS par photo, à la résolution du buffer
+            // initialement affiché (l'aperçu réduit) — jamais mise à jour ensuite (voir
+            // _getRenderScale). C'est ce qui rend le pourcentage affiché stable dans le
+            // temps, y compris après un swap vers la pleine résolution.
+            this._refWidth = imageData.width;
+            this._refHeight = imageData.height;
             this.resetZoom();
         } else {
             this.requestRender();
@@ -253,17 +376,18 @@ class DisplayCanvas {
         const h = this.canvas.height;
         const imgW = this.offscreenCanvas.width;
         const imgH = this.offscreenCanvas.height;
+        const renderScale = this._getRenderScale();
 
         this.ctx.fillStyle = "#141414";
         this.ctx.fillRect(0, 0, w, h);
 
         this.ctx.save();
 
-        const drawX = (w - imgW * this.scale) / 2 + this.panX;
-        const drawY = (h - imgH * this.scale) / 2 + this.panY;
+        const drawX = (w - imgW * renderScale) / 2 + this.panX;
+        const drawY = (h - imgH * renderScale) / 2 + this.panY;
 
         this.ctx.translate(drawX, drawY);
-        this.ctx.scale(this.scale, this.scale);
+        this.ctx.scale(renderScale, renderScale);
 
         const centerX = imgW / 2;
         const centerY = imgH / 2;
@@ -288,14 +412,17 @@ class DisplayCanvas {
 
         const containerW = this.canvas.width;
         const containerH = this.canvas.height;
-        const imgW = this.offscreenCanvas.width;
-        const imgH = this.offscreenCanvas.height;
+        // 🔹 Le "fit" se calcule TOUJOURS par rapport à this._refWidth/_refHeight (voir
+        // _getRenderScale), pas par rapport à offscreenCanvas.width/height courant :
+        // sinon, cliquer "Ajuster" après un swap pleine résolution recalculerait le
+        // fit dans le mauvais référentiel et casserait la cohérence du pourcentage.
+        const refW = this._refWidth || this.offscreenCanvas.width;
+        const refH = this._refHeight || this.offscreenCanvas.height;
 
-        this.scale = Math.min(containerW / imgW, containerH / imgH) * 0.95;
+        this._setScale(Math.min(containerW / refW, containerH / refH) * 0.95);
         this.panX = 0;
         this.panY = 0;
 
-        this.updateZoomUI();
         this.requestRender();
     }
 

@@ -145,10 +145,13 @@ function _bindMasksPanelEvents(container) {
             }
 
             // Un seul outil d'édition locale actif à la fois : annule le tampon
-            // de duplication s'il était en cours pour éviter que les deux
-            // contrôleurs se disputent les clics sur le canvas.
+            // de duplication et la Gomme couleur du module Monochrome s'ils
+            // étaient en cours, pour éviter que plusieurs contrôleurs se
+            // disputent les clics sur le canvas.
             if (window.retouchCanvasController) window.retouchCanvasController.cancelMode();
             if (typeof window.renderRetouchPanel === "function") window.renderRetouchPanel();
+            if (window.monochromeMaskController) window.monochromeMaskController.cancelMode();
+            if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
 
             // Nécessaire pour afficher immédiatement les réglages du pinceau
             // (taille/dureté) dès la sélection de l'outil, avant le premier trait.

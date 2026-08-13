@@ -191,11 +191,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
     saveExternalPrograms: (programs) =>
         ipcRenderer.invoke("save-external-programs", programs),
 
+    getFrameSettings: () =>
+        ipcRenderer.invoke("get-frame-settings"),
+
+    saveFrameSettings: (settings) =>
+        ipcRenderer.invoke("save-frame-settings", settings),
+
     browseExecutable: () =>
         ipcRenderer.invoke("browse-executable"),
 
     openInExternalProgram: (payload) =>
         ipcRenderer.invoke("open-in-external-program", payload),
+
+    // ============================================================
+    // SIMULATION PELLICULE (Hald-CLUT)
+    // ============================================================
+
+    browseHaldClut: () =>
+        ipcRenderer.invoke("browse-hald-clut"),
+
+    listHaldClutPresets: () =>
+        ipcRenderer.invoke("list-hald-clut-presets"),
 
     addSingleFileToCatalog: (filePath) =>
         ipcRenderer.invoke("catalog:add-single-file", filePath),

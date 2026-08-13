@@ -14,11 +14,23 @@ class RenderPipeline {
     }
 
     process(imageData, settings) {
-        if (!imageData || !imageData.data) return imageData;
-        
-        let currentData = imageData;
+        return this.processRange(imageData, settings, 0, this.filters.length);
+    }
 
-        for (const filter of this.filters) {
+    /**
+     * Exécute seulement les filtres [startIndex, endIndex) — utilisé par
+     * ImageProcessor pour insérer la Gomme du module Monochrome juste après
+     * le trio Mixeur N&B/Lumière tamisée/Dodge & Burn, sans dupliquer la
+     * logique d'itération/gestion d'erreurs de process().
+     */
+    processRange(imageData, settings, startIndex, endIndex) {
+        if (!imageData || !imageData.data) return imageData;
+
+        let currentData = imageData;
+        const end = Math.min(endIndex, this.filters.length);
+
+        for (let i = Math.max(0, startIndex); i < end; i++) {
+            const filter = this.filters[i];
             if (!filter) continue;
 
             try {

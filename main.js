@@ -1738,11 +1738,104 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
         return { success: true };
     });
 
+    // ============================================================
+    // 🖼️ ENCADREMENT (préférence globale, pas par photo — export ET impression)
+    // ============================================================
+
+    const DEFAULT_FRAME_SETTINGS = { enabled: false, color: "white", widthPercent: 5 };
+
+    ipcMain.handle("get-frame-settings", async () => {
+        return studioPreferencesStore ? studioPreferencesStore.get("frameSettings", DEFAULT_FRAME_SETTINGS) : DEFAULT_FRAME_SETTINGS;
+    });
+
+    ipcMain.handle("save-frame-settings", async (event, settings) => {
+        if (!studioPreferencesStore) return { success: false, error: "Store indisponible" };
+        studioPreferencesStore.set("frameSettings", {
+            enabled: !!settings?.enabled,
+            color: settings?.color === "black" ? "black" : "white",
+            widthPercent: Math.max(0, Math.min(15, Number(settings?.widthPercent) || 0))
+        });
+        return { success: true };
+    });
+
+    // ============================================================
+    // 🎞️ PRÉRÉGLAGES HALD-CLUT INTÉGRÉS (assets/hald-clut/bw, /color)
+    // ============================================================
+
+    ipcMain.handle("list-hald-clut-presets", async () => {
+        const baseDir = path.join(__dirname, "assets", "hald-clut");
+
+        const listCategory = (category) => {
+            const categoryDir = path.join(baseDir, category);
+            const results = [];
+            if (!fs.existsSync(categoryDir)) return results;
+
+            let entries;
+            try {
+                entries = fs.readdirSync(categoryDir, { withFileTypes: true });
+            } catch (err) {
+                console.error(`❌ Erreur lecture préréglages Hald-CLUT (${category}) :`, err);
+                return results;
+            }
+
+            for (const entry of entries) {
+                if (entry.isDirectory()) {
+                    // Sous-dossier de marque (Kodak, Ilford, ...)
+                    const brand = entry.name;
+                    const brandDir = path.join(categoryDir, brand);
+                    let files = [];
+                    try {
+                        files = fs.readdirSync(brandDir).filter(f => f.toLowerCase().endsWith(".png"));
+                    } catch (err) {
+                        console.error(`❌ Erreur lecture dossier de marque ${brand} :`, err);
+                        continue;
+                    }
+                    for (const file of files) {
+                        results.push({
+                            brand,
+                            name: path.basename(file, path.extname(file)),
+                            path: path.join(brandDir, file)
+                        });
+                    }
+                } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".png")) {
+                    // PNG directement à la racine (bw/ ou color/), sans marque
+                    results.push({
+                        brand: null,
+                        name: path.basename(entry.name, path.extname(entry.name)),
+                        path: path.join(categoryDir, entry.name)
+                    });
+                }
+            }
+
+            results.sort((a, b) => {
+                const brandCmp = (a.brand || "").localeCompare(b.brand || "");
+                return brandCmp !== 0 ? brandCmp : a.name.localeCompare(b.name);
+            });
+            return results;
+        };
+
+        return {
+            bw: listCategory("bw"),
+            color: listCategory("color")
+        };
+    });
+
     ipcMain.handle("browse-executable", async () => {
         const result = await dialog.showOpenDialog(mainWindow, {
             title: "Sélectionner le programme externe",
             properties: ["openFile"],
             filters: [{ name: "Exécutable Windows", extensions: ["exe"] }]
+        });
+
+        if (result.canceled || !result.filePaths.length) return null;
+        return result.filePaths[0];
+    });
+
+    ipcMain.handle("browse-hald-clut", async () => {
+        const result = await dialog.showOpenDialog(mainWindow, {
+            title: "Sélectionner un Hald-CLUT",
+            properties: ["openFile"],
+            filters: [{ name: "Image PNG", extensions: ["png"] }]
         });
 
         if (result.canceled || !result.filePaths.length) return null;
