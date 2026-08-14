@@ -114,9 +114,26 @@ function updateMaskOpacity(id, opacity) {
     return mask;
 }
 
+// 🔹 Visualisation de la zone (bouton œil, masques IA) : préférence d'AFFICHAGE
+// pure, PAS un réglage du masque — délibérément SANS beginAction() pour ne
+// pas polluer l'historique annuler/rétablir avec un simple toggle d'aperçu.
+function setMaskOverlayVisible(id, visible) {
+    const mask = getMask(id);
+    if (mask) mask.showOverlay = visible;
+    return mask;
+}
+
+function isMaskOverlayVisible(id) {
+    const mask = getMask(id);
+    return !!(mask && mask.showOverlay);
+}
+
 function displayName(mask) {
     if (mask.name) return mask.name;
-    const labels = { linear: "Linéaire", radial: "Radial", brush: "Pinceau" };
+    const labels = {
+        linear: "Linéaire", radial: "Radial", brush: "Pinceau",
+        sky: "Ciel", subject: "Sujet", background: "Arrière-plan"
+    };
     const sameType = masksList.filter(m => m.type === mask.type);
     const index = sameType.indexOf(mask) + 1;
     return `${labels[mask.type] || mask.type} ${index}`;
@@ -132,6 +149,8 @@ if (typeof window !== "undefined") {
         updateMaskGeometry,
         updateMaskAdjustments,
         updateMaskOpacity,
+        setMaskOverlayVisible,
+        isMaskOverlayVisible,
         toggleMask,
         removeMask,
         clearMasks,
@@ -147,7 +166,8 @@ if (typeof window !== "undefined") {
 if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         createMask, getMasks, getMask, getActiveMask, setActiveMask,
-        updateMaskGeometry, updateMaskAdjustments, updateMaskOpacity, toggleMask, removeMask,
+        updateMaskGeometry, updateMaskAdjustments, updateMaskOpacity,
+        setMaskOverlayVisible, isMaskOverlayVisible, toggleMask, removeMask,
         clearMasks, displayName, beginAction, undo, redo, canUndo, canRedo, DEFAULT_MASK_ADJUSTMENTS
     };
 }

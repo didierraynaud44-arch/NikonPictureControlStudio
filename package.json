@@ -31,11 +31,13 @@
     "asar": true,
     "asarUnpack": [
       "bin/**/*",
+      "assets/ai-models/**/*",
       "**/node_modules/nikon-flexible-color-picture-control/**/*",
       "**/node_modules/sharp/**/*",
       "**/node_modules/sqlite3/**/*",
       "**/node_modules/exiftool-vendored/**/*",
       "**/node_modules/libraw-wasm/**/*",
+      "**/node_modules/onnxruntime-web/**/*",
       "db.js",
       "services/catalogService.js"
     ],
@@ -68,6 +70,7 @@
     "exiftool-vendored": "^37.0.0",
     "libraw-wasm": "^1.6.0",
     "nikon-flexible-color-picture-control": "^1",
+    "onnxruntime-web": "^1.27.0",
     "sharp": "^0.34",
     "sqlite3": "^5.1.7"
   }

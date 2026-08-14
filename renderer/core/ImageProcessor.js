@@ -959,7 +959,26 @@ class ImageProcessor {
 
         const masksToDraw = [];
         const activeMask = MasksManager.getActiveMask();
-        if (activeMask) masksToDraw.push({ mask: activeMask, live: false });
+        const isAiMaskType = (type) => type === "sky" || type === "subject" || type === "background";
+
+        // 🔹 Masques IA (Ciel/Sujet/Arrière-plan) : EXCLUS de l'affichage
+        // automatique "masque actif" — leur aplat plein cadre serait sinon
+        // TOUJOURS visible dès qu'on sélectionne le masque pour éditer Seuil/
+        // Adoucissement (l'activation ne change pas au clic du bouton œil),
+        // rendant ce bouton inopérant en pratique : un 2e clic bascule bien
+        // showOverlay à false (voir MasksManager.setMaskOverlayVisible), mais
+        // ce bloc redessinait quand même l'aplat via le masque actif, ignorant
+        // totalement showOverlay. Pour ces types, showOverlay est désormais
+        // l'UNIQUE source de vérité (voir boucle ci-dessous).
+        if (activeMask && !isAiMaskType(activeMask.type)) {
+            masksToDraw.push({ mask: activeMask, live: false });
+        }
+
+        for (const mask of MasksManager.getMasks()) {
+            if (isAiMaskType(mask.type) && mask.showOverlay) {
+                masksToDraw.push({ mask, live: false });
+            }
+        }
 
         const controller = this.maskController;
         if (controller && controller.isDrawing && controller.pendingMask) {
@@ -1139,9 +1158,48 @@ class ImageProcessor {
 
         } else if (mask.type === "brush") {
             this._drawBrushMaskFill(ctx, width, height, mask);
+        } else if (mask.type === "sky" || mask.type === "subject" || mask.type === "background") {
+            this._drawAiMaskFill(ctx, width, height, mask);
         }
 
         ctx.restore();
+    }
+
+    /**
+     * Peint un aplat semi-transparent rouge à partir d'une alpha map déjà
+     * calculée (0..1, largeur×hauteur PLEINE IMAGE), limité à la zone
+     * [minX,minY]-[maxX,maxY] pour ne pas traiter/dessiner l'image entière
+     * quand la zone réelle est plus petite (masque Pinceau localisé).
+     * Utilisé par _drawBrushMaskFill (bbox des traits) et _drawAiMaskFill
+     * (bbox = image entière, la zone IA pouvant couvrir n'importe où).
+     */
+    _paintAlphaOverlay(ctx, width, minX, minY, maxX, maxY, alpha) {
+        const boxW = maxX - minX;
+        const boxH = maxY - minY;
+        if (boxW <= 0 || boxH <= 0) return;
+
+        const imgData = new ImageData(boxW, boxH);
+        const data = imgData.data;
+        const OVERLAY_MAX_ALPHA = 130; // ~50% d'opacité max, convention Lightroom
+
+        for (let y = 0; y < boxH; y++) {
+            for (let x = 0; x < boxW; x++) {
+                const srcIdx = (y + minY) * width + (x + minX);
+                const a = alpha[srcIdx];
+                const dstIdx = (y * boxW + x) * 4;
+                data[dstIdx]     = 255; // rouge
+                data[dstIdx + 1] = 40;
+                data[dstIdx + 2] = 40;
+                data[dstIdx + 3] = Math.round(a * OVERLAY_MAX_ALPHA);
+            }
+        }
+
+        const off = document.createElement("canvas");
+        off.width = boxW;
+        off.height = boxH;
+        off.getContext("2d").putImageData(imgData, 0, 0);
+
+        ctx.drawImage(off, minX, minY);
     }
 
     /**
@@ -1172,36 +1230,23 @@ class ImageProcessor {
         minY = Math.max(0, Math.floor(minY));
         maxX = Math.min(width, Math.ceil(maxX));
         maxY = Math.min(height, Math.ceil(maxY));
-        const boxW = maxX - minX;
-        const boxH = maxY - minY;
-        if (boxW <= 0 || boxH <= 0) return;
 
         // Alpha réel du masque (même fonction que le traitement de l'image,
         // donc bords doux selon la dureté, identique au résultat final)
         const alpha = MaskEngine.computeBrushAlpha(width, height, mask.geometry);
+        this._paintAlphaOverlay(ctx, width, minX, minY, maxX, maxY, alpha);
+    }
 
-        const imgData = new ImageData(boxW, boxH);
-        const data = imgData.data;
-        const OVERLAY_MAX_ALPHA = 130; // ~50% d'opacité max, convention Lightroom
-
-        for (let y = 0; y < boxH; y++) {
-            for (let x = 0; x < boxW; x++) {
-                const srcIdx = (y + minY) * width + (x + minX);
-                const a = alpha[srcIdx];
-                const dstIdx = (y * boxW + x) * 4;
-                data[dstIdx]     = 255; // rouge
-                data[dstIdx + 1] = 40;
-                data[dstIdx + 2] = 40;
-                data[dstIdx + 3] = Math.round(a * OVERLAY_MAX_ALPHA);
-            }
-        }
-
-        const off = document.createElement("canvas");
-        off.width = boxW;
-        off.height = boxH;
-        off.getContext("2d").putImageData(imgData, 0, 0);
-
-        ctx.drawImage(off, minX, minY);
+    /**
+     * Aplat semi-transparent rouge pour Ciel/Sujet/Arrière-plan, à partir de
+     * la MÊME fonction que le rendu réel (MaskEngine.computeAlpha, donc
+     * Seuil/Adoucissement/Inversion inclus) — l'aperçu correspond exactement
+     * à l'effet réellement appliqué. Pas de bounding box réduite : la zone IA
+     * peut couvrir n'importe quelle portion de l'image.
+     */
+    _drawAiMaskFill(ctx, width, height, mask) {
+        const alpha = MaskEngine.computeAlpha(width, height, mask);
+        this._paintAlphaOverlay(ctx, width, 0, 0, width, height, alpha);
     }
 }
 

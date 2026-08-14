@@ -7,7 +7,7 @@ const HIT_TOLERANCE_PX = 24;
 class MaskCanvasController {
     constructor(imageProcessor) {
         this.imageProcessor = imageProcessor;
-        this.mode = null;        // null | "linear" | "radial" | "brush"
+        this.mode = null;        // null | "linear" | "radial" | "brush" | "ai-subject"
         this.isDrawing = false;
         this.pendingMask = null;
         this.editState = null;
@@ -16,6 +16,13 @@ class MaskCanvasController {
         this.brushHardness = 0.5;
         this.brushPreviewPos = null; // {x,y} normalisé (0-1) : dernière position survolée en mode pinceau
         this.onMaskChange = null;
+
+        // 🔹 Mode "ai-subject" (bouton "Sujet") : un simple clic sur la photo
+        // ne dessine rien lui-même, il déclenche ce callback (branché par
+        // masksPanel.js) avec les coordonnées normalisées cliquées — la
+        // segmentation SAM2 étant asynchrone, la création du masque est
+        // entièrement gérée côté appelant, pas ici.
+        this.onAiSubjectPick = null;
 
         this._boundMouseDown = null;
         this._boundMouseMove = null;
@@ -201,6 +208,19 @@ class MaskCanvasController {
                 e.clientX >= rect.left && e.clientX <= rect.right &&
                 e.clientY >= rect.top && e.clientY <= rect.bottom
             );
+
+            if (this.mode === "ai-subject" && insideCanvas) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const pos = this._canvasToNormalized(e.clientX, e.clientY);
+                this.mode = null;
+                this._setCursor();
+                if (typeof this.onAiSubjectPick === "function") {
+                    this.onAiSubjectPick(pos.x, pos.y);
+                }
+                return;
+            }
 
             if (this.mode && insideCanvas) {
                 e.preventDefault();
