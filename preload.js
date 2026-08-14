@@ -226,6 +226,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     listHaldClutPresets: () =>
         ipcRenderer.invoke("list-hald-clut-presets"),
 
+    // ============================================================
+    // CORRECTION D'OBJECTIF (base Lensfun + profils importés)
+    // ============================================================
+
+    listLensDatabaseFiles: () =>
+        ipcRenderer.invoke("list-lens-database-files"),
+
+    listImportedLensProfiles: () =>
+        ipcRenderer.invoke("list-imported-lens-profiles"),
+
+    importLensProfile: () =>
+        ipcRenderer.invoke("import-lens-profile"),
+
     addSingleFileToCatalog: (filePath) =>
         ipcRenderer.invoke("catalog:add-single-file", filePath),
 

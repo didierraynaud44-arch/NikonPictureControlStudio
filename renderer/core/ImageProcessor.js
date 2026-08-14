@@ -17,6 +17,16 @@ class ImageProcessor {
         this.currentOrientation = 1;
         this.currentLensInfo = null;
 
+        // 🔹 Correction d'objectif (LensDatabaseParser + LensCorrectionFilter) :
+        // le profil (distorsion/vignettage/TCA déjà interpolés pour la focale/
+        // ouverture actuelles) est résolu de façon ASYNCHRONE (parse XML), donc
+        // ne peut pas l'être depuis _buildRenderSettings() qui doit rester
+        // synchrone (appelée à chaque frame). Résolu en amont, mis en cache ici,
+        // re-render() automatique une fois prêt — même principe que le décodage
+        // des cartes d'opacité IA (voir MaskEngine.computeAiAlpha).
+        this.lensProfile = null;
+        this._lensProfileKey = null;
+
         // 🔹 Chemin de la photo actuellement affichée dans le Studio (mis à jour par
         // l'appelant, voir app.js/loadImageInStudio) et flag indiquant si l'affichage
         // doit utiliser this.originalRawBuffer en pleine résolution plutôt que
@@ -79,6 +89,12 @@ class ImageProcessor {
         };
         this.haldClutState = null; // { path, imageData, side }
 
+        // 🔹 Correction d'objectif (distorsion/TCA/vignettage) : TOUJOURS en
+        // tout premier — c'est une correction GÉOMÉTRIQUE qui doit précéder tout
+        // filtre basé sur le voisinage des pixels (Netteté, Clarté, Débruitage,
+        // etc.), sans quoi ceux-ci opéreraient sur une image encore déformée.
+        if (typeof LensCorrectionFilter !== "undefined") this.pipeline.add(new LensCorrectionFilter());
+
         if (typeof WhiteBalanceFilter !== "undefined") this.pipeline.add(new WhiteBalanceFilter());
         if (typeof SharpenFilter !== "undefined") this.pipeline.add(new SharpenFilter());
         if (typeof MidRangeSharpenFilter !== "undefined") this.pipeline.add(new MidRangeSharpenFilter());
@@ -108,7 +124,6 @@ class ImageProcessor {
         if (typeof DehazeFilter !== "undefined") this.pipeline.add(new DehazeFilter());
         if (typeof VibranceFilter !== "undefined") this.pipeline.add(new VibranceFilter());
         if (typeof SCurveFilter !== "undefined") this.pipeline.add(new SCurveFilter());
-        if (typeof LensCorrectionFilter !== "undefined") this.pipeline.add(new LensCorrectionFilter());
         if (typeof VignetteFilter !== "undefined") this.pipeline.add(new VignetteFilter());
         if (typeof DenoiseFilter !== "undefined") this.pipeline.add(new DenoiseFilter());
 
@@ -163,7 +178,49 @@ class ImageProcessor {
             }
         }
 
+        // 🔹 Correction d'objectif : injecte le profil déjà résolu (ou null tant
+        // qu'il ne l'est pas encore / qu'aucun profil ne correspond) — voir
+        // _refreshLensProfile, qui déclenche la résolution async et redemande
+        // un render() une fois prête.
+        if (settings.lensCorrection) {
+            this._refreshLensProfile();
+            settings.lensProfile = this.lensProfile;
+        }
+
         return settings;
+    }
+
+    /**
+     * Résout (de façon async, fire-and-forget) le profil Lensfun pour
+     * l'objectif/focale/ouverture actuels (this.currentLensInfo), le met en
+     * cache dans this.lensProfile, et redemande un render() une fois prêt.
+     * No-op si l'objectif/focale n'a pas changé depuis la dernière résolution
+     * (évite de re-parser à chaque frame pendant qu'on bouge un curseur).
+     * @private
+     */
+    _refreshLensProfile() {
+        if (typeof LensDatabaseParser === "undefined") return;
+        const info = this.currentLensInfo;
+        if (!info || !info.model) {
+            this.lensProfile = null;
+            this._lensProfileKey = null;
+            return;
+        }
+
+        const key = `${info.model}|${info.focalLength}|${info.aperture}|${info.make}`;
+        if (key === this._lensProfileKey) return; // déjà résolu (ou en cours) pour cette combinaison
+
+        this._lensProfileKey = key;
+        LensDatabaseParser.findLensProfile(info.model, info.focalLength, info.aperture, info.make)
+            .then((profile) => {
+                if (this._lensProfileKey !== key) return; // objectif/focale a changé entre-temps
+                this.lensProfile = profile;
+                if (this.originalRawBuffer) this.render();
+                if (typeof this.onLensProfileResolved === "function") this.onLensProfileResolved(profile);
+            })
+            .catch((err) => {
+                console.error("❌ Erreur résolution profil objectif :", err);
+            });
     }
 
     /**
@@ -377,7 +434,8 @@ class ImageProcessor {
                 this.currentLensInfo = {
                     model: metadata.lens || "Generic",
                     focalLength: metadata.focalLength || 0,
-                    aperture: metadata.aperture || 0
+                    aperture: metadata.aperture || 0,
+                    make: metadata.make || null
                 };
 
                 this.resetTransform();

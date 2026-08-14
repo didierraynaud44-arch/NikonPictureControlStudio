@@ -188,6 +188,18 @@
                     <input type="range" id="rangeRotationDegree" min="-45" max="45" value="0" step="0.1" style="width:100%;">
                     <button id="btnResetRotation" class="btn-secondary" style="margin-top: 8px; width: 100%; font-size: 11px;">Réinitialiser la rotation</button>
                 </div>
+
+                <!-- Correction d'objectif (distorsion, vignettage, aberration
+                     chromatique) : base Lensfun (assets/lens-database/, CC BY-SA
+                     3.0) + profils importés manuellement. -->
+                <div class="control-group" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #35373c;">
+                    <div class="pc-row" style="margin-bottom: 6px;">
+                        <label style="font-size: 12px;">Correction de l'objectif :</label>
+                        <input type="checkbox" id="checkLensCorrection" class="pc-checkbox">
+                    </div>
+                    <p id="lensCorrectionStatus" style="font-size: 11px; color: #949ba4; margin: 0 0 8px;"></p>
+                    <button id="btnImportLensProfile" class="btn-secondary" style="width: 100%; font-size: 11px;">Importer un profil XML...</button>
+                </div>
             </div>
 
             <div id="retouchPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
@@ -518,6 +530,7 @@
     <script src="core/FrameUtils.js"></script>
 
     <!-- Filtres -->
+    <script src="filters/LensCorrectionFilter.js"></script>
     <script src="filters/WhiteBalanceFilter.js"></script>
     <script src="filters/ContrastFilter.js"></script>
     <script src="filters/BrightnessFilter.js"></script>
@@ -548,6 +561,7 @@
     <!-- UI & Moteur -->
     <script src="components/ToneCurveWidget.js"></script>
     <script type="module" src="core/RawFullResDecoder.js"></script>
+    <script src="core/LensDatabaseParser.js"></script>
     <script src="core/ImageProcessor.js"></script>
     <script src="components/exifPanel.js"></script>
     <script src="components/pictureControlPanel.js"></script>

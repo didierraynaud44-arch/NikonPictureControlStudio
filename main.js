@@ -629,6 +629,26 @@ ipcMain.handle("read-file-direct", async (event, filePath, maxWidth = 1200) => {
             console.warn("⚠️ Erreur extraction EXIF (exifr):", exifErr.message);
         }
 
+        // 🔹 Repli exiftool pour l'objectif : exifr ne décode pas les données
+        // objectif propriétaires Nikon (MakerNote LensData chiffré/binaire) pour
+        // certains couples boîtier/objectif (confirmé sur un AF-P DX 18-55mm —
+        // exifr ne trouve AUCUN champ "lens" du tout, même en parsing complet),
+        // alors qu'exiftool (déjà vendorisé et utilisé ailleurs, voir
+        // services/rawDecoder.js) le résout via sa table de correspondance
+        // LensID. Repli ciblé (lecture de 4 tags, pas un exiftool.read()
+        // complet), uniquement si exifr n'a rien trouvé.
+        if (!result.lens) {
+            try {
+                const lensTags = await exiftool.read(filePath, ["LensID", "LensModel", "Lens", "LensSpec"]);
+                result.lens = lensTags.LensID || lensTags.LensModel || lensTags.Lens || null;
+                if (result.lens) {
+                    console.log("📸 Objectif retrouvé via exiftool (repli) :", result.lens);
+                }
+            } catch (lensErr) {
+                console.warn("⚠️ Erreur extraction objectif (repli exiftool):", lensErr.message);
+            }
+        }
+
         // 🔥 Le ShutterCount (exiftool.read complet) a été retiré d'ici : c'était l'appel
         // le plus lent de ce handler et il bloquait l'affichage de chaque photo à la
         // navigation. Il est désormais récupéré en tâche de fond après affichage, via
@@ -1895,6 +1915,62 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
             bw: listCategory("bw"),
             color: listCategory("color")
         };
+    });
+
+    // ============================================================
+    // 🔍 CORRECTION D'OBJECTIF — base Lensfun (assets/lens-database/, CC BY-SA
+    // 3.0, voir assets/lens-database/NOTICE) + profils importés manuellement
+    // (userData/lens-profiles/)
+    // ============================================================
+
+    ipcMain.handle("list-lens-database-files", async () => {
+        const dir = path.join(__dirname, "assets", "lens-database");
+        try {
+            return fs.readdirSync(dir)
+                .filter(f => f.toLowerCase().endsWith(".xml"))
+                .map(f => path.join(dir, f));
+        } catch (err) {
+            console.error("❌ Erreur lecture assets/lens-database :", err);
+            return [];
+        }
+    });
+
+    ipcMain.handle("list-imported-lens-profiles", async () => {
+        const dir = path.join(app.getPath("userData"), "lens-profiles");
+        try {
+            if (!fs.existsSync(dir)) return [];
+            return fs.readdirSync(dir)
+                .filter(f => f.toLowerCase().endsWith(".xml"))
+                .map(f => path.join(dir, f));
+        } catch (err) {
+            console.error("❌ Erreur lecture des profils objectif importés :", err);
+            return [];
+        }
+    });
+
+    ipcMain.handle("import-lens-profile", async () => {
+        const result = await dialog.showOpenDialog(mainWindow, {
+            title: "Importer un profil de correction d'objectif (XML Lensfun)",
+            properties: ["openFile"],
+            filters: [{ name: "Profil XML Lensfun", extensions: ["xml"] }]
+        });
+
+        if (result.canceled || !result.filePaths.length) return null;
+        const srcPath = result.filePaths[0];
+
+        try {
+            const dir = path.join(app.getPath("userData"), "lens-profiles");
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+            const destName = path.basename(srcPath);
+            const destPath = path.join(dir, destName);
+            fs.copyFileSync(srcPath, destPath);
+
+            return { success: true, path: destPath };
+        } catch (err) {
+            console.error("❌ Erreur import profil objectif :", err);
+            return { success: false, error: err.message };
+        }
     });
 
     ipcMain.handle("browse-executable", async () => {

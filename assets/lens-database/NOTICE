@@ -1,0 +1,28 @@
+Lens calibration database
+==========================
+
+The XML files in this directory (assets/lens-database/) are the lens
+calibration database from the Lensfun project:
+
+    https://github.com/lensfun/lensfun
+
+Source: data/db/ directory of the lensfun/lensfun repository (branch
+"master"), downloaded 2026-08-14.
+
+License: Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0)
+    https://creativecommons.org/licenses/by-sa/3.0/
+    Full license text: https://github.com/lensfun/lensfun/blob/master/data/COPYING.CC_BY-SA_3.0
+
+This license is distinct from and independent of the LGPL license that
+covers the Lensfun C++ library itself. Pixel RAW does not use or link
+against the Lensfun library or any of its source code — only this XML
+calibration data is used, read and interpreted by our own JavaScript code
+(renderer/core/LensDatabaseParser.js, renderer/filters/LensCorrectionFilter.js),
+which reimplements the published distortion/vignetting/TCA correction
+formulas independently.
+
+Under CC BY-SA 3.0, redistribution of this unmodified data is permitted
+provided proper attribution is given (as done here) and any redistributed
+adaptation of the data itself remains under the same license. This does not
+extend to the rest of the Pixel RAW application, which remains under its
+own (MIT) license.

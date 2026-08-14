@@ -1139,7 +1139,16 @@ if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
                 {
                     lens: fileInfo.lens,
                     focalLength: fileInfo.rawFocalLength || fileInfo.focal,
-                    aperture: fileInfo.rawAperture || fileInfo.aperture
+                    aperture: fileInfo.rawAperture || fileInfo.aperture,
+                    // 🔹 Fabricant du boîtier : le champ EXIF "Lens" de secours (utilisé
+                    // quand LensModel est absent, cas courant pour certains couples
+                    // boîtier/objectif Nikon) est souvent générique ("18-55mm
+                    // f/3.5-5.6", sans marque) — plusieurs fabricants partagent des
+                    // noms d'objectif quasi identiques dans la base Lensfun (Canon/
+                    // Samsung/Sony/Nikon ont chacun un "18-55mm f/3.5-5.6"). Sans
+                    // filtrer par fabricant d'abord, la recherche peut se tromper de
+                    // marque — voir LensDatabaseParser.findLensProfile.
+                    make: fileInfo.make
                 }
             );
 
@@ -1152,6 +1161,12 @@ if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
             // 🔥 APPLIQUER LES RÉGLAGES CHARGÉS
             window.imageProcessor.setPictureControl(pcData);
         }
+
+        // 🔹 Nouvelle photo = nouvel objectif potentiel (currentLensInfo vient
+        // d'être mis à jour par load()) : rafraîchit tout de suite l'état
+        // affiché (case à cocher + texte de statut), pendant que la résolution
+        // async du profil (voir _refreshLensProfile) se termine en arrière-plan.
+        if (typeof window.updateLensCorrectionStatus === "function") window.updateLensCorrectionStatus();
 
         if (typeof window.updatePictureControl === "function") {
             window.updatePictureControl({
@@ -2228,6 +2243,78 @@ function initButtons() {
             if (rangeDegree) rangeDegree.value = 0;
             if (inputDegree) inputDegree.value = 0;
             applyStudioTransform();
+        };
+    }
+
+    // 🔹 Correction d'objectif : panneau "Orientation & Rotation" (case à
+    // cocher externe au panneau Picture Control, voir readState() dans
+    // pictureControlPanel.js — lensCorrection y est un simple passe-plat
+    // depuis currentPC pour ne jamais être écrasé par un autre curseur).
+    const checkLensCorrection  = document.getElementById("checkLensCorrection");
+    const lensCorrectionStatus = document.getElementById("lensCorrectionStatus");
+    const btnImportLensProfile = document.getElementById("btnImportLensProfile");
+
+    function updateLensCorrectionStatus() {
+        if (!lensCorrectionStatus) return;
+        const ip = window.imageProcessor;
+        const info = ip && ip.currentLensInfo;
+
+        if (checkLensCorrection) checkLensCorrection.checked = !!(ip && ip.pictureControl && ip.pictureControl.lensCorrection);
+
+        if (!info || !info.model || info.model === "Generic") {
+            lensCorrectionStatus.textContent = "Aucun objectif détecté dans les métadonnées de cette photo.";
+            return;
+        }
+        if (!ip.lensProfile) {
+            lensCorrectionStatus.textContent = `Aucun profil disponible pour "${info.model}".`;
+            return;
+        }
+        const sourceLabel = ip.lensProfile.source === "imported" ? "profil importé" : "base intégrée";
+        lensCorrectionStatus.textContent = `Profil trouvé : ${ip.lensProfile.lensName} (${sourceLabel}).`;
+    }
+    window.updateLensCorrectionStatus = updateLensCorrectionStatus;
+    if (window.imageProcessor) {
+        window.imageProcessor.onLensProfileResolved = updateLensCorrectionStatus;
+        updateLensCorrectionStatus();
+    }
+
+    if (checkLensCorrection) {
+        checkLensCorrection.onchange = () => {
+            if (!window.imageProcessor || !window.imageProcessor.pictureControl) return;
+            window.imageProcessor.pictureControl.lensCorrection = checkLensCorrection.checked;
+            window.imageProcessor.render();
+            saveCurrentPhotoSettingsToCatalog();
+        };
+    }
+
+    if (btnImportLensProfile) {
+        btnImportLensProfile.onclick = async () => {
+            if (!window.electronAPI || typeof window.electronAPI.importLensProfile !== "function") return;
+            const result = await window.electronAPI.importLensProfile();
+            if (!result || !result.success) return;
+
+            // 🔹 Validation : le fichier doit être un XML Lensfun reconnaissable
+            // (au moins un <lens> avec de la calibration exploitable), sinon on
+            // prévient plutôt que de l'ajouter silencieusement sans effet.
+            try {
+                const xmlText = await (await fetch(`file:///${result.path.replace(/\\/g, "/")}`)).text();
+                const parsed = window.LensDatabaseParser.parseLensfunXml(xmlText, "imported");
+                if (!parsed.length) {
+                    alert("Ce fichier ne semble pas être un profil XML Lensfun valide (aucun objectif exploitable trouvé).");
+                    return;
+                }
+            } catch (err) {
+                console.error("❌ Erreur validation du profil importé :", err);
+                alert("Impossible de lire ce fichier.");
+                return;
+            }
+
+            await window.LensDatabaseParser.reload();
+            if (window.imageProcessor) {
+                window.imageProcessor._lensProfileKey = null; // force une nouvelle résolution
+                window.imageProcessor._refreshLensProfile();
+            }
+            alert("Profil importé avec succès.");
         };
     }
 

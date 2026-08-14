@@ -282,11 +282,6 @@ function buildPanelHtml(pc, compact, extendedNP3) {
 
         ${createSlider("Vignettage", "vignette", pc.vignette ?? 0, -5, 5, 0.1)}
         ${createSlider("Réduction du bruit", "denoise", pc.denoise ?? 0, 0, 5, 0.1)}
-
-        <div class="pc-row" style="margin-top: 10px;">
-            <label style="font-size: 12px;">Correction de l'objectif :</label>
-            <input type="checkbox" data-field="lensCorrection" class="pc-checkbox" ${pc.lensCorrection ? 'checked' : ''}>
-        </div>
         `}
 
         ${extendedNP3 ? buildNP3SectionHtml(pc) : ""}
@@ -420,7 +415,11 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             vibrance: compact ? (currentPC.vibrance ?? 0) : getVal("vibrance"),
             vignette: compact ? (currentPC.vignette ?? 0) : getVal("vignette"),
             denoise: compact ? (currentPC.denoise ?? 0) : getVal("denoise"),
-            lensCorrection: compact ? !!currentPC.lensCorrection : getBool("lensCorrection"),
+            // 🔹 Plus de case à cocher DANS ce panneau (voir panneau "Orientation
+            // & Rotation", géré directement dans app.js) : simple passe-plat
+            // depuis currentPC, pour que ce champ ne soit jamais réinitialisé à
+            // false quand un AUTRE curseur de ce panneau déclenche readState().
+            lensCorrection: !!currentPC.lensCorrection,
 
             toneCurveLut: curveLut
         };
