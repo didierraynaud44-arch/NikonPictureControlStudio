@@ -65,6 +65,18 @@ class ImageProcessor {
         this.retouchController = null;
         this._retouchCache = {};
 
+        // 🔹 Débruitage neuronal (NAFNet, voir NeuralDenoiseEngine.js) : PAS un
+        // filtre du pipeline (trop lent pour tourner à chaque frame) — un buffer
+        // "cuit" une fois via applyNeuralDenoise(), au même niveau que les
+        // retouches (avant Picture Control), réutilisé par render()/export tant
+        // qu'il correspond encore au buffer source actuel et à la version des
+        // retouches au moment du calcul (voir _resolveNeuralDenoiseBuffer).
+        this.neuralDenoiseApplied = false;
+        this.neuralDenoisePending = false; // appliqué lors d'une session précédente, à réappliquer explicitement
+        this._neuralDenoiseBuffer = null;
+        this._neuralDenoiseSourceRef = null;
+        this._neuralDenoiseRetouchVersion = null;
+
         // 🔹 NOUVEAU : Histogramme
         this.histogramMode = "luminance"; // "luminance" | "rgb"
         this._lastImageDataForHistogram = null;
@@ -579,6 +591,94 @@ class ImageProcessor {
         return working;
     }
 
+    /**
+     * Buffer à utiliser pour le pipeline : le buffer débruité par IA (voir
+     * applyNeuralDenoise) si un résultat valide existe pour CE buffer source
+     * précis (référence identique, donc invalidé automatiquement dès que la
+     * photo ou la résolution change) et que les retouches n'ont pas changé
+     * depuis son calcul — sinon, sourceBuffer tel quel.
+     * @private
+     */
+    _resolveNeuralDenoiseBuffer(sourceBuffer) {
+        if (this.neuralDenoiseApplied
+            && this._neuralDenoiseBuffer
+            && this._neuralDenoiseSourceRef === sourceBuffer
+            && this._neuralDenoiseRetouchVersion === (typeof RetouchManager !== "undefined" ? RetouchManager.getVersion() : null)) {
+            return this._neuralDenoiseBuffer;
+        }
+        return sourceBuffer;
+    }
+
+    /**
+     * Lance le débruitage neuronal (NAFNet, voir NeuralDenoiseEngine.js) sur la
+     * photo actuellement affichée, TOUJOURS en pleine résolution (jamais sur
+     * l'aperçu réduit — sinon le résultat visible ne correspondrait pas à
+     * l'export). Réutilise le mécanisme de bascule pleine résolution déjà en
+     * place pour le zoom (ensureFullResolutionLoaded) : le Studio bascule donc
+     * automatiquement en pleine résolution pendant/après le traitement, comme
+     * un zoom au-delà du seuil.
+     * @param {(done:number, total:number) => void} [onProgress]
+     * @param {{cancelled:boolean}} [signal]
+     * @returns {Promise<boolean>} true si le débruitage a été appliqué avec succès
+     */
+    async applyNeuralDenoise(onProgress, signal) {
+        if (typeof NeuralDenoiseEngine === "undefined") {
+            console.error("❌ NeuralDenoiseEngine indisponible");
+            return false;
+        }
+        if (!this.currentFilePath) {
+            console.warn("⚠️ Aucune photo chargée pour le débruitage neuronal");
+            return false;
+        }
+
+        await this.ensureFullResolutionLoaded(this.currentFilePath);
+        if (!this.originalRawBuffer) {
+            console.error("❌ Pas de buffer pleine résolution pour le débruitage neuronal");
+            return false;
+        }
+
+        const source = this._applyRetouches(this.originalRawBuffer, "fullRes");
+
+        try {
+            const result = await NeuralDenoiseEngine.denoiseImage(source, { onProgress, signal });
+            this._neuralDenoiseBuffer = result;
+            this._neuralDenoiseSourceRef = source;
+            this._neuralDenoiseRetouchVersion = typeof RetouchManager !== "undefined" ? RetouchManager.getVersion() : null;
+            this.neuralDenoiseApplied = true;
+            this.neuralDenoisePending = false;
+            this.render();
+            return true;
+        } catch (err) {
+            if (!err || !err.cancelled) {
+                console.error("❌ Erreur débruitage neuronal :", err);
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Retire le débruitage neuronal appliqué (revient au buffer normal, comme
+     * annuler une retouche) — ne touche PAS neuralDenoisePending, géré séparément
+     * par app.js au chargement d'une photo.
+     */
+    removeNeuralDenoise() {
+        this.neuralDenoiseApplied = false;
+        this._neuralDenoiseBuffer = null;
+        this._neuralDenoiseSourceRef = null;
+        this._neuralDenoiseRetouchVersion = null;
+        this.render();
+    }
+
+    /**
+     * Indique qu'un débruitage neuronal avait été appliqué lors d'une session
+     * précédente pour cette photo (chargé depuis la base, voir app.js) — ne
+     * recalcule PAS automatiquement (opération lente), affiche juste une
+     * proposition de réapplication dans le panneau (voir neuralDenoisePanel.js).
+     */
+    setNeuralDenoisePending(flag) {
+        this.neuralDenoisePending = !!flag;
+    }
+
     render() {
         // 🔹 Zoom pleine résolution (Studio) : une fois ensureFullResolutionLoaded()
         // résolu pour LA PHOTO ACTUELLEMENT AFFICHÉE, l'affichage bascule sur
@@ -593,11 +693,12 @@ class ImageProcessor {
         if (!rawSourceBuffer || !this.display) return;
 
         const sourceBuffer = this._applyRetouches(rawSourceBuffer, usingFullRes ? "fullRes" : "preview");
+        const workingBuffer = this._resolveNeuralDenoiseBuffer(sourceBuffer);
 
         let currentImageData = new ImageData(
-            new Uint8ClampedArray(sourceBuffer.data),
-            sourceBuffer.width,
-            sourceBuffer.height
+            new Uint8ClampedArray(workingBuffer.data),
+            workingBuffer.width,
+            workingBuffer.height
         );
 
         if (this.pipeline) {
@@ -881,10 +982,11 @@ class ImageProcessor {
         // Créer une copie des données originales en pleine résolution (après
         // application des retouches, mises en cache par résolution)
         const retouchedBuffer = this._applyRetouches(this.originalRawBuffer, "fullRes");
+        const workingBuffer = this._resolveNeuralDenoiseBuffer(retouchedBuffer);
         let currentImageData = new ImageData(
-            new Uint8ClampedArray(retouchedBuffer.data),
-            retouchedBuffer.width,
-            retouchedBuffer.height
+            new Uint8ClampedArray(workingBuffer.data),
+            workingBuffer.width,
+            workingBuffer.height
         );
 
         // Appliquer le pipeline de traitement (Picture Control, etc.)
@@ -948,10 +1050,11 @@ class ImageProcessor {
         }
 
         const retouchedBuffer = this._applyRetouches(this.originalRawBuffer, "fullRes");
+        const workingBuffer = this._resolveNeuralDenoiseBuffer(retouchedBuffer);
         let currentImageData = new ImageData(
-            new Uint8ClampedArray(retouchedBuffer.data),
-            retouchedBuffer.width,
-            retouchedBuffer.height
+            new Uint8ClampedArray(workingBuffer.data),
+            workingBuffer.width,
+            workingBuffer.height
         );
 
         if (this.pipeline) {

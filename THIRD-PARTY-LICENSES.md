@@ -23,7 +23,16 @@ open source. Un grand merci à leurs auteurs et contributeurs.
 |---|---|---|---|
 | `mobilesam-encoder.onnx` / `mobilesam-decoder.onnx` | Détection de sujet / arrière-plan (masques IA) | Apache 2.0 | https://github.com/ChaoningZhang/MobileSAM |
 | `skyseg.onnx` | Détection automatique du ciel (masques IA) | MIT | https://github.com/xiongzhu666/Sky-Segmentation-and-Post-processing |
-| `onnxruntime-web` | Moteur d'inférence exécutant les modèles ci-dessus | MIT | https://github.com/microsoft/onnxruntime |
+| `denoise-nafnet.onnx` | Débruitage neuronal (expérimental) | MIT | https://github.com/megvii-research/NAFNet |
+| `onnxruntime-web` | Moteur d'inférence exécutant les modèles ci-dessus — WebGPU (accélération GPU) en priorité, repli automatique sur WASM (CPU) si WebGPU est indisponible ou échoue | MIT | https://github.com/microsoft/onnxruntime |
+
+> ⚠️ `denoise-nafnet.onnx` est exporté par darktable-org/darktable-ai à partir 
+> de megvii-research/NAFNet (MIT). Le dépôt NAFNet lui-même s'appuie sur 
+> BasicSR, sous licence **Apache 2.0** — cette portion Apache 2.0 concerne le 
+> code d'entraînement/framework de NAFNet, pas les poids ONNX exportés 
+> (déclarés MIT sans condition additionnelle par darktable-ai), mais 
+> l'attribution Apache 2.0 est mentionnée ici par transparence si du code de 
+> ce dépôt venait à être repris directement.
 
 ## C. Gestion des LUTs (Hald-CLUT)
 

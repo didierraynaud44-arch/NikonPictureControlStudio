@@ -8,3 +8,4 @@ out/
 .DS_Store
 Thumbs.db
 assets/ai-models/skyseg.onnx
+assets/ai-models/denoise-nafnet.onnx

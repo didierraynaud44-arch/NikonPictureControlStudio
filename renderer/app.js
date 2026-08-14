@@ -246,6 +246,9 @@ async function saveCurrentPictureControlSettings(filePath) {
         if (typeof window.MonochromeManager !== "undefined") {
             settings.monochromeStudio = window.MonochromeManager.getSettings();
         }
+        if (window.imageProcessor) {
+            settings.neuralDenoiseApplied = !!window.imageProcessor.neuralDenoiseApplied;
+        }
 
         console.log("💾 Sauvegarde des réglages pour:", filePath);
 
@@ -284,6 +287,9 @@ async function saveCurrentPhotoSettingsToCatalog() {
     }
     if (typeof window.MonochromeManager !== "undefined") {
         settingsToSave.monochromeStudio = window.MonochromeManager.getSettings();
+    }
+    if (window.imageProcessor) {
+        settingsToSave.neuralDenoiseApplied = !!window.imageProcessor.neuralDenoiseApplied;
     }
 
     if (window.electronAPI && typeof window.electronAPI.savePhotoSettings === "function") {
@@ -1026,6 +1032,19 @@ async function loadImageInStudio(filePath) {
             if (savedSettings && "monochromeStudio" in savedSettings) delete savedSettings.monochromeStudio;
             window.MonochromeManager.loadSettings(savedMonochromeStudio);
             if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
+        }
+
+        // 🔹 Débruitage neuronal : booléen dédié, jamais le buffer (voir
+        // ImageProcessor.applyNeuralDenoise). Reset systématique à chaque photo
+        // (removeNeuralDenoise) AVANT de positionner le flag "pending" de la
+        // NOUVELLE photo, pour ne jamais laisser le buffer débruité d'une photo
+        // fuiter visuellement sur la suivante pendant le chargement.
+        if (window.imageProcessor) {
+            const savedNeuralDenoise = !!(savedSettings && savedSettings.neuralDenoiseApplied);
+            if (savedSettings && "neuralDenoiseApplied" in savedSettings) delete savedSettings.neuralDenoiseApplied;
+            window.imageProcessor.removeNeuralDenoise();
+            window.imageProcessor.setNeuralDenoisePending(savedNeuralDenoise);
+            if (typeof window.renderNeuralDenoisePanel === "function") window.renderNeuralDenoisePanel();
         }
 
         let pcData = {};

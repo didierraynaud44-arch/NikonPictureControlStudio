@@ -23,9 +23,15 @@
       WASM d'onnxruntime-web et l'architecture d'encodeur Hiera, pas un
       fichier défectueux. MobileSAM (architecture SAM v1/ViT-T) n'a pas ce
       problème et a une démo navigateur prouvée fonctionnelle.
+
+    Moteur d'inférence : WebGPU en priorité (accélération GPU), repli
+    explicite sur WASM (CPU) si la création de session échoue — voir
+    onnxProviderHelper.js (même pattern que neuralDenoiseWorker.js, pour
+    rester cohérent entre tous les modèles ONNX du projet).
 =========================================================*/
 
-import * as ort from "../../node_modules/onnxruntime-web/dist/ort.min.mjs";
+import * as ort from "../../node_modules/onnxruntime-web/dist/ort.all.min.mjs";
+import { createSessionWithFallback } from "./onnxProviderHelper.js";
 
 // 🔹 Résolu via import.meta.url (relatif à CE module), pas un chemin relatif
 // nu : passé tel quel à fetch() (par ort.InferenceSession.create()), un
@@ -67,9 +73,7 @@ async function loadSkyModel() {
 
     skySessionPromise = (async () => {
         console.time("⏱️ AIMaskEngine : chargement modèle Ciel (skyseg.onnx)");
-        const session = await ort.InferenceSession.create(MODEL_PATHS.sky, {
-            executionProviders: ["wasm"]
-        });
+        const { session } = await createSessionWithFallback(ort, MODEL_PATHS.sky, "Ciel (skyseg.onnx)");
         console.timeEnd("⏱️ AIMaskEngine : chargement modèle Ciel (skyseg.onnx)");
         skySession = session;
         return session;
@@ -86,9 +90,9 @@ async function loadSam2Models() {
 
     subjectSessionsPromise = (async () => {
         console.time("⏱️ AIMaskEngine : chargement modèles Sujet (MobileSAM encodeur+décodeur)");
-        const [encoder, decoder] = await Promise.all([
-            ort.InferenceSession.create(MODEL_PATHS.subjectEncoder, { executionProviders: ["wasm"] }),
-            ort.InferenceSession.create(MODEL_PATHS.subjectDecoder, { executionProviders: ["wasm"] })
+        const [{ session: encoder }, { session: decoder }] = await Promise.all([
+            createSessionWithFallback(ort, MODEL_PATHS.subjectEncoder, "Sujet — encodeur (MobileSAM)"),
+            createSessionWithFallback(ort, MODEL_PATHS.subjectDecoder, "Sujet — décodeur (MobileSAM)")
         ]);
         console.timeEnd("⏱️ AIMaskEngine : chargement modèles Sujet (MobileSAM encodeur+décodeur)");
         subjectEncoderSession = encoder;
