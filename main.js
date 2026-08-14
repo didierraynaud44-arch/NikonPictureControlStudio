@@ -24,6 +24,9 @@ const {
     getCatalogStats
 } = require("./services/catalogService");
 
+// 🔹 Gestion colorimétrique export/impression (conversion ICC réelle, voir Partie 4)
+const { convertBufferColorSpace, checkIccProfilesAvailability } = require("./services/colorManagement");
+
 // 🔹 Imports pour le décodage RAW (si disponibles)
 let decodeRAWImage, readRawFileBuffer, SUPPORTED_EXTENSIONS;
 try {
@@ -118,6 +121,10 @@ function scanDirectoryRecursive(dirPath) {
     return item;
 }
 
+// 🔹 Gestionnaire de Profils : option secondaire, uniquement sous Fichier
+// (plus d'accès direct dans la barre du haut).
+const PROFILE_MANAGER_MENU_LABEL = "Gestionnaire de profils pour Nikon";
+
 // 🔹 Création du menu supérieur
 function createAppMenu() {
     const menu = Menu.buildFromTemplate([
@@ -130,10 +137,46 @@ function createAppMenu() {
                         if (mainWindow) mainWindow.webContents.send("menu-open-nef");
                     }
                 },
+                { type: "separator" },
                 {
-                    label: "Charger un Picture Control (.NP3)",
+                    label: "Exporter",
+                    submenu: [
+                        {
+                            label: "Exporter l'image active...",
+                            accelerator: "CmdOrCtrl+E",
+                            click: () => {
+                                if (mainWindow) mainWindow.webContents.send("menu-trigger-export");
+                            }
+                        }
+                    ]
+                },
+                {
+                    label: "Sauvegarde base de données",
+                    submenu: [
+                        {
+                            label: "Exporter la base...",
+                            click: () => {
+                                if (mainWindow) mainWindow.webContents.send("menu-export-backup");
+                            }
+                        },
+                        {
+                            label: "Importer une sauvegarde...",
+                            click: () => {
+                                if (mainWindow) mainWindow.webContents.send("menu-import-backup");
+                            }
+                        }
+                    ]
+                },
+                {
+                    label: "Paramètres",
                     click: () => {
-                        if (mainWindow) mainWindow.webContents.send("menu-open-np3");
+                        if (mainWindow) mainWindow.webContents.send("menu-open-settings");
+                    }
+                },
+                {
+                    label: PROFILE_MANAGER_MENU_LABEL,
+                    click: () => {
+                        if (mainWindow) mainWindow.webContents.send("menu-switch-view", "view-profiles");
                     }
                 },
                 { type: "separator" },
@@ -145,49 +188,9 @@ function createAppMenu() {
         },
         {
             label: "Studio",
-            submenu: [
-                {
-                    label: "Ouvrir Studio",
-                    click: () => {
-                        if (mainWindow) mainWindow.webContents.send("menu-switch-view", "view-studio");
-                    }
-                }
-            ]
-        },
-        {
-            label: "Gestionnaire de Profils",
             click: () => {
-                if (mainWindow) mainWindow.webContents.send("menu-switch-view", "view-profiles");
+                if (mainWindow) mainWindow.webContents.send("menu-switch-view", "view-studio");
             }
-        },
-        {
-            label: "Exporter",
-            submenu: [
-                {
-                    label: "Exporter l'image active...",
-                    accelerator: "CmdOrCtrl+E",
-                    click: () => {
-                        if (mainWindow) mainWindow.webContents.send("menu-trigger-export");
-                    }
-                }
-            ]
-        },
-        {
-            label: "Sauvegarde",
-            submenu: [
-                {
-                    label: "Exporter la base...",
-                    click: () => {
-                        if (mainWindow) mainWindow.webContents.send("menu-export-backup");
-                    }
-                },
-                {
-                    label: "Importer une sauvegarde...",
-                    click: () => {
-                        if (mainWindow) mainWindow.webContents.send("menu-import-backup");
-                    }
-                }
-            ]
         },
         {
             label: "Programmes externes",
@@ -414,6 +417,7 @@ function createWindow() {
     if (!app.isPackaged) {
         mainWindow.webContents.openDevTools();
     }
+
     console.log("🪟 Fenêtre principale créée.");
 }
 
@@ -1085,7 +1089,7 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
 
         try {
             const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, "");
-            const imageBuffer = Buffer.from(cleanBase64, "base64");
+            let imageBuffer = Buffer.from(cleanBase64, "base64");
 
             let ext = ".jpg";
             if (exportConfig && exportConfig.format) {
@@ -1094,10 +1098,23 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
                 else if (exportConfig.format === "image/webp") ext = ".webp";
             }
 
+            // 🎨 Conversion colorimétrique ICC réelle si un espace non-sRGB a été
+            // choisi dans la modale d'export (voir services/colorManagement.js).
+            // Repli silencieux sur sRGB (buffer inchangé) si le profil ICC demandé
+            // est introuvable ; iccWarning remonté à l'appelant pour affichage.
+            let iccWarning = null;
+            if (exportConfig && exportConfig.colorSpace && exportConfig.colorSpace !== "srgb") {
+                const iccResult = await convertBufferColorSpace(imageBuffer, exportConfig.colorSpace, ext, exportConfig.quality);
+                imageBuffer = iccResult.buffer;
+                if (!iccResult.converted && iccResult.reason === "icc-missing") {
+                    iccWarning = `Profil ICC "${exportConfig.colorSpace}" introuvable : export réalisé en sRGB (voir assets/icc/README.txt).`;
+                }
+            }
+
             if (exportConfig && exportConfig.folder && (silent || exportConfig.folder)) {
                 const destPath = path.join(exportConfig.folder, `${defaultName}${ext}`);
                 fs.writeFileSync(destPath, imageBuffer);
-                return { success: true, filePath: destPath };
+                return { success: true, filePath: destPath, iccWarning };
             }
 
             const { filePath, canceled } = await dialog.showSaveDialog(win || mainWindow, {
@@ -1114,7 +1131,7 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
             if (canceled || !filePath) return { success: false };
 
             fs.writeFileSync(filePath, imageBuffer);
-            return { success: true, filePath };
+            return { success: true, filePath, iccWarning };
 
         } catch (err) {
             console.error("❌ Erreur écriture image :", err);
@@ -1200,6 +1217,21 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
 
             if (!imageBuffer || imageBuffer.length === 0) {
                 return { success: false, error: "Image vide" };
+            }
+
+            // 🎨 Impression : même chemin d'export final (exportFullResolution côté
+            // renderer) que l'export JPEG, donc même conversion ICC réelle — mais
+            // pas de sélecteur dédié dans le panneau Impression pour cette version :
+            // on applique directement l'espace colorimétrique GLOBAL par défaut
+            // (voir Fichier > Paramètres / services/colorManagement.js).
+            try {
+                const defaultColorSpace = studioPreferencesStore ? studioPreferencesStore.get("defaultColorSpace", "srgb") : "srgb";
+                if (defaultColorSpace && defaultColorSpace !== "srgb") {
+                    const iccResult = await convertBufferColorSpace(imageBuffer, defaultColorSpace, ".jpg", 0.95);
+                    imageBuffer = iccResult.buffer;
+                }
+            } catch (iccErr) {
+                console.warn("⚠️ Conversion ICC impression ignorée :", iccErr.message);
             }
 
             // Créer le fichier temporaire
@@ -1583,20 +1615,24 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
     // 🎨 PICTURE CONTROL - NP3 / NCP
     // ============================================================
 
-    ipcMain.handle("loadNP3", async () => {
+    // 🔹 formatFilter restreint le sélecteur à UN SEUL format ("ncp" ou "np3",
+    // voir dropdown "Importer un profil" dans Gestionnaire de Profils) ; sans
+    // argument, comportement inchangé (les deux extensions combinées).
+    ipcMain.handle("loadNP3", async (event, formatFilter) => {
+        let filters;
+        if (formatFilter === "ncp") {
+            filters = [{ name: "Picture Control Nikon NCP", extensions: ["ncp", "NCP"] }];
+        } else if (formatFilter === "np3") {
+            filters = [{ name: "Picture Control Nikon NP3", extensions: ["np3", "NP3"] }];
+        } else {
+            filters = [{ name: "Picture Control Nikon", extensions: ["np3", "ncp", "NP3", "NCP"] }];
+        }
+        filters.push({ name: "Tous les fichiers (*.*)", extensions: ["*"] });
+
         const result = await dialog.showOpenDialog({
             title: "Charger un Picture Control",
             properties: ["openFile"],
-            filters: [
-                {
-                    name: "Picture Control Nikon",
-                    extensions: ["np3", "ncp", "NP3", "NCP"]
-                },
-                {
-                    name: "Tous les fichiers (*.*)",
-                    extensions: ["*"]
-                }
-            ]
+            filters
         });
 
         if (result.canceled || !result.filePaths.length) return null;
@@ -1605,11 +1641,30 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
             const filePath = result.filePaths[0];
             const fileBuffer = fs.readFileSync(filePath);
             const fileName = path.basename(filePath);
-            
+
+            // 🔹 Les fichiers .np3/.ncp EXPORTÉS PAR CETTE APP (voir dialog:saveNP3 /
+            // export-ncp) sont du JSON brut (JSON.stringify(pictureControl)) — on tente
+            // de les reparser ici pour restituer un VRAI objet Picture Control
+            // (isMonochrome, contrast, etc.) plutôt que de renvoyer uniquement les octets
+            // bruts, que l'appelant n'avait jusqu'ici aucun moyen de décoder (c'était la
+            // cause du bug diagnostiqué : un profil Monochrome importé perdait isMonochrome
+            // et tous ses autres réglages, l'appelant retombant sur ce wrapper au lieu d'un
+            // vrai Picture Control). Pour un vrai fichier NPC/NP3 binaire Nikon natif (pas
+            // généré par cette app), le JSON.parse échoue : pictureControl reste null, et
+            // le parsing binaire Nikon reste hors scope de ce correctif.
+            let pictureControl = null;
+            try {
+                const parsed = JSON.parse(fileBuffer.toString("utf8"));
+                if (parsed && typeof parsed === "object") pictureControl = parsed;
+            } catch (parseErr) {
+                pictureControl = null;
+            }
+
             return {
                 success: true,
                 filePath: filePath,
                 fileName: fileName,
+                pictureControl,
                 data: fileBuffer.toString('base64')
             };
         } catch (err) {
@@ -1756,6 +1811,28 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
             widthPercent: Math.max(0, Math.min(15, Number(settings?.widthPercent) || 0))
         });
         return { success: true };
+    });
+
+    // ============================================================
+    // 🎨 ESPACE COLORIMÉTRIQUE PAR DÉFAUT (préférence globale — voir Fichier >
+    // Paramètres et services/colorManagement.js pour la conversion ICC réelle)
+    // ============================================================
+
+    const VALID_COLOR_SPACES = ["srgb", "prophoto"];
+
+    ipcMain.handle("get-default-color-space", async () => {
+        return studioPreferencesStore ? studioPreferencesStore.get("defaultColorSpace", "srgb") : "srgb";
+    });
+
+    ipcMain.handle("save-default-color-space", async (event, value) => {
+        if (!studioPreferencesStore) return { success: false, error: "Store indisponible" };
+        const safeValue = VALID_COLOR_SPACES.includes(value) ? value : "srgb";
+        studioPreferencesStore.set("defaultColorSpace", safeValue);
+        return { success: true };
+    });
+
+    ipcMain.handle("check-icc-profiles", async () => {
+        return checkIccProfilesAvailability();
     });
 
     // ============================================================

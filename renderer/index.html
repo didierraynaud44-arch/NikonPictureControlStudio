@@ -27,7 +27,15 @@
 
         <!-- Actions Vue 2 (Gestionnaire) -->
         <div id="header-profile-actions" class="header-buttons" style="display: none;">
-            <button id="openNP3" class="btn-primary" data-icon="folder-open">Importer un NP3</button>
+            <div style="position: relative;">
+                <button id="btnImportProfile" class="btn-primary" data-icon="folder-open">Importer un profil</button>
+                <div id="importProfileDropdown" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:250px; background:#202124; border:1px solid #3c4043; border-radius:6px; padding:6px; z-index:9998; box-shadow:0 4px 12px rgba(0,0,0,0.4);">
+                    <button class="btn-import-profile-format" data-format="ncp" style="display:flex; width:100%; text-align:left; background:transparent; border:none; color:#e8eaed; padding:8px 10px; border-radius:4px; cursor:pointer; font-size:12px;">NPC (Z6 II, Z5, D780)</button>
+                    <button class="btn-import-profile-format" data-format="np3" style="display:flex; width:100%; text-align:left; background:transparent; border:none; color:#e8eaed; padding:8px 10px; border-radius:4px; cursor:pointer; font-size:12px;">NP3 (Z6III, Z5II, Z8)</button>
+                </div>
+            </div>
+            <button id="btnImportProfileRaw" class="btn-primary" data-icon="image" title="Charge une photo de test INDÉPENDANTE de la photo ouverte dans le Studio, pour prévisualiser les profils dans ce module">Importer un RAW</button>
+            <button id="btnPreviewProfileOnPhoto" class="btn-action" data-icon="image" disabled title="Prévisualise ce profil sur la photo de test de ce module (n'affecte jamais le Studio)">Aperçu sur cette photo</button>
             <button id="saveNP3" class="btn-action" data-icon="save">Exporter pour Z50 II (.NP3)</button>
             <button id="exportNCP" class="btn-action" data-icon="save">Exporter pour Z6 II (.NCP)</button>
             <button id="btnViewPrintFromProfile" class="btn-tool" title="Module d'impression" data-icon="printer">Impression</button>
@@ -397,7 +405,15 @@
                 <input type="range" id="expQuality" min="10" max="100" value="90" style="width:100%;">
             </div>
             <div style="margin-bottom:12px; border-top:1px solid #333; padding-top:10px;">
-                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">4. Dimensions &amp; Résolution :</label>
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:4px;">4. Espace colorimétrique :</label>
+                <select id="expColorSpace" style="width:100%; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px;">
+                    <option value="srgb">sRGB (par défaut, web/écrans)</option>
+                    <option value="prophoto">ProPhoto RGB</option>
+                </select>
+                <p style="font-size:10px; color:#888; margin:4px 0 0;">Conversion colorimétrique réelle (profil ICC), pas une simple étiquette. Réglage par défaut modifiable dans Fichier &gt; Paramètres.</p>
+            </div>
+            <div style="margin-bottom:12px; border-top:1px solid #333; padding-top:10px;">
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">5. Dimensions &amp; Résolution :</label>
                 <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
                     <div>
                         <span style="font-size:10px; color:#aaa;">Largeur (px)</span>
@@ -416,13 +432,13 @@
             <div style="margin-bottom:12px; border-top:1px solid #333; padding-top:10px;">
                 <label style="font-size:12px; cursor:pointer; display:flex; align-items:center; gap:8px;">
                     <input type="checkbox" id="expStripExif">
-                    <span>5. Supprimer les métadonnées (EXIF)</span>
+                    <span>6. Supprimer les métadonnées (EXIF)</span>
                 </label>
             </div>
             <div style="margin-bottom:18px; border-top:1px solid #333; padding-top:10px;">
                 <label style="font-size:12px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                     <input type="checkbox" id="expFrameEnabled">
-                    <span>6. Ajouter un cadre</span>
+                    <span>7. Ajouter un cadre</span>
                 </label>
                 <div id="expFrameOptions" style="display:none; gap:8px; align-items:center;">
                     <div style="display:flex; gap:8px; margin-bottom:8px;">
@@ -445,24 +461,48 @@
         </div>
     </div>
 
-    <!-- MODALE CONFIGURATION DES PROGRAMMES EXTERNES -->
-    <div id="externalProgramsModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
-        <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:440px; color:#e8eaed;">
-            <button id="btnCloseExternalProgramsModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer" data-icon="x"></button>
-            <h3 style="margin-top:0; color:#5865f2; font-size:16px;" data-icon="upload">Programmes externes</h3>
-            <p style="font-size:11px; color:#949ba4; margin-bottom:12px;">
-                "Ouvrir avec" génère un TIFF sans perte (réglages + masques + retouches appliqués) dans le dossier de la photo, puis lance le programme dessus.
-            </p>
+    <!-- MODALE PARAMÈTRES (tableau de réglages extensible : un onglet par catégorie -
+         d'autres catégories viendront s'ajouter ici au même titre que les deux
+         existantes, voir renderer/app.js initSettingsModal / selectSettingsTab) -->
+    <div id="settingsModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
+        <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:460px; max-height:80vh; overflow-y:auto; color:#e8eaed;">
+            <button id="btnCloseSettingsModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer" data-icon="x"></button>
+            <h3 style="margin-top:0; color:#5865f2; font-size:16px;" data-icon="settings">Paramètres</h3>
 
-            <div id="externalProgramsList" style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;"></div>
-
-            <div id="externalProgramAddRow" style="display:none; gap:6px; margin-bottom:12px;">
-                <input type="text" id="externalProgramNameInput" placeholder="Nom (ex : Photoshop)" style="flex:1; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px; font-size:12px;">
-                <button id="btnBrowseExternalProgram" style="background:#3c4043; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px;">Parcourir...</button>
-                <button id="btnCancelAddExternalProgram" style="background:transparent; border:1px solid #555; color:#fff; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:12px;">Annuler</button>
+            <div style="display:flex; gap:4px; border-bottom:1px solid #3c4043; margin-bottom:16px;">
+                <button class="settings-tab-btn" data-tab="external-programs" style="background:transparent; border:none; color:#aaa; padding:8px 12px; cursor:pointer; font-size:12px; font-weight:bold; border-bottom:2px solid transparent;">Programmes externes</button>
+                <button class="settings-tab-btn" data-tab="color-management" style="background:transparent; border:none; color:#aaa; padding:8px 12px; cursor:pointer; font-size:12px; font-weight:bold; border-bottom:2px solid transparent;">Espace colorimétrique</button>
             </div>
 
-            <button id="btnAddExternalProgram" style="background:#5865f2; border:none; color:#fff; padding:6px 14px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px;">+ Ajouter</button>
+            <!-- Onglet : Programmes externes ("Ouvrir avec...") -->
+            <div id="settingsTab-external-programs" class="settings-tab-panel">
+                <p style="font-size:11px; color:#949ba4; margin-bottom:12px;">
+                    "Ouvrir avec" génère un TIFF sans perte (réglages + masques + retouches appliqués) dans le dossier de la photo, puis lance le programme dessus. Plusieurs programmes peuvent être déclarés.
+                </p>
+
+                <div id="externalProgramsList" style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;"></div>
+
+                <div id="externalProgramAddRow" style="display:none; gap:6px; margin-bottom:12px;">
+                    <input type="text" id="externalProgramNameInput" placeholder="Nom (ex : Photoshop)" style="flex:1; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px; font-size:12px;">
+                    <button id="btnBrowseExternalProgram" style="background:#3c4043; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px;">Parcourir...</button>
+                    <button id="btnCancelAddExternalProgram" style="background:transparent; border:1px solid #555; color:#fff; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:12px;">Annuler</button>
+                </div>
+
+                <button id="btnAddExternalProgram" style="background:#5865f2; border:none; color:#fff; padding:6px 14px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px;">+ Ajouter</button>
+            </div>
+
+            <!-- Onglet : Espace colorimétrique par défaut (export) -->
+            <div id="settingsTab-color-management" class="settings-tab-panel" style="display:none;">
+                <p style="font-size:11px; color:#949ba4; margin-bottom:12px;">
+                    Espace colorimétrique utilisé par défaut lors d'un export (conversion ICC réelle, pas une étiquette). Pré-remplit la modale d'export, modifiable à chaque export.
+                </p>
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:4px;">Espace colorimétrique par défaut :</label>
+                <select id="settingsDefaultColorSpace" style="width:100%; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px;">
+                    <option value="srgb">sRGB (par défaut, web/écrans)</option>
+                    <option value="prophoto">ProPhoto RGB</option>
+                </select>
+                <p id="settingsColorSpaceWarning" style="display:none; font-size:10px; color:#e8a33d; margin:8px 0 0;"></p>
+            </div>
         </div>
     </div>
 

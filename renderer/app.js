@@ -6,6 +6,55 @@
 let currentNefFileName = "image-editee";
 let profileImageProcessor = null;
 let activeProfilePC = null; // Picture Control actif dans le Gestionnaire
+
+// 🔹 Profil Standard neutre COMPLET (mêmes valeurs que getDefaultPictureControl()
+// côté main.js) : source unique pour "Réinitialiser" et pour la remise à zéro
+// systématique du Gestionnaire de Profils (import d'une nouvelle photo de test).
+// Les champs du module Monochrome (mixeur 8 canaux, Lumière tamisée, Dodge &
+// Burn, gomme locale) ne figurent PAS ici : ils vivent dans MonochromeManager
+// (état global indépendant du Picture Control, voir ImageProcessor._buildRenderSettings)
+// et ne sont plus jamais fusionnés dans un rendu tant que isMonochrome n'est pas
+// vrai — c'est CE gate, pas une liste de valeurs neutres dupliquée ici, qui
+// garantit qu'un profil par défaut ne peut plus en hériter.
+const DEFAULT_PICTURE_CONTROL = Object.freeze({
+    name: "Standard",
+    pictureControlName: "Standard",
+    baseProfile: "STANDARD",
+    basePictureControl: "STANDARD",
+    isMonochrome: false,
+    wbTemperature: 0,
+    wbTint: 0,
+    sharpening: 3.25,
+    midRangeSharpening: 1,
+    clarity: 0,
+    contrast: 0,
+    brightness: 0,
+    saturation: 0,
+    hue: 0,
+    filterEffect: "OFF",
+    toningEffect: "B&W",
+    toningAmount: 1,
+    exposure: 0,
+    blackPoint: 0,
+    whitePoint: 255,
+    highlights: 0,
+    shadows: 0,
+    dehaze: 0,
+    vibrance: 0,
+    vignette: 0,
+    denoise: 0,
+    lensCorrection: false,
+    toneCurveLut: null,
+    monoFilter: "None",
+    monoToning: "None"
+});
+
+// 🔹 true dès que l'utilisateur a explicitement importé une photo de test via
+// "Importer un RAW" (Gestionnaire de Profils) : empêche switchToView de
+// l'écraser en re-copiant la photo du Studio à chaque fois qu'on revient sur
+// cette vue — une fois choisie explicitement, la photo de test reste sous le
+// contrôle exclusif de l'utilisateur, indépendante du Studio.
+let profileHasIndependentRaw = false;
 let studioFoldersList = []; // Liste de toutes les structures de dossiers importées
 
 // 🔹 Chemins des dossiers actuellement dépliés dans l'arbre "Dossiers Photos"
@@ -807,8 +856,31 @@ async function loadSavedStudioFolders() {
     MODULE PROFILE MANAGER (NP3 / NCP)
 ========================================================= */
 
+// 🔹 Construit (si besoin) profileImageProcessor avec les retouches et masques
+// locaux du Studio désactivés : RetouchManager/MasksManager sont des états
+// GLOBAUX (comme MonochromeManager, voir DEFAULT_PICTURE_CONTROL plus haut),
+// partagés par toutes les instances ImageProcessor — sans ce verrou, une
+// retouche ou un masque peint sur la photo du Studio s'appliquerait aussi ici,
+// alors que ce module doit rester strictement indépendant du Studio.
+function ensureProfileImageProcessor() {
+    if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
+        profileImageProcessor = new ImageProcessor("profilePreviewCanvas");
+        profileImageProcessor.enableMasks = false;
+        profileImageProcessor.enableRetouches = false;
+    }
+    return profileImageProcessor;
+}
+
+// 🔹 "Aperçu sur cette photo" (Gestionnaire de profils) : activé dès qu'un
+// profil est sélectionné/importé (activeProfilePC), désactivé sinon.
+function updateApplyProfileButtonState() {
+    const btn = document.getElementById("btnPreviewProfileOnPhoto");
+    if (btn) btn.disabled = !activeProfilePC;
+}
+
 function renderProfilePanel(pc, isNewInstance = false) {
     activeProfilePC = pc;
+    updateApplyProfileButtonState();
     if (typeof window.renderPictureControlPanel !== "function") return;
 
     window.renderPictureControlPanel("profileControlStatus", pc, {
@@ -817,8 +889,15 @@ function renderProfilePanel(pc, isNewInstance = false) {
         isNewInstance: isNewInstance,
         onChange: (state) => {
             activeProfilePC = state;
+            updateApplyProfileButtonState();
             if (profileImageProcessor) profileImageProcessor.setPictureControl(state);
-        }
+        },
+        // 🔹 Sans ceci, le bouton "Réinitialiser" du composant retombe sur son
+        // cache interne (originalPictureControlByContainer), un instantané pris
+        // à la dernière instanciation "neuve" du panneau — qui peut très bien
+        // être un profil Monochrome (ex. sélection d'un profil importé N&B) et
+        // rester coincé indéfiniment. Un vrai profil neutre complet à la place.
+        onReset: () => structuredClone(DEFAULT_PICTURE_CONTROL)
     });
 }
 
@@ -1247,6 +1326,19 @@ async function initExportFrameControls() {
     widthEl.addEventListener("input", persist);
 }
 
+/**
+ * 🔹 Espace colorimétrique (Partie 4) : pré-remplit le sélecteur de la modale
+ * d'export avec le réglage global par défaut (voir Fichier > Paramètres),
+ * modifiable ensuite pour CET export uniquement (pas de re-sauvegarde ici).
+ */
+async function refreshExportColorSpaceDefault() {
+    const select = document.getElementById("expColorSpace");
+    if (!select || !window.electronAPI || typeof window.electronAPI.getDefaultColorSpace !== "function") return;
+    const value = await window.electronAPI.getDefaultColorSpace();
+    select.value = value || "srgb";
+}
+window.refreshExportColorSpaceDefault = refreshExportColorSpaceDefault;
+
 function initExportModal() {
     const modal = document.getElementById("exportModal");
     const btnBrowse = document.getElementById("btnBrowseExpFolder");
@@ -1266,6 +1358,7 @@ function initExportModal() {
     // partagée avec le panneau Impression (voir PrintManager.js). Chargée au
     // démarrage puis tenue à jour localement ; persistée à chaque changement.
     initExportFrameControls();
+    refreshExportColorSpaceDefault();
 
     if (btnBrowse && folderInput) {
         btnBrowse.onclick = async () => {
@@ -1294,6 +1387,7 @@ function initExportModal() {
                 folder: folderInput ? folderInput.value : "",
                 format: document.getElementById("expFormat")?.value || "image/jpeg",
                 quality: qualitySlider ? parseFloat(qualitySlider.value) / 100 : 0.9,
+                colorSpace: document.getElementById("expColorSpace")?.value || "srgb",
                 width: parseInt(document.getElementById("expWidth")?.value) || null,
                 height: parseInt(document.getElementById("expHeight")?.value) || null,
                 dpi: parseInt(document.getElementById("expDpi")?.value) || 300,
@@ -1342,7 +1436,11 @@ function initExportModal() {
                             base64Data: base64Data,
                             exportConfig: config
                         });
-                        alert(res?.success ? "✅ Export réussi !" : `❌ Erreur d'export : ${res?.error || "Échec inconnu"}`);
+                        if (res?.success) {
+                            alert(res.iccWarning ? `✅ Export réussi ! ⚠️ ${res.iccWarning}` : "✅ Export réussi !");
+                        } else {
+                            alert(`❌ Erreur d'export : ${res?.error || "Échec inconnu"}`);
+                        }
                     }
                 } else if (window.gridManager && window.gridManager.selectedIds.size > 0) {
                     await window.gridManager.exportSelectedImages(config);
@@ -1399,18 +1497,65 @@ async function refreshExternalProgramsList() {
     return programs;
 }
 
-function initExternalProgramsModal() {
-    const modal = document.getElementById("externalProgramsModal");
-    const btnClose = document.getElementById("btnCloseExternalProgramsModal");
+/**
+ * 🔹 Modale "Paramètres" : tableau de réglages extensible en onglets (voir
+ * renderer/index.html #settingsModal). Pour l'instant : Programmes externes
+ * (déplacé depuis son ancienne modale dédiée) + Espace colorimétrique par
+ * défaut (export). D'autres catégories pourront s'ajouter comme de nouveaux
+ * onglets sans toucher à la structure existante.
+ */
+function selectSettingsTab(tab) {
+    const validTab = ["external-programs", "color-management"].includes(tab) ? tab : "external-programs";
+
+    document.querySelectorAll(".settings-tab-btn").forEach(btn => {
+        const isActive = btn.dataset.tab === validTab;
+        btn.style.color = isActive ? "#fff" : "#aaa";
+        btn.style.borderBottomColor = isActive ? "#5865f2" : "transparent";
+    });
+
+    document.querySelectorAll(".settings-tab-panel").forEach(panel => {
+        panel.style.display = (panel.id === `settingsTab-${validTab}`) ? "block" : "none";
+    });
+}
+
+async function refreshDefaultColorSpaceSelect() {
+    const select = document.getElementById("settingsDefaultColorSpace");
+    if (!select || !window.electronAPI || typeof window.electronAPI.getDefaultColorSpace !== "function") return;
+
+    const value = await window.electronAPI.getDefaultColorSpace();
+    select.value = value || "srgb";
+
+    // 🔹 ProPhoto RGB est généré automatiquement (voir services/iccProfileBuilder.js) :
+    // ce contrôle ne sert plus qu'à détecter un échec d'écriture disque, très rare.
+    const warningEl = document.getElementById("settingsColorSpaceWarning");
+    if (warningEl && typeof window.electronAPI.checkIccProfiles === "function") {
+        const status = await window.electronAPI.checkIccProfiles();
+        if (value === "prophoto" && !status?.prophoto) {
+            warningEl.textContent = "⚠️ Impossible de générer le profil ICC ProPhoto RGB (erreur disque ?) : les exports retomberont automatiquement en sRGB.";
+            warningEl.style.display = "block";
+        } else {
+            warningEl.style.display = "none";
+        }
+    }
+}
+
+function initSettingsModal() {
+    const modal = document.getElementById("settingsModal");
+    const btnClose = document.getElementById("btnCloseSettingsModal");
     const btnAdd = document.getElementById("btnAddExternalProgram");
     const addRow = document.getElementById("externalProgramAddRow");
     const nameInput = document.getElementById("externalProgramNameInput");
     const btnBrowse = document.getElementById("btnBrowseExternalProgram");
     const btnCancelAdd = document.getElementById("btnCancelAddExternalProgram");
+    const colorSpaceSelect = document.getElementById("settingsDefaultColorSpace");
 
     if (btnClose && modal) {
         btnClose.onclick = () => { modal.style.display = "none"; };
     }
+
+    document.querySelectorAll(".settings-tab-btn").forEach(btn => {
+        btn.onclick = () => selectSettingsTab(btn.dataset.tab);
+    });
 
     if (btnAdd && addRow) {
         btnAdd.onclick = () => {
@@ -1449,13 +1594,28 @@ function initExternalProgramsModal() {
         };
     }
 
-    window.openExternalProgramsModal = async () => {
+    if (colorSpaceSelect) {
+        colorSpaceSelect.onchange = async () => {
+            if (window.electronAPI && typeof window.electronAPI.saveDefaultColorSpace === "function") {
+                await window.electronAPI.saveDefaultColorSpace(colorSpaceSelect.value);
+            }
+            refreshDefaultColorSpaceSelect();
+        };
+    }
+
+    window.openSettingsModal = async (initialTab = "external-programs") => {
         if (!modal) return;
         if (addRow) addRow.style.display = "none";
         if (btnAdd) btnAdd.style.display = "inline-flex";
         await refreshExternalProgramsList();
+        await refreshDefaultColorSpaceSelect();
+        selectSettingsTab(initialTab);
         modal.style.display = "flex";
     };
+
+    // 🔹 "Programmes externes" (barre du haut, garde son propre accès direct — voir
+    // Partie 3) ouvre la MÊME modale Paramètres, juste sur cet onglet.
+    window.openExternalProgramsModal = () => window.openSettingsModal("external-programs");
 }
 
 function closeOpenWithDropdown() {
@@ -1564,7 +1724,7 @@ function initOpenWithButton() {
             : [];
 
         if (!programs.length) {
-            dropdown.innerHTML = `<p style="font-size:11px; color:#aaa; margin:4px; max-width:200px;">Aucun programme configuré. Utilise le menu "Programmes externes" → "Configurer..." pour en ajouter un.</p>`;
+            dropdown.innerHTML = `<p style="font-size:11px; color:#aaa; margin:4px; max-width:200px;">Aucun programme configuré. Rends-toi dans "Fichier" → "Paramètres" pour en déclarer un.</p>`;
         } else {
             dropdown.innerHTML = programs.map(p => `
                 <button class="open-with-item" data-id="${p.id}" style="display:block; width:100%; text-align:left; background:transparent; border:none; color:#e8eaed; padding:6px 8px; border-radius:4px; cursor:pointer; font-size:12px;">${p.name}</button>
@@ -1627,16 +1787,7 @@ async function switchToView(targetViewId) {
     }
 
     if (targetViewId === "view-profiles") {
-        if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
-            profileImageProcessor = new ImageProcessor("profilePreviewCanvas");
-        }
-
-        if (profileImageProcessor && window.imageProcessor?.loadedImage) {
-            await profileImageProcessor.load(
-                window.imageProcessor.loadedImage.src,
-                window.imageProcessor.currentOrientation
-            );
-        }
+        ensureProfileImageProcessor();
 
         const pcToShow = activeProfilePC || window.imageProcessor?.pictureControl || null;
         if (pcToShow) {
@@ -1764,7 +1915,10 @@ function initButtons() {
     const btnSaveNP3           = document.getElementById("saveNP3");
     const btnExportNCP         = document.getElementById("exportNCP");
     const btnStudioOpenFolder  = document.getElementById("btnStudioOpenFolder");
-    const btnNP3               = document.getElementById("openNP3");
+    const btnImportProfile     = document.getElementById("btnImportProfile");
+    const importProfileDropdown = document.getElementById("importProfileDropdown");
+    const btnImportProfileRaw = document.getElementById("btnImportProfileRaw");
+    const btnPreviewProfileOnPhoto = document.getElementById("btnPreviewProfileOnPhoto");
     const btnViewPrint         = document.getElementById("btnViewPrint");
     const btnViewPrintFromProfile = document.getElementById("btnViewPrintFromProfile");
     const btnBackToStudio      = document.getElementById("btnBackToStudio");
@@ -1859,26 +2013,154 @@ function initButtons() {
         btnStudioOpenFolder.onclick = openStudioFolder;
     }
 
-    const importProfileFile = async () => {
+    // 🔹 Importe un profil Nikon. formatFilter restreint le sélecteur de fichier
+    // à UNE seule extension ("ncp" ou "np3", voir dropdown ci-dessous) ; le code
+    // d'import lui-même (loadNP3 IPC) gérait déjà les deux formats en interne,
+    // donc pas de logique dupliquée ici, juste le filtre de sélection.
+    //
+    // 🔹 response.pictureControl (voir main.js/loadNP3) est le VRAI Picture
+    // Control reparsé depuis le fichier — pour un .np3/.ncp exporté par cette
+    // app (JSON), le round-trip est maintenant complet (isMonochrome et tous
+    // les autres réglages sont préservés, voir diagnostic précédent : le bug
+    // venait de loadNP3 qui ne renvoyait que les octets bruts, jamais parsés).
+    // Un vrai fichier NPC/NP3 binaire Nikon natif n'est pas encore supporté
+    // (pictureControl reste alors null) : on le signale explicitement plutôt
+    // que d'appliquer silencieusement un profil vide/par défaut.
+    const importProfileFile = async (formatFilter) => {
         try {
-            const response = await window.electronAPI.loadNP3();
-            if (response) {
-                const pc = response.pictureControl || response.pc || response;
-                const name = response.fileName || response.name || pc.name || `Profil ${np3Library.length + 1}`;
+            const response = await window.electronAPI.loadNP3(formatFilter);
+            if (!response) return;
 
-                np3Library.push({ name: name, data: pc });
-                localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
-                renderNp3Library();
-
-                if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
-                renderProfilePanel(pc, true);
+            if (!response.pictureControl) {
+                alert("⚠️ Ce fichier n'a pas pu être interprété comme un profil Picture Control " +
+                    "(format binaire Nikon natif non pris en charge pour l'instant). Seuls les profils " +
+                    "exportés par Pixel RAW (.np3/.ncp) peuvent être ré-importés ici.");
+                return;
             }
+
+            const pc = response.pictureControl;
+            const name = response.fileName || pc.name || `Profil ${np3Library.length + 1}`;
+
+            np3Library.push({ name: name, data: pc });
+            localStorage.setItem("nikon_np3_library", JSON.stringify(np3Library));
+            renderNp3Library();
+
+            if (profileImageProcessor) profileImageProcessor.setPictureControl(pc);
+            renderProfilePanel(pc, true);
         } catch (err) {
             console.error("❌ Erreur lors de l'importation du profil :", err);
         }
     };
 
-    if (btnNP3) btnNP3.onclick = importProfileFile;
+    if (btnImportProfile && importProfileDropdown) {
+        btnImportProfile.onclick = (e) => {
+            e.stopPropagation();
+            importProfileDropdown.style.display = (importProfileDropdown.style.display === "block") ? "none" : "block";
+        };
+
+        importProfileDropdown.querySelectorAll(".btn-import-profile-format").forEach(item => {
+            item.addEventListener("mouseenter", () => { item.style.background = "#35373c"; });
+            item.addEventListener("mouseleave", () => { item.style.background = "transparent"; });
+            item.addEventListener("click", () => {
+                importProfileDropdown.style.display = "none";
+                importProfileFile(item.dataset.format);
+            });
+        });
+
+        document.addEventListener("click", (e) => {
+            if (importProfileDropdown.style.display === "block" && !importProfileDropdown.contains(e.target) && e.target !== btnImportProfile) {
+                importProfileDropdown.style.display = "none";
+            }
+        });
+    }
+
+    // 🔹 "Importer un RAW" (Gestionnaire de Profils) : charge une photo de test
+    // INDÉPENDANTE dans profileImageProcessor, en réutilisant le même mécanisme
+    // que l'ouverture de fichier du Studio (openNEF -> readFileDirect), mais
+    // SANS jamais toucher à window.imageProcessor ni à window.currentStudioFilePath.
+    const importProfileTestRaw = async () => {
+        if (!window.electronAPI || typeof window.electronAPI.openNEF !== "function") return;
+
+        try {
+            const selection = await window.electronAPI.openNEF();
+            if (!selection || !selection.filePath) return;
+
+            if (typeof window.electronAPI.readFileDirect !== "function") return;
+            const fileInfo = await window.electronAPI.readFileDirect(selection.filePath, studioPreviewMaxWidth);
+            if (!fileInfo) {
+                alert("❌ Impossible de lire ce fichier.");
+                return;
+            }
+
+            let rawSrc = fileInfo.preview || fileInfo.filePath || fileInfo.path;
+            let imageSrc = "";
+            if (rawSrc) {
+                if (rawSrc.startsWith("data:")) {
+                    imageSrc = rawSrc;
+                } else if (/^[A-Za-z0-9+/=]+$/.test(rawSrc.toString().trim().substring(0, 100))) {
+                    imageSrc = `data:image/jpeg;base64,${rawSrc.toString().trim()}`;
+                } else {
+                    const formattedPath = rawSrc.toString().replace(/\\/g, "/");
+                    imageSrc = formattedPath.startsWith("/") ? `file://${formattedPath}` : `file:///${formattedPath}`;
+                }
+            }
+            if (!imageSrc) {
+                alert("❌ Impossible de charger l'aperçu de ce fichier.");
+                return;
+            }
+
+            ensureProfileImageProcessor();
+            if (!profileImageProcessor) return;
+
+            await profileImageProcessor.load(imageSrc, fileInfo.orientation || 1, {
+                lens: fileInfo.lens,
+                focalLength: fileInfo.rawFocalLength || fileInfo.focal,
+                aperture: fileInfo.rawAperture || fileInfo.aperture
+            });
+
+            // 🔹 Indispensable au zoom pleine résolution (voir DisplayCanvas.
+            // ZOOM_FULLRES_THRESHOLD / ImageProcessor.onRequestFullRes) : sans
+            // currentFilePath, ensureFullResolutionLoaded() n'a aucun fichier à
+            // décoder et abandonne silencieusement — exactement comme le Studio
+            // le fait déjà pour window.imageProcessor (voir loadImageInStudio).
+            profileImageProcessor.currentFilePath = selection.filePath;
+
+            // 🔹 Cette photo de test devient indépendante : plus jamais écrasée par
+            // la photo du Studio lors des retours sur cette vue (voir switchToView).
+            profileHasIndependentRaw = true;
+
+            // 🔹 Nouvelle photo de test = repart TOUJOURS d'un profil neutre.
+            // NE JAMAIS réappliquer l'ancien activeProfilePC/pictureControl ici :
+            // c'était la cause du bug "reste bloqué en Monochrome" — une photo
+            // fraîchement importée héritait silencieusement du dernier profil
+            // actif (parfois Monochrome) au lieu de partir propre. L'utilisateur
+            // choisit ensuite explicitement quel profil appliquer.
+            const freshPC = structuredClone(DEFAULT_PICTURE_CONTROL);
+            profileImageProcessor.setPictureControl(freshPC);
+            renderProfilePanel(freshPC, true);
+        } catch (err) {
+            console.error("❌ Erreur import RAW (Gestionnaire de Profils) :", err);
+        }
+    };
+
+    if (btnImportProfileRaw) {
+        btnImportProfileRaw.onclick = importProfileTestRaw;
+    }
+
+    // 🔹 "Aperçu sur cette photo" : applique le profil sélectionné/importé
+    // UNIQUEMENT à profileImageProcessor (photo de test de ce module) — ne
+    // touche jamais window.imageProcessor ni ne bascule vers le Studio. Le
+    // résultat reste visible et modifiable ici même, sur profilePreviewCanvas.
+    updateApplyProfileButtonState();
+    if (btnPreviewProfileOnPhoto) {
+        btnPreviewProfileOnPhoto.onclick = () => {
+            const pc = activeProfilePC || profileImageProcessor?.pictureControl;
+            if (!pc || !profileImageProcessor) return;
+
+            profileImageProcessor.setPictureControl(pc);
+            profileImageProcessor.render();
+        };
+    }
 
     if (btnSaveNP3) {
         btnSaveNP3.onclick = async () => {
@@ -1964,7 +2246,7 @@ function initButtons() {
 
     renderStudioFolderTree();
     initExportModal();
-    initExternalProgramsModal();
+    initSettingsModal();
     initOpenWithButton();
 
     if (typeof window.renderMasksPanel === "function") {
@@ -2020,8 +2302,11 @@ if (window.electronAPI?.onMenuSwitchView) {
 }
 
 if (window.electronAPI?.onMenuTriggerExport) {
-    window.electronAPI.onMenuTriggerExport(() => {
+    window.electronAPI.onMenuTriggerExport(async () => {
         const modal = document.getElementById("exportModal");
+        if (typeof window.refreshExportColorSpaceDefault === "function") {
+            await window.refreshExportColorSpaceDefault();
+        }
         if (modal) modal.style.display = "flex";
     });
 }
@@ -2047,6 +2332,12 @@ if (window.electronAPI?.onMenuImportBackup) {
 if (window.electronAPI?.onMenuOpenExternalProgramsConfig) {
     window.electronAPI.onMenuOpenExternalProgramsConfig(() => {
         if (typeof window.openExternalProgramsModal === "function") window.openExternalProgramsModal();
+    });
+}
+
+if (window.electronAPI?.onMenuOpenSettings) {
+    window.electronAPI.onMenuOpenSettings((tab) => {
+        if (typeof window.openSettingsModal === "function") window.openSettingsModal(tab || "external-programs");
     });
 }
 

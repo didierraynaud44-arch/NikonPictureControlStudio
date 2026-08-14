@@ -51,6 +51,7 @@ class ImageProcessor {
         // pipeline. Cache par clé de résolution ("preview"/"fullRes"), invalidé
         // automatiquement si le buffer source change (nouvelle photo) ou si la
         // liste de RetouchManager change (RetouchManager.getVersion()).
+        this.enableRetouches = true;
         this.retouchController = null;
         this._retouchCache = {};
 
@@ -140,12 +141,19 @@ class ImageProcessor {
         // 🔹 Module Monochrome dédié : réglages lus directement depuis
         // MonochromeManager (état global, comme MasksManager.getMasks()), pas
         // stockés sur l'instance. N'injecte les réglages QUE si le module est
-        // activé — c'est ce qui fait de monoMixerEnabled un vrai interrupteur
-        // maître pour les 3 filtres à la fois : désactivé, aucune des clés
-        // (softLightIntensity, dodgeBurnWhite...) n'est présente dans settings,
-        // donc chaque filtre s'arrête tout seul via son propre court-circuit,
-        // sans qu'on ait à modifier leur logique individuelle.
-        if (typeof MonochromeManager !== "undefined") {
+        // activé ET que le Picture Control actuellement rendu est lui-même
+        // Monochrome — sans ce second verrou, monoMixerEnabled (état GLOBAL,
+        // partagé par TOUTES les instances ImageProcessor) reste vrai après
+        // avoir testé le module dans le Studio et se réinjecte alors dans
+        // N'IMPORTE QUEL rendu suivant, y compris un profil par défaut (Vivid,
+        // Standard...) sélectionné dans le Gestionnaire de Profils, produisant
+        // un rendu "explosé" (mixeur N&B, Lumière tamisée, Dodge & Burn tous
+        // appliqués par-dessus une photo qui n'a jamais demandé à être N&B).
+        // Avec ce verrou, aucune fusion n'a lieu tant que isMonochrome n'est
+        // pas vrai : les clés (softLightIntensity, dodgeBurnWhite...) restent
+        // absentes de settings, donc chaque filtre s'arrête tout seul via son
+        // propre court-circuit, sans qu'on ait à modifier leur logique.
+        if (typeof MonochromeManager !== "undefined" && settings.isMonochrome) {
             const monoSettings = MonochromeManager.getSettings();
             if (monoSettings && monoSettings.monoMixerEnabled) {
                 Object.assign(settings, monoSettings);
@@ -463,8 +471,15 @@ class ImageProcessor {
      * que les réglages globaux/masques s'appliquent ensuite normalement
      * par-dessus la zone corrigée. Résultat mis en cache par cacheKey tant
      * que sourceBuffer et RetouchManager.getVersion() n'ont pas changé.
+     *
+     * 🔹 Gomme derrière this.enableRetouches (même principe que this.enableMasks
+     * pour MasksManager) : RetouchManager est un état GLOBAL, partagé par
+     * TOUTES les instances ImageProcessor — sans ce verrou, une retouche peinte
+     * sur la photo du Studio s'appliquerait aussi au rendu du Gestionnaire de
+     * Profils, qui doit rester strictement indépendant du Studio.
      */
     _applyRetouches(sourceBuffer, cacheKey) {
+        if (!this.enableRetouches) return sourceBuffer;
         if (!sourceBuffer) return sourceBuffer;
         if (typeof RetouchManager === "undefined" || typeof HealEngine === "undefined" || typeof MaskEngine === "undefined") {
             return sourceBuffer;

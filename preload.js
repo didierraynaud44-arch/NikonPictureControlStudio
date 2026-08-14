@@ -83,8 +83,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getShutterCount: (filePath) =>
         ipcRenderer.invoke("get-shutter-count", filePath),
 
-    loadNP3: () => 
-        ipcRenderer.invoke("loadNP3"),
+    loadNP3: (formatFilter) =>
+        ipcRenderer.invoke("loadNP3", formatFilter),
     
     selectFolderRecursive: () => 
         ipcRenderer.invoke("select-folder-recursive"),
@@ -157,12 +157,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ÉCOUTEURS DE MENU
     // ============================================================
     
-    onMenuOpenNEF: (callback) => 
+    onMenuOpenNEF: (callback) =>
         ipcRenderer.on("menu-open-nef", callback),
-    
-    onMenuOpenNP3: (callback) => 
-        ipcRenderer.on("menu-open-np3", callback),
-    
+
+    onMenuOpenSettings: (callback) =>
+        ipcRenderer.on("menu-open-settings", (event, tab) => callback(tab)),
+
     onMenuSwitchView: (callback) =>
         ipcRenderer.on("menu-switch-view", (event, viewId) => callback(viewId)),
 
@@ -196,6 +196,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     saveFrameSettings: (settings) =>
         ipcRenderer.invoke("save-frame-settings", settings),
+
+    // ============================================================
+    // ESPACE COLORIMÉTRIQUE PAR DÉFAUT (export/impression, voir Partie 4)
+    // ============================================================
+
+    getDefaultColorSpace: () =>
+        ipcRenderer.invoke("get-default-color-space"),
+
+    saveDefaultColorSpace: (value) =>
+        ipcRenderer.invoke("save-default-color-space", value),
+
+    checkIccProfiles: () =>
+        ipcRenderer.invoke("check-icc-profiles"),
 
     browseExecutable: () =>
         ipcRenderer.invoke("browse-executable"),
