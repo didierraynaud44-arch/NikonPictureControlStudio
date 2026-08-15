@@ -202,6 +202,8 @@
                 </div>
             </div>
 
+            <div id="cropPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
+            <div id="perspectivePanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
             <div id="retouchPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
             <div id="pictureControlStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
             <div id="neuralDenoisePanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
@@ -474,6 +476,133 @@
         </div>
     </div>
 
+    <!-- MODALE RATIO D'ASPECT PERSONNALISÉ (panneau Recadrage, voir components/cropPanel.js) -->
+    <div id="cropCustomRatioModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
+        <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:340px; color:#e8eaed;">
+            <button id="btnCloseCropCustomRatioModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer" data-icon="x"></button>
+            <h3 style="margin-top:0; color:#5865f2; font-size:16px;">Ratio d'aspect personnalisé</h3>
+            <div style="margin-bottom:8px;">
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">Rapport d'aspect :</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="number" id="cropCustomRatioW" min="0.001" step="0.01" value="1" style="flex:1; min-width:0; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px;">
+                    <span style="color:#aaa;">×</span>
+                    <input type="number" id="cropCustomRatioH" min="0.001" step="0.01" value="1.3" style="flex:1; min-width:0; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px;">
+                </div>
+            </div>
+            <p id="cropCustomRatioError" style="display:none; color:#f28b82; font-size:11px; margin:6px 0 0;"></p>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                <button id="btnCancelCropCustomRatio" style="background:transparent; border:1px solid #555; color:#fff; padding:6px 14px; border-radius:4px; cursor:pointer;">Annuler</button>
+                <button id="btnConfirmCropCustomRatio" style="background:#5865f2; border:none; color:#fff; padding:6px 16px; border-radius:4px; cursor:pointer; font-weight:bold;">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALE AIDE (menu "Aide" de la barre du haut, voir main.js "menu-open-help" /
+         renderer/app.js initHelpModal). Deux onglets, même style de tab que la
+         modale Paramètres (voir plus bas), classes .help-tab-btn/.help-tab-panel
+         séparées pour ne pas interférer avec selectSettingsTab(). -->
+    <div id="helpModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
+        <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:560px; max-height:80vh; overflow-y:auto; color:#e8eaed;">
+            <button id="btnCloseHelpModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer" data-icon="x"></button>
+            <h3 style="margin-top:0; color:#5865f2; font-size:16px;">Aide</h3>
+
+            <div style="display:flex; gap:4px; border-bottom:1px solid #3c4043; margin-bottom:16px;">
+                <button class="help-tab-btn" data-tab="guide">Guide de démarrage</button>
+                <button class="help-tab-btn" data-tab="thanks">Remerciements</button>
+            </div>
+
+            <div id="helpTab-guide" class="help-tab-panel help-content">
+                <h2>Charger un dossier de photos</h2>
+                <p>Dans le panneau Dossiers Photos (colonne de gauche), cliquez sur <strong>+ Ouvrir</strong>. Choisissez le dossier contenant vos photos (RAW, TIFF, JPEG…) — Pixel RAW l'indexe et l'ajoute à votre arbre de dossiers.</p>
+                <p>Une fois indexé, le dossier reste disponible d'une session à l'autre : pas besoin de le réimporter à chaque lancement de l'application.</p>
+                <p>Pour un très gros dossier, un message « Indexation en cours » s'affiche le temps du traitement — inutile de s'inquiéter si ça prend quelques minutes sur une bibliothèque volumineuse.</p>
+
+                <h2>Le mode Studio</h2>
+                <p>C'est l'espace principal de retouche. Cliquez sur une photo dans l'arbre de gauche (ou utilisez les flèches ‹ › pour naviguer) pour l'ouvrir en grand.</p>
+                <p>Depuis le Studio, vous pouvez :</p>
+                <ul>
+                    <li>Ajuster les réglages Picture Control (exposition, contraste, netteté…)</li>
+                    <li>Appliquer un profil Nikon (Standard, Vivid, Monochrome…)</li>
+                    <li>Peindre des masques locaux (linéaires, radiaux, pinceau, ou masques IA Ciel/Sujet/Arrière-plan)</li>
+                    <li>Corriger poussières et éléments indésirables avec le Tampon de duplication</li>
+                    <li>Utiliser le module Monochrome avancé (mixeur 8 canaux, Lumière tamisée, Dodge &amp; Burn)</li>
+                    <li>Recadrer, redresser l'horizon, corriger la perspective</li>
+                    <li>Noter vos photos (étoiles, Validée/Rejetée) et filtrer la Galerie</li>
+                </ul>
+                <p>Tout ce que vous faites en Studio s'applique à la photo réellement sélectionnée dans votre bibliothèque — c'est votre espace de travail principal.</p>
+
+                <h2>Le mode Gestionnaire de profils</h2>
+                <p>Un espace totalement séparé du Studio, dédié à la création et au test de profils Picture Control Nikon (NP3/NPC), sans jamais toucher à la photo actuellement ouverte dans le Studio.</p>
+                <p>À l'ouverture de ce mode, aucune photo n'est chargée — c'est volontaire. Pour travailler dedans :</p>
+                <ol>
+                    <li>Cliquez sur <strong>Importer un RAW</strong> (menu de gauche) pour charger une photo de test, propre à ce module.</li>
+                    <li>Réglez les curseurs comme vous le souhaitez.</li>
+                    <li>Exportez le profil obtenu (fichier NP3 ou NPC) pour le transférer plus tard sur votre appareil Nikon.</li>
+                    <li>Vous pouvez aussi importer un profil existant (NPC pour Z6 II/Z5/D780, ou NP3 pour Z6III/Z5II/Z8) et cliquer sur <strong>Aperçu</strong> sur cette photo pour voir son rendu avant de l'utiliser réellement.</li>
+                </ol>
+                <p>Ce module est pensé comme un bac à sable : vous pouvez fabriquer, tester, réinitialiser autant de fois que nécessaire, sans jamais risquer de modifier la photo sur laquelle vous travaillez par ailleurs dans le Studio.</p>
+
+                <h2>Passer du Studio au Gestionnaire de profils</h2>
+                <p>Deux façons d'y accéder :</p>
+                <ul>
+                    <li>Le menu <strong>Fichier &gt; Gestionnaire de profils pour Nikon</strong></li>
+                    <li>Le raccourci correspondant dans la barre de menu du haut (si affiché)</li>
+                </ul>
+                <p>Pour revenir au Studio, cliquez simplement sur <strong>Studio</strong> dans la barre de menu.</p>
+
+                <h2>Le menu Programmes externes</h2>
+                <p>Permet d'ouvrir la photo actuellement affichée dans un autre logiciel (Photoshop, Exposure X7, etc.), avec vos réglages Picture Control déjà appliqués (export automatique en TIFF traité, pas la RAW brute).</p>
+                <p>Avant la première utilisation, il faut déclarer au moins un programme :</p>
+                <ol>
+                    <li>Allez dans <strong>Fichier &gt; Paramètres</strong>.</li>
+                    <li>Dans la section Programmes externes, cliquez <strong>+ Ajouter</strong>, donnez-lui un nom (ex : « Photoshop »), puis indiquez le chemin de son exécutable (.exe) via le sélecteur de fichier.</li>
+                    <li>Vous pouvez déclarer plusieurs programmes.</li>
+                </ol>
+                <p>Pour l'utiliser : dans le Studio, cliquez sur <strong>Ouvrir avec</strong> (en haut à droite) et choisissez le programme dans la liste. Le fichier généré est automatiquement enregistré dans le même dossier que la photo d'origine, et réapparaît dans votre arbre dès que vous l'enregistrez depuis le logiciel externe.</p>
+                <p>Si aucun programme n'est déclaré, ce menu vous invite à vous rendre dans Paramètres pour en configurer un.</p>
+
+                <h2>Le menu Exporter</h2>
+                <p>Génère un fichier JPEG ou TIFF de votre photo traitée, à la résolution réelle du capteur (pas l'aperçu réduit du Studio).</p>
+                <p>Réglages disponibles :</p>
+                <ul>
+                    <li>Qualité/compression (100 % = qualité maximale)</li>
+                    <li>Format (JPEG ou TIFF)</li>
+                    <li>Espace colorimétrique : sRGB (par défaut, le plus répandu) ou ProPhoto RGB (gamme de couleurs plus large, pour un usage professionnel/impression avancée)</li>
+                    <li>Cadre (optionnel) : ajout d'une bordure blanche ou noire autour de la photo, sans jamais rogner l'image</li>
+                </ul>
+
+                <h2>Le menu Impression</h2>
+                <p>Ouvre la boîte de dialogue d'impression native de Windows — c'est volontaire : elle seule donne accès aux réglages avancés de votre imprimante (bac papier, type de papier, gestion des couleurs) via le bouton Propriétés/Préférences du pilote.</p>
+                <p>Étapes :</p>
+                <ol>
+                    <li>Cliquez sur <strong>Impression</strong> dans le Studio.</li>
+                    <li>Choisissez votre imprimante dans la boîte de dialogue Windows.</li>
+                    <li>Cliquez sur <strong>Propriétés</strong> pour régler le bac d'alimentation et le type de papier (indispensable pour une imprimante photo comme la Canon PRO-300, par exemple).</li>
+                    <li>Lancez l'impression.</li>
+                </ol>
+                <p>L'image envoyée à l'imprimante est toujours la version pleine résolution, avec tous vos réglages Picture Control déjà appliqués — identique à ce que produirait un export JPEG/TIFF.</p>
+            </div>
+
+            <div id="helpTab-thanks" class="help-tab-panel help-content" style="display:none;">
+                <h2>Remerciements</h2>
+                <p>Pixel RAW n'existerait pas sans plusieurs projets open source, et leurs auteurs méritent d'être cités :</p>
+                <ul>
+                    <li><strong>nikon-flexible-color-picture-control</strong> (ssssota) — le point de départ de ce projet, pour la lecture/écriture des profils Nikon.</li>
+                    <li><strong>LibRaw / libraw-wasm</strong> — pour le décodage RAW pleine résolution.</li>
+                    <li><strong>Sharp</strong> — pour le traitement et l'export des images.</li>
+                    <li><strong>ExifTool</strong> (Phil Harvey) et <strong>exifr</strong> — pour la lecture des métadonnées.</li>
+                    <li><strong>MobileSAM</strong> et le projet de segmentation du ciel (xiongzhu666) — pour les masques intelligents.</li>
+                    <li><strong>NAFNet</strong> (Megvii Research) — pour le débruitage neuronal.</li>
+                    <li><strong>Lensfun</strong> — pour la base de données de correction d'objectifs.</li>
+                    <li><strong>ONNX Runtime</strong> (Microsoft) — pour l'exécution des modèles d'intelligence artificielle.</li>
+                    <li><strong>Electron</strong> — pour le socle applicatif.</li>
+                </ul>
+                <p>Merci à toutes celles et ceux qui ont rendu ce travail possible en le partageant librement.</p>
+                <p>La liste complète et détaillée des licences est disponible dans le fichier <a id="helpGithubLink" href="https://github.com/didierraynaud44-arch/PixelRaw/blob/main/THIRD-PARTY-LICENSES.md" target="_blank" rel="noopener noreferrer">THIRD-PARTY-LICENSES.md du dépôt GitHub du projet</a>.</p>
+            </div>
+        </div>
+    </div>
+
     <!-- MODALE PARAMÈTRES (tableau de réglages extensible : un onglet par catégorie -
          d'autres catégories viendront s'ajouter ici au même titre que les deux
          existantes, voir renderer/app.js initSettingsModal / selectSettingsTab) -->
@@ -572,9 +701,14 @@
     <!-- Masques locaux (Studio uniquement) -->
     <script type="module" src="core/AIMaskEngine.js"></script>
     <script src="core/MaskEngine.js"></script>
+    <script src="core/PerspectiveEngine.js"></script>
     <script src="core/MasksManager.js"></script>
     <script src="components/MaskCanvasController.js"></script>
     <script src="components/masksPanel.js"></script>
+    <script src="components/CropCanvasController.js"></script>
+    <script src="components/cropPanel.js"></script>
+    <script src="components/PerspectiveCanvasController.js"></script>
+    <script src="components/perspectivePanel.js"></script>
 
     <!-- Retouche (tampon de duplication, fusion Poisson) -->
     <script src="core/HealEngine.js"></script>

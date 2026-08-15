@@ -181,6 +181,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onMenuOpenExternalProgramsConfig: (callback) =>
         ipcRenderer.on("menu-open-external-programs-config", callback),
 
+    onMenuOpenHelp: (callback) =>
+        ipcRenderer.on("menu-open-help", callback),
+
     // ============================================================
     // PROGRAMMES EXTERNES ("Ouvrir avec...")
     // ============================================================

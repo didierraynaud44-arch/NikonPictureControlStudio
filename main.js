@@ -205,12 +205,9 @@ function createAppMenu() {
         },
         {
             label: "Aide",
-            submenu: [
-                {
-                    label: "Bientôt disponible",
-                    enabled: false
-                }
-            ]
+            click: () => {
+                if (mainWindow) mainWindow.webContents.send("menu-open-help");
+            }
         }
     ]);
 
@@ -430,7 +427,7 @@ function setupIpcHandlers() {
     // ============================================================
     // 🔗 OUVERTURE DE LIENS EXTERNES (navigateur système, pas Electron)
     // ============================================================
-    const ALLOWED_EXTERNAL_HOSTS = ["www.pixelphotographie.com", "pixelphotographie.com"];
+    const ALLOWED_EXTERNAL_HOSTS = ["www.pixelphotographie.com", "pixelphotographie.com", "github.com"];
 
     ipcMain.handle("open-external-link", async (event, url) => {
         try {
@@ -617,16 +614,36 @@ ipcMain.handle("read-file-direct", async (event, filePath, maxWidth = 1200) => {
                 result.exposureCompensation = exif.ExposureCompensation || null;
                 result.whiteBalance = exif.WhiteBalanceName || null;
                 result.dateTimeOriginal = exif.DateTimeOriginal || null;
+                // 🔹 Valeur de repli seulement : exifr TRADUIT Orientation en chaîne
+                // lisible ("Rotate 270 CW", "Horizontal (normal)") au lieu du code
+                // numérique EXIF standard (1-8). Number("Rotate 270 CW") = NaN, donc
+                // ImageProcessor.load() (renderer) retombait TOUJOURS sur l'orientation
+                // 1 (Number(orientation) || 1) et ne faisait jamais tourner l'image —
+                // confirmé par test réel sur de vraies photos verticales du catalogue.
+                // Écrasée juste en dessous par la lecture exiftool (valeur numérique
+                // fiable) si elle réussit ; ce repli ne sert qu'en cas d'échec d'exiftool.
                 result.orientation = exif.Orientation || 1;
-                
-                console.log("📸 EXIF extraites (exifr):", { 
-                    make: result.make, 
-                    model: result.model, 
+
+                console.log("📸 EXIF extraites (exifr):", {
+                    make: result.make,
+                    model: result.model,
                     iso: result.iso
                 });
             }
         } catch (exifErr) {
             console.warn("⚠️ Erreur extraction EXIF (exifr):", exifErr.message);
+        }
+
+        // 🔹 Orientation numérique fiable via exiftool (voir commentaire ci-dessus :
+        // exifr ne peut pas être utilisé tel quel pour ce tag précis). Lecture ciblée
+        // (1 seul tag), même pattern que le repli objectif juste en dessous.
+        try {
+            const orientTag = await exiftool.read(filePath, ["Orientation"]);
+            if (orientTag && typeof orientTag.Orientation === "number") {
+                result.orientation = orientTag.Orientation;
+            }
+        } catch (orientErr) {
+            console.warn("⚠️ Lecture orientation (exiftool) échouée :", orientErr.message);
         }
 
         // 🔹 Repli exiftool pour l'objectif : exifr ne décode pas les données
@@ -757,6 +774,13 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
             return {
                 success: true,
                 isRaw: false,
+                // 🔹 metadata.orientation (sharp) est un NOMBRE fiable 1-8, contrairement
+                // à exifr.Orientation (voir plus haut) — transmis pour que le renderer
+                // applique la même rotation qu'à l'aperçu (voir ImageProcessor.js
+                // _dataUrlToImageData), sinon une image standard tournée reviendrait
+                // à son orientation brute une fois le zoom/export/impression pleine
+                // résolution déclenché.
+                orientation: metadata.orientation || 1,
                 dataUrl: `data:image/jpeg;base64,${imageBuffer.toString("base64")}`
             };
         }

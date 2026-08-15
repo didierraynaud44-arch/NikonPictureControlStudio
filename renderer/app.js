@@ -248,6 +248,8 @@ async function saveCurrentPictureControlSettings(filePath) {
         }
         if (window.imageProcessor) {
             settings.neuralDenoiseApplied = !!window.imageProcessor.neuralDenoiseApplied;
+            settings.crop = window.imageProcessor.cropSettings || null;
+            settings.perspective = window.imageProcessor.perspectiveSettings || null;
         }
 
         console.log("💾 Sauvegarde des réglages pour:", filePath);
@@ -290,6 +292,8 @@ async function saveCurrentPhotoSettingsToCatalog() {
     }
     if (window.imageProcessor) {
         settingsToSave.neuralDenoiseApplied = !!window.imageProcessor.neuralDenoiseApplied;
+        settingsToSave.crop = window.imageProcessor.cropSettings || null;
+        settingsToSave.perspective = window.imageProcessor.perspectiveSettings || null;
     }
 
     if (window.electronAPI && typeof window.electronAPI.savePhotoSettings === "function") {
@@ -1013,6 +1017,27 @@ async function loadImageInStudio(filePath) {
             if (typeof window.renderRetouchPanel === "function") window.renderRetouchPanel();
         }
 
+        // 🔹 Recadrage + Niveau : champ dédié à part, même principe que les
+        // retouches. Mode édition (cropPanelActive) TOUJOURS remis à false au
+        // changement de photo — jamais laissé actif d'une photo à l'autre.
+        if (window.imageProcessor) {
+            const savedCrop = savedSettings && savedSettings.crop ? savedSettings.crop : null;
+            if (savedSettings && "crop" in savedSettings) delete savedSettings.crop;
+            window.imageProcessor.cropPanelActive = false;
+            window.imageProcessor.cropSettings = savedCrop;
+            if (window.cropCanvasController) window.cropCanvasController.ratioId = savedCrop?.ratioId || "free";
+            if (typeof window.renderCropPanel === "function") window.renderCropPanel();
+        }
+
+        // 🔹 Correction de perspective : champ dédié à part, même principe.
+        if (window.imageProcessor) {
+            const savedPerspective = savedSettings && savedSettings.perspective ? savedSettings.perspective : null;
+            if (savedSettings && "perspective" in savedSettings) delete savedSettings.perspective;
+            window.imageProcessor.perspectivePanelActive = false;
+            window.imageProcessor.perspectiveSettings = savedPerspective;
+            if (typeof window.renderPerspectivePanel === "function") window.renderPerspectivePanel();
+        }
+
         // 🔹 Simulation Pellicule : même principe que les retouches, champ dédié
         // retiré de savedSettings pour ne pas polluer l'objet Picture Control
         // (pcData = savedSettings dans la branche suivante).
@@ -1652,6 +1677,62 @@ function initSettingsModal() {
     window.openExternalProgramsModal = () => window.openSettingsModal("external-programs");
 }
 
+/**
+ * 🔹 Modale "Aide" (menu "Aide" de la barre du haut, voir main.js
+ * "menu-open-help" / renderer/index.html #helpModal) : Guide de démarrage +
+ * Remerciements, même structure à onglets que la modale Paramètres
+ * (voir selectSettingsTab), classes .help-tab-btn/.help-tab-panel séparées
+ * pour ne pas se marcher dessus.
+ */
+function selectHelpTab(tab) {
+    const validTab = ["guide", "thanks"].includes(tab) ? tab : "guide";
+
+    document.querySelectorAll(".help-tab-btn").forEach(btn => {
+        const isActive = btn.dataset.tab === validTab;
+        btn.style.color = isActive ? "#fff" : "#aaa";
+        btn.style.borderBottomColor = isActive ? "#5865f2" : "transparent";
+    });
+
+    document.querySelectorAll(".help-tab-panel").forEach(panel => {
+        panel.style.display = (panel.id === `helpTab-${validTab}`) ? "block" : "none";
+    });
+}
+
+function initHelpModal() {
+    const modal = document.getElementById("helpModal");
+    const btnClose = document.getElementById("btnCloseHelpModal");
+    const githubLink = document.getElementById("helpGithubLink");
+
+    if (btnClose && modal) {
+        btnClose.onclick = () => { modal.style.display = "none"; };
+    }
+
+    document.querySelectorAll(".help-tab-btn").forEach(btn => {
+        btn.onclick = () => selectHelpTab(btn.dataset.tab);
+    });
+
+    if (githubLink) {
+        githubLink.addEventListener("click", (e) => {
+            e.preventDefault();
+            if (window.electronAPI && typeof window.electronAPI.openExternalLink === "function") {
+                window.electronAPI.openExternalLink(githubLink.href);
+            }
+        });
+    }
+
+    window.openHelpModal = () => {
+        if (!modal) return;
+        selectHelpTab("guide");
+        modal.style.display = "flex";
+    };
+}
+
+if (window.electronAPI?.onMenuOpenHelp) {
+    window.electronAPI.onMenuOpenHelp(() => {
+        if (typeof window.openHelpModal === "function") window.openHelpModal();
+    });
+}
+
 function closeOpenWithDropdown() {
     const dropdown = document.getElementById("openWithDropdown");
     if (dropdown) dropdown.style.display = "none";
@@ -2032,6 +2113,14 @@ function initButtons() {
         window.initRetouchController(window.imageProcessor);
     }
 
+    if (window.imageProcessor && typeof window.initCropController === "function") {
+        window.initCropController(window.imageProcessor);
+    }
+
+    if (window.imageProcessor && typeof window.initPerspectiveController === "function") {
+        window.initPerspectiveController(window.imageProcessor);
+    }
+
     // 🔹 Gomme couleur (module Monochrome) : try/catch explicite — un contrôleur
     // qui échoue à s'initialiser ici (script manquant, classe indisponible...)
     // ne doit pas interrompre le reste de initButtons().
@@ -2218,27 +2307,44 @@ function initButtons() {
     const inputDegree     = document.getElementById("inputRotationDegree");
     const btnResetRot     = document.getElementById("btnResetRotation");
 
-    let currentTransform = { rotation: 0, flipH: false, flipV: false };
-
+    // 🔹 Recadrage + Niveau (cropPanel.js) réutilise ce MÊME curseur Angle fin
+    // avec son propre champ dans le DOM, mais lit/écrit directement
+    // window.imageProcessor.transform (source de vérité unique, PAS de miroir
+    // local comme l'ancien "currentTransform" ci-dessous) — indispensable pour
+    // que les deux panneaux restent synchronisés sans état dupliqué qui
+    // pourrait diverger entre eux.
     function applyStudioTransform() {
         if (window.imageProcessor && typeof window.imageProcessor.setTransform === "function") {
-            window.imageProcessor.setTransform(currentTransform);
+            window.imageProcessor.setTransform(window.imageProcessor.transform);
             saveCurrentPhotoSettingsToCatalog();
         }
     }
 
-    if (btnRotateLeft) btnRotateLeft.onclick = () => { currentTransform.rotation -= 90; applyStudioTransform(); };
-    if (btnRotateRight) btnRotateRight.onclick = () => { currentTransform.rotation += 90; applyStudioTransform(); };
-    if (btnFlipH) btnFlipH.onclick = () => { currentTransform.flipH = !currentTransform.flipH; applyStudioTransform(); };
-      if (btnFlipV) btnFlipV.onclick = () => { currentTransform.flipV = !currentTransform.flipV; applyStudioTransform(); };
+    // 🔹 Prévient CropCanvasController qu'Angle fin a changé, pour recontraindre
+    // le cadre de recadrage au plus grand rectangle inscrit dans l'image
+    // tournée (voir CropCanvasController.onFineAngleChange) — no-op si le
+    // panneau Recadrage n'est pas actif ou n'existe pas encore.
+    function _notifyCropOfAngleChange() {
+        if (window.cropCanvasController && typeof window.cropCanvasController.onFineAngleChange === "function") {
+            window.cropCanvasController.onFineAngleChange();
+        }
+        if (typeof window.renderCropPanel === "function") window.renderCropPanel();
+    }
+
+    if (btnRotateLeft) btnRotateLeft.onclick = () => { window.imageProcessor.transform.rotation -= 90; applyStudioTransform(); _notifyCropOfAngleChange(); };
+    if (btnRotateRight) btnRotateRight.onclick = () => { window.imageProcessor.transform.rotation += 90; applyStudioTransform(); _notifyCropOfAngleChange(); };
+    if (btnFlipH) btnFlipH.onclick = () => { window.imageProcessor.transform.flipH = !window.imageProcessor.transform.flipH; applyStudioTransform(); };
+      if (btnFlipV) btnFlipV.onclick = () => { window.imageProcessor.transform.flipV = !window.imageProcessor.transform.flipV; applyStudioTransform(); };
 
     if (rangeDegree) {
         rangeDegree.oninput = (e) => {
             const val = parseFloat(e.target.value) || 0;
-            const base90 = Math.round(currentTransform.rotation / 90) * 90;
-            currentTransform.rotation = base90 + val;
+            const t = window.imageProcessor.transform;
+            const base90 = Math.round(t.rotation / 90) * 90;
+            t.rotation = base90 + val;
             if (inputDegree) inputDegree.value = val;
             applyStudioTransform();
+            _notifyCropOfAngleChange();
         };
     }
 
@@ -2247,10 +2353,12 @@ function initButtons() {
             let val = parseFloat(inputDegree.value) || 0;
             if (val > 45) val = 45;
             if (val < -45) val = -45;
-            const base90 = Math.round(currentTransform.rotation / 90) * 90;
-            currentTransform.rotation = base90 + val;
+            const t = window.imageProcessor.transform;
+            const base90 = Math.round(t.rotation / 90) * 90;
+            t.rotation = base90 + val;
             if (rangeDegree) rangeDegree.value = val;
             applyStudioTransform();
+            _notifyCropOfAngleChange();
         };
         inputDegree.oninput = handleInput;
         inputDegree.onchange = handleInput;
@@ -2258,10 +2366,11 @@ function initButtons() {
 
     if (btnResetRot) {
         btnResetRot.onclick = () => {
-            currentTransform = { rotation: 0, flipH: false, flipV: false };
+            window.imageProcessor.transform = { rotation: 0, flipH: false, flipV: false };
             if (rangeDegree) rangeDegree.value = 0;
             if (inputDegree) inputDegree.value = 0;
             applyStudioTransform();
+            _notifyCropOfAngleChange();
         };
     }
 
@@ -2353,6 +2462,7 @@ function initButtons() {
     renderStudioFolderTree();
     initExportModal();
     initSettingsModal();
+    initHelpModal();
     initOpenWithButton();
 
     if (typeof window.renderMasksPanel === "function") {
@@ -2361,6 +2471,14 @@ function initButtons() {
 
     if (typeof window.renderRetouchPanel === "function") {
         window.renderRetouchPanel();
+    }
+
+    if (typeof window.renderCropPanel === "function") {
+        window.renderCropPanel();
+    }
+
+    if (typeof window.renderPerspectivePanel === "function") {
+        window.renderPerspectivePanel();
     }
 
     if (typeof window.renderFilmPanel === "function") {

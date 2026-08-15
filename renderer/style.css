@@ -1385,3 +1385,64 @@ canvas {
 #singleImageContainer:fullscreen:hover::after {
     opacity: 1;
 }
+
+/* Menu Aide (modale) : contenu Guide de démarrage / Remerciements, texte
+   riche généré depuis renderer/index.html (voir #helpModal) — même palette
+   sombre que le reste des modales (#202124/#e8eaed), pas de style.css
+   générique pour h2/ul ailleurs dans l'app donc scoping local ici. */
+.help-content h2 {
+    color: #5865f2;
+    font-size: 14px;
+    margin: 22px 0 8px;
+}
+
+.help-content h2:first-child {
+    margin-top: 0;
+}
+
+.help-content h3 {
+    color: #e8eaed;
+    font-size: 13px;
+    margin: 16px 0 6px;
+}
+
+.help-content p {
+    font-size: 12px;
+    line-height: 1.6;
+    color: #c9ccd1;
+    margin: 0 0 10px;
+}
+
+.help-content ul,
+.help-content ol {
+    font-size: 12px;
+    line-height: 1.6;
+    color: #c9ccd1;
+    margin: 0 0 10px;
+    padding-left: 22px;
+}
+
+.help-content li {
+    margin-bottom: 4px;
+}
+
+.help-content strong {
+    color: #e8eaed;
+}
+
+.help-content a {
+    color: #7289f2;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.help-tab-btn {
+    background: transparent;
+    border: none;
+    color: #aaa;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    border-bottom: 2px solid transparent;
+}

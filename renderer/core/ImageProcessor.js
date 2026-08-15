@@ -45,12 +45,37 @@ class ImageProcessor {
         this.overlayCtx = this.overlayCanvas ? this.overlayCanvas.getContext("2d") : null;
 
         this.transform = { rotation: 0, flipH: false, flipV: false };
+
+        // 🔹 Recadrage + Niveau : cropSettings = { enabled, ratioId, rectX, rectY,
+        // rectWidth, rectHeight } normalisés RELATIFS À L'IMAGE TOURNÉE (voir
+        // _bakeTransform/applyCrop), persistés par photo. cropPanelActive n'est
+        // vrai QUE pendant que le panneau Recadrage est ouvert (mis par
+        // cropPanel.js) : c'est ce qui bascule render() en mode "rotation
+        // gravée dans les pixels + cosmétique DisplayCanvas supprimée" (voir
+        // render()) — le reste de l'app (édition masques/retouches) continue
+        // d'utiliser la rotation cosmétique existante, inchangée.
+        this.cropPanelActive = false;
+        this.cropSettings = null;
+
+        // 🔹 Correction de perspective : perspectiveSettings = { enabled, corners:
+        // [4 points {x,y} normalisés, ordre [tl,tr,bl,br] ] }, s'applique en
+        // continu dans le pipeline dès que enabled (comme un réglage Picture
+        // Control), indépendamment de perspectivePanelActive — qui ne pilote
+        // que l'affichage/l'interactivité des 4 poignées (voir
+        // PerspectiveCanvasController.js et _drawPerspectiveOverlay).
+        this.perspectivePanelActive = false;
+        this.perspectiveSettings = null;
+        this.perspectiveController = null;
         this.pictureControl = null;
         this.pipeline = new RenderPipeline();
 
         this.enableMasks = true;
         this.maskController = null;
         this.showMaskOverlay = true;
+
+        // 🔹 Recadrage + Niveau : référence au contrôleur souris (voir
+        // CropCanvasController.js), même rôle que maskController/retouchController.
+        this.cropController = null;
 
         // 🔹 Gomme du module Monochrome : contrôleur dédié (voir
         // MonochromeMaskCanvasController.js), même rôle que maskController/
@@ -718,8 +743,39 @@ class ImageProcessor {
             }
         }
 
+        // 🔹 Correction de perspective : correction géométrique de finition,
+        // APRÈS le rendu créatif (Picture Control/masques/Monochrome) car elle
+        // dépend du contenu visuel final que l'utilisateur voit pour choisir
+        // ses 4 points — AVANT le recadrage/la rotation gravée (voir plus bas).
+        // S'applique dès que perspectiveSettings.enabled, indépendamment du
+        // panneau ouvert ou non (comme un réglage Picture Control).
+        if (this.perspectiveSettings && this.perspectiveSettings.enabled && typeof PerspectiveEngine !== "undefined") {
+            try {
+                currentImageData = PerspectiveEngine.applyPerspective(currentImageData, this.perspectiveSettings.corners);
+            } catch (err) {
+                console.error("❌ Erreur correction de perspective :", err);
+            }
+        }
+
+        // 🔹 Panneau Recadrage actif : la rotation est gravée RÉELLEMENT dans les
+        // pixels ici (voir _bakeTransform) plutôt que laissée cosmétique côté
+        // DisplayCanvas — c'est ce qui permet à CropCanvasController de placer
+        // son cadre/poignées en coordonnées simples (pan/zoom uniquement, comme
+        // MaskCanvasController), l'image affichée étant déjà axis-aligned. On
+        // n'appelle PAS applyCrop() ici : le cadre reste un survol/overlay
+        // pendant l'édition (comme un masque), pas une découpe physique tant
+        // que l'utilisateur n'a pas quitté le panneau — le recadrage réel
+        // n'intervient qu'à l'export (voir exportFullResolution/exportProcessedTiff).
+        // Partout ailleurs (masques/retouches en cours d'édition, etc.), la
+        // rotation cosmétique de DisplayCanvas reste inchangée pour ne rien casser.
+        let displayTransform = this.transform;
+        if (this.cropPanelActive) {
+            currentImageData = this._bakeTransform(currentImageData, this.transform);
+            displayTransform = { rotation: 0, flipH: false, flipV: false };
+        }
+
         if (typeof this.display.setTransform === "function") {
-            this.display.setTransform(this.transform);
+            this.display.setTransform(displayTransform);
         }
 
         this.display.draw(currentImageData, { preserveView: usingFullRes });
@@ -919,16 +975,20 @@ class ImageProcessor {
 
             // Repli : le décodage pleine résolution a échoué sur ce fichier
             // particulier -> on retombe sur la vignette embarquée (decodeRAWImage),
-            // déjà utilisée pour le chargement rapide dans le Studio.
+            // déjà utilisée pour le chargement rapide dans le Studio. Cette vignette
+            // n'est PAS pré-tournée (voir orientation EXIF/RAW, main.js) : orientation
+            // appliquée ici comme pour l'aperçu (this.currentOrientation), sinon la
+            // photo repartirait dans son orientation capteur brute une fois zoomée/
+            // exportée/imprimée en pleine résolution malgré un aperçu correct.
             if (!imageData) {
                 console.warn("⚠️ Décodage RAW pleine résolution indisponible, repli sur la vignette embarquée");
                 const fallback = await window.electronAPI.readFileDirect(filePath);
                 if (fallback && fallback.preview) {
-                    imageData = await this._dataUrlToImageData(fallback.preview);
+                    imageData = await this._dataUrlToImageData(fallback.preview, fallback.orientation || 1);
                 }
             }
         } else if (result.dataUrl) {
-            imageData = await this._dataUrlToImageData(result.dataUrl);
+            imageData = await this._dataUrlToImageData(result.dataUrl, result.orientation || 1);
         }
 
         if (!imageData) return null;
@@ -942,15 +1002,12 @@ class ImageProcessor {
     /**
      * @private
      */
-    _dataUrlToImageData(dataUrl) {
+    _dataUrlToImageData(dataUrl, orientation = 1) {
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.onload = () => {
-                const canvas = document.createElement("canvas");
-                canvas.width = img.width;
-                canvas.height = img.height;
+                const canvas = this.createRotatedCanvas(img, orientation);
                 const ctx = canvas.getContext("2d");
-                ctx.drawImage(img, 0, 0);
                 resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
             };
             img.onerror = reject;
@@ -1008,23 +1065,42 @@ class ImageProcessor {
             }
         }
 
-        // Encadrement : toute dernière étape, après pipeline + masques, avant la
-        // mise en canvas finale (voir FrameUtils.js — agrandit le canevas, ne
-        // recadre jamais dans la photo).
+        // 🔹 Correction de perspective : voir render() pour le raisonnement
+        // complet (après le rendu créatif, avant le recadrage/la rotation gravée).
+        if (this.perspectiveSettings && this.perspectiveSettings.enabled && typeof PerspectiveEngine !== "undefined") {
+            try {
+                currentImageData = PerspectiveEngine.applyPerspective(currentImageData, this.perspectiveSettings.corners);
+            } catch (err) {
+                console.error("❌ Erreur correction de perspective export full res :", err);
+            }
+        }
+
+        // 🔹 Rotation/inversion RÉELLEMENT gravée dans les pixels (voir
+        // _bakeTransform — remplace l'ancien _applyTransformations+putImageData,
+        // qui n'avait aucun effet réel ici : putImageData ignore toujours la
+        // matrice de transformation du canvas, contrairement à drawImage utilisé
+        // par _bakeTransform et par DisplayCanvas.render() pour l'aperçu Studio).
+        currentImageData = this._bakeTransform(currentImageData, this.transform);
+
+        // 🔹 Recadrage : une simple fenêtre sur le résultat final déjà tourné
+        // (voir applyCrop) — jamais avant, pour que les masques/retouches
+        // continuent de fonctionner sur l'image complète.
+        currentImageData = this.applyCrop(currentImageData);
+
+        // 🔹 Encadrement : VRAIMENT la toute dernière étape désormais (après
+        // perspective/rotation/recadrage, pas avant) — sinon le recadrage
+        // coupait une partie du cadre ajouté, et la rotation le faisait
+        // pivoter avec le contenu au lieu d'entourer le résultat final (voir
+        // FrameUtils.js : "agrandit le canevas, ne recadre jamais dans la photo").
         if (frameOptions && typeof applyFrame === "function") {
             currentImageData = applyFrame(currentImageData, frameOptions);
         }
 
-        // Créer un canvas temporaire en pleine résolution
+        // Créer un canvas temporaire en pleine résolution et y dessiner le résultat final
         const tempCanvas = document.createElement("canvas");
         tempCanvas.width = currentImageData.width;
         tempCanvas.height = currentImageData.height;
         const tempCtx = tempCanvas.getContext("2d");
-
-        // Appliquer les transformations (rotation, flip)
-        this._applyTransformations(tempCtx, tempCanvas.width, tempCanvas.height);
-
-        // Dessiner l'image traitée
         tempCtx.putImageData(currentImageData, 0, 0);
 
         // Retourner le DataURL
@@ -1074,40 +1150,124 @@ class ImageProcessor {
             }
         }
 
+        if (this.perspectiveSettings && this.perspectiveSettings.enabled && typeof PerspectiveEngine !== "undefined") {
+            try {
+                currentImageData = PerspectiveEngine.applyPerspective(currentImageData, this.perspectiveSettings.corners);
+            } catch (err) {
+                console.error("❌ Erreur correction de perspective export TIFF :", err);
+            }
+        }
+
+        currentImageData = this._bakeTransform(currentImageData, this.transform);
+        currentImageData = this.applyCrop(currentImageData);
+
         const tempCanvas = document.createElement("canvas");
         tempCanvas.width = currentImageData.width;
         tempCanvas.height = currentImageData.height;
         const tempCtx = tempCanvas.getContext("2d");
-
-        this._applyTransformations(tempCtx, tempCanvas.width, tempCanvas.height);
         tempCtx.putImageData(currentImageData, 0, 0);
 
         return tempCanvas.toDataURL("image/png");
     }
 
     /**
-     * Applique les transformations (rotation, flip) au contexte
-     * @private
+     * Dimensions de la bounding box (axis-aligned) contenant width×height une
+     * fois tourné de transform.rotation (le flip seul ne change pas les
+     * dimensions). Utilisé par _bakeTransform pour dimensionner le canevas de
+     * sortie, et par CropCanvasController pour contraindre le cadre de
+     * recadrage au plus grand rectangle inscriptible dans l'image tournée.
+     * @param {number} width
+     * @param {number} height
+     * @param {{rotation:number}} transform
+     * @returns {{width:number, height:number}}
      */
-    _applyTransformations(ctx, width, height) {
-        const rotation = this.transform.rotation % 360;
-        const flipH = this.transform.flipH;
-        const flipV = this.transform.flipV;
+    getRotatedBounds(width, height, transform) {
+        const rotation = ((transform.rotation % 360) + 360) % 360;
+        const rad = (rotation * Math.PI) / 180;
+        const cos = Math.abs(Math.cos(rad));
+        const sin = Math.abs(Math.sin(rad));
+        return {
+            width: Math.round(width * cos + height * sin),
+            height: Math.round(width * sin + height * cos)
+        };
+    }
 
-        if (rotation !== 0 || flipH || flipV) {
-            ctx.translate(width / 2, height / 2);
+    /**
+     * Grave RÉELLEMENT la rotation/inversion dans les pixels, via drawImage
+     * (qui respecte la matrice de transformation du canvas) — contrairement à
+     * l'ancienne _applyTransformations()+putImageData() qui posait la
+     * transformation sur le CONTEXTE puis appelait putImageData(), laquelle
+     * IGNORE TOUJOURS cette matrice (comportement standard de l'API Canvas2D,
+     * pas un bug qu'on aurait pu activer autrement) : la rotation n'avait donc
+     * jusqu'ici aucun effet réel à l'export/impression, seulement sur l'aperçu
+     * Studio (voir DisplayCanvas.render(), qui utilise bien drawImage).
+     * Le canevas de sortie s'agrandit à la bounding box de l'image tournée
+     * (voir getRotatedBounds) — zones hors du contenu d'origine transparentes,
+     * jamais visibles tant que le recadrage reste dans le rectangle inscrit.
+     * @param {ImageData} imageData
+     * @param {{rotation:number, flipH:boolean, flipV:boolean}} transform
+     * @returns {ImageData}
+     */
+    _bakeTransform(imageData, transform) {
+        const rotation = ((transform.rotation % 360) + 360) % 360;
+        const flipH = !!transform.flipH;
+        const flipV = !!transform.flipV;
+        if (rotation === 0 && !flipH && !flipV) return imageData;
 
-            if (flipH) ctx.scale(-1, 1);
-            if (flipV) ctx.scale(1, -1);
+        const srcCanvas = document.createElement("canvas");
+        srcCanvas.width = imageData.width;
+        srcCanvas.height = imageData.height;
+        srcCanvas.getContext("2d").putImageData(imageData, 0, 0);
 
-            ctx.rotate((rotation * Math.PI) / 180);
-            ctx.translate(-width / 2, -height / 2);
-        }
+        const { width: outW, height: outH } = this.getRotatedBounds(imageData.width, imageData.height, transform);
+
+        const dstCanvas = document.createElement("canvas");
+        dstCanvas.width = outW;
+        dstCanvas.height = outH;
+        const dctx = dstCanvas.getContext("2d");
+
+        dctx.translate(outW / 2, outH / 2);
+        if (flipH) dctx.scale(-1, 1);
+        if (flipV) dctx.scale(1, -1);
+        dctx.rotate((rotation * Math.PI) / 180);
+        dctx.drawImage(srcCanvas, -imageData.width / 2, -imageData.height / 2);
+
+        return dctx.getImageData(0, 0, outW, outH);
+    }
+
+    /**
+     * Découpe imageData (déjà tournée, voir _bakeTransform) selon
+     * this.cropSettings — coordonnées normalisées RELATIVES À CETTE IMAGE
+     * TOURNÉE, pas à l'image d'origine. No-op si le recadrage n'est pas activé.
+     * @param {ImageData} imageData
+     * @returns {ImageData}
+     */
+    applyCrop(imageData) {
+        const crop = this.cropSettings;
+        if (!crop || !crop.enabled) return imageData;
+
+        const x = Math.round(Math.max(0, Math.min(1, crop.rectX)) * imageData.width);
+        const y = Math.round(Math.max(0, Math.min(1, crop.rectY)) * imageData.height);
+        const w = Math.min(imageData.width - x, Math.max(1, Math.round(crop.rectWidth * imageData.width)));
+        const h = Math.min(imageData.height - y, Math.max(1, Math.round(crop.rectHeight * imageData.height)));
+        if (w <= 0 || h <= 0) return imageData;
+
+        const srcCanvas = document.createElement("canvas");
+        srcCanvas.width = imageData.width;
+        srcCanvas.height = imageData.height;
+        srcCanvas.getContext("2d").putImageData(imageData, 0, 0);
+
+        const dstCanvas = document.createElement("canvas");
+        dstCanvas.width = w;
+        dstCanvas.height = h;
+        const dctx = dstCanvas.getContext("2d");
+        dctx.drawImage(srcCanvas, x, y, w, h, 0, 0, w, h);
+
+        return dctx.getImageData(0, 0, w, h);
     }
 
     renderMaskOverlay() {
         if (!this.overlayCanvas || !this.display || !this.display.offscreenCanvas.width) return;
-        if (typeof MasksManager === "undefined") return;
 
         const canvas = this.overlayCanvas;
         const ctx = this.overlayCtx || canvas.getContext("2d");
@@ -1116,6 +1276,22 @@ class ImageProcessor {
         canvas.height = this.display.canvas.height;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // 🔹 Panneau Recadrage actif : cadre/poignées/grille des tiers à la place
+        // des masques (deux workflows exclusifs) — voir CropCanvasController.js.
+        // L'image affichée est déjà axis-aligned (rotation gravée, voir render()),
+        // donc la même conversion pan/zoom simple que _drawCropOverlay utilise
+        // suffit, sans maths de rotation supplémentaires.
+        if (this.cropPanelActive) {
+            this._drawCropOverlay(ctx, canvas);
+            return;
+        }
+
+        if (this.perspectivePanelActive) {
+            this._drawPerspectiveOverlay(ctx, canvas);
+            return;
+        }
+
+        if (typeof MasksManager === "undefined") return;
         if (!this.showMaskOverlay) return;
 
         const masksToDraw = [];
@@ -1197,6 +1373,129 @@ class ImageProcessor {
 
         if (showErasePreview) {
             this._drawBrushPreview(ctx, imgW, imgH, { brushPreviewPos: monochromeMaskController.hoverPos, brushSize: monochromeMaskController.brushSize }, scale);
+        }
+
+        ctx.restore();
+    }
+
+    /**
+     * Dessine le cadre de recadrage (voile semi-transparent hors cadre,
+     * bordure, grille des tiers, 8 poignées) en coordonnées pan/zoom simples —
+     * l'image est déjà axis-aligned à ce stade (rotation gravée dans les
+     * pixels, voir render()). Le rectangle lui-même vit dans this.cropSettings,
+     * muté en direct par CropCanvasController (comme RetouchManager pour les
+     * retouches) — défaut plein cadre si le recadrage n'a jamais été touché.
+     * @private
+     */
+    _drawCropOverlay(ctx, canvas) {
+        const imgW = this.display.offscreenCanvas.width;
+        const imgH = this.display.offscreenCanvas.height;
+        const scale = this.display.scale || 1;
+        const panX = this.display.panX || 0;
+        const panY = this.display.panY || 0;
+
+        const drawX = (canvas.width - imgW * scale) / 2 + panX;
+        const drawY = (canvas.height - imgH * scale) / 2 + panY;
+
+        const crop = this.cropSettings || { rectX: 0, rectY: 0, rectWidth: 1, rectHeight: 1 };
+        const rx = crop.rectX * imgW, ry = crop.rectY * imgH;
+        const rw = crop.rectWidth * imgW, rh = crop.rectHeight * imgH;
+
+        ctx.save();
+        ctx.translate(drawX, drawY);
+        ctx.scale(scale, scale);
+
+        // Voile semi-transparent sur toute l'image SAUF le cadre (règle even-odd :
+        // rectangle image "plein" + rectangle cadre "trou").
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, imgW, imgH);
+        ctx.rect(rx, ry, rw, rh);
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.fill("evenodd");
+        ctx.restore();
+
+        ctx.lineWidth = 1.5 / scale;
+        ctx.strokeStyle = "#ffffff";
+        ctx.strokeRect(rx, ry, rw, rh);
+
+        // Grille règle des tiers, uniquement à l'intérieur du cadre.
+        ctx.strokeStyle = "rgba(255,255,255,0.6)";
+        ctx.lineWidth = 1 / scale;
+        for (let i = 1; i <= 2; i++) {
+            const gx = rx + (rw * i) / 3;
+            ctx.beginPath();
+            ctx.moveTo(gx, ry);
+            ctx.lineTo(gx, ry + rh);
+            ctx.stroke();
+
+            const gy = ry + (rh * i) / 3;
+            ctx.beginPath();
+            ctx.moveTo(rx, gy);
+            ctx.lineTo(rx + rw, gy);
+            ctx.stroke();
+        }
+
+        // 8 poignées : 4 coins + 4 côtés (mêmes points que CropCanvasController._hitTest).
+        const handleR = 5 / scale;
+        const handlePoints = [
+            [rx, ry], [rx + rw / 2, ry], [rx + rw, ry],
+            [rx, ry + rh / 2], [rx + rw, ry + rh / 2],
+            [rx, ry + rh], [rx + rw / 2, ry + rh], [rx + rw, ry + rh]
+        ];
+        ctx.fillStyle = "#ffffff";
+        for (const [hx, hy] of handlePoints) {
+            ctx.beginPath();
+            ctx.arc(hx, hy, handleR, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.restore();
+    }
+
+    /**
+     * Dessine le quadrilatère de correction de perspective (4 poignées reliées
+     * par un contour) en coordonnées pan/zoom simples — voir
+     * PerspectiveCanvasController pour la justification de l'absence de maths
+     * de rotation ici (même limitation déjà acceptée pour les masques).
+     * @private
+     */
+    _drawPerspectiveOverlay(ctx, canvas) {
+        const persp = this.perspectiveSettings || {
+            corners: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }]
+        };
+        const imgW = this.display.offscreenCanvas.width;
+        const imgH = this.display.offscreenCanvas.height;
+        const scale = this.display.scale || 1;
+        const panX = this.display.panX || 0;
+        const panY = this.display.panY || 0;
+
+        const drawX = (canvas.width - imgW * scale) / 2 + panX;
+        const drawY = (canvas.height - imgH * scale) / 2 + panY;
+
+        const pts = persp.corners.map(c => ({ x: c.x * imgW, y: c.y * imgH }));
+        const order = [0, 1, 3, 2]; // [tl,tr,bl,br] -> tracé tl-tr-br-bl-tl
+
+        ctx.save();
+        ctx.translate(drawX, drawY);
+        ctx.scale(scale, scale);
+
+        ctx.lineWidth = 1.5 / scale;
+        ctx.strokeStyle = "#ffffff";
+        ctx.beginPath();
+        order.forEach((idx, i) => {
+            const p = pts[idx];
+            if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+        ctx.stroke();
+
+        const handleR = 6 / scale;
+        ctx.fillStyle = "#ffffff";
+        for (const p of pts) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, handleR, 0, Math.PI * 2);
+            ctx.fill();
         }
 
         ctx.restore();

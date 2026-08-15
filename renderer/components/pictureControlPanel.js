@@ -250,6 +250,12 @@ function buildPanelHtml(pc, compact, extendedNP3) {
             </div>
         </div>
 
+        ${compact ? "" : `
+        <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
+        <h3 style="margin-bottom: 10px; font-size: 13px;">Exposition</h3>
+        ${createSlider("Exposition (EV)", "exposure", pc.exposure ?? 0, -3, 3, 0.05)}
+        `}
+
         ${createSlider("Accentuation", "sharpening", pc.sharpening ?? 0, -3, 9, 0.1)}
         ${createSlider("Accentuation moyenne", "midRangeSharpening", pc.midRangeSharpening ?? 0, -5, 5, 0.1)}
         ${createSlider("Clarté", "clarity", pc.clarity ?? 0, -5, 5, 0.1)}
@@ -259,10 +265,6 @@ function buildPanelHtml(pc, compact, extendedNP3) {
         ${createSlider("Teinte", "hue", pc.hue ?? 0, -3, 3, 0.1)}
 
         ${compact ? "" : `
-        <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
-        <h3 style="margin-bottom: 10px; font-size: 13px;">Exposition</h3>
-        ${createSlider("Exposition (EV)", "exposure", pc.exposure ?? 0, -3, 3, 0.05)}
-
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
         <h3 style="margin-bottom: 10px; font-size: 13px;">Point noir &amp; Point blanc</h3>
         ${createSlider("Point noir", "blackPoint", pc.blackPoint ?? 0, 0, 250, 1)}
