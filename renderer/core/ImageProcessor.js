@@ -82,6 +82,14 @@ class ImageProcessor {
         // retouchController pour l'aperçu du cercle de pinceau en survol.
         this.monochromeMaskController = null;
 
+        // 🔹 Module Monochrome dédié : MonochromeManager est un état GLOBAL
+        // (comme MasksManager/RetouchManager, voir enableMasks/enableRetouches
+        // ci-dessus) partagé par toutes les instances ImageProcessor. Sans ce
+        // verrou, profileImageProcessor (Gestionnaire de Profils, app.js)
+        // hériterait du module Monochrome activé sur la photo du Studio —
+        // voir ensureProfileImageProcessor() qui le met à false.
+        this.enableMonochrome = true;
+
         // 🔹 Retouche (tampon de duplication) : appliquée une fois, en amont du
         // pipeline. Cache par clé de résolution ("preview"/"fullRes"), invalidé
         // automatiquement si le buffer source change (nouvelle photo) ou si la
@@ -192,20 +200,20 @@ class ImageProcessor {
 
         // 🔹 Module Monochrome dédié : réglages lus directement depuis
         // MonochromeManager (état global, comme MasksManager.getMasks()), pas
-        // stockés sur l'instance. N'injecte les réglages QUE si le module est
-        // activé ET que le Picture Control actuellement rendu est lui-même
-        // Monochrome — sans ce second verrou, monoMixerEnabled (état GLOBAL,
-        // partagé par TOUTES les instances ImageProcessor) reste vrai après
-        // avoir testé le module dans le Studio et se réinjecte alors dans
-        // N'IMPORTE QUEL rendu suivant, y compris un profil par défaut (Vivid,
-        // Standard...) sélectionné dans le Gestionnaire de Profils, produisant
-        // un rendu "explosé" (mixeur N&B, Lumière tamisée, Dodge & Burn tous
-        // appliqués par-dessus une photo qui n'a jamais demandé à être N&B).
-        // Avec ce verrou, aucune fusion n'a lieu tant que isMonochrome n'est
-        // pas vrai : les clés (softLightIntensity, dodgeBurnWhite...) restent
-        // absentes de settings, donc chaque filtre s'arrête tout seul via son
-        // propre court-circuit, sans qu'on ait à modifier leur logique.
-        if (typeof MonochromeManager !== "undefined" && settings.isMonochrome) {
+        // stockés sur l'instance. Module INDÉPENDANT du profil Nikon de base
+        // (Standard/Vivid/Monochrome...) — applicable à n'importe quelle photo,
+        // voir monochromePanel.js — donc gaté uniquement par monoMixerEnabled,
+        // jamais par settings.isMonochrome (qui décrit le profil Picture
+        // Control, une notion distincte).
+        // MonochromeManager restant un état GLOBAL partagé par TOUTES les
+        // instances ImageProcessor, this.enableMonochrome (voir constructeur)
+        // isole le Gestionnaire de Profils (profileImageProcessor.enableMonochrome
+        // = false) pour qu'il n'hérite jamais du module activé sur la photo du
+        // Studio — même principe que enableMasks/enableRetouches. Le
+        // rechargement par photo (loadImageInStudio -> MonochromeManager.
+        // loadSettings()) évite lui l'autre fuite possible, entre deux photos
+        // du Studio.
+        if (this.enableMonochrome && typeof MonochromeManager !== "undefined") {
             const monoSettings = MonochromeManager.getSettings();
             if (monoSettings && monoSettings.monoMixerEnabled) {
                 Object.assign(settings, monoSettings);
@@ -356,11 +364,13 @@ class ImageProcessor {
 
     /**
      * Modifie un seul réglage Simulation Pellicule (curseur en direct dans filmPanel.js).
+     * Ne déclenche PAS de rendu ici : le pipeline (Hald-CLUT/Halation/Grain) est
+     * lourd et synchrone, donc filmPanel.js débounce l'appel à render() séparément
+     * pour ne pas bloquer le thread principal pendant le glissement du curseur.
      */
     updateFilmSetting(field, value) {
         if (!this.filmSettings) this.filmSettings = {};
         this.filmSettings[field] = value;
-        if (this.originalRawBuffer) this.render();
     }
 
     /**

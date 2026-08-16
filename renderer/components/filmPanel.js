@@ -156,6 +156,7 @@
 
     function _bindFilmPanelEvents(container) {
         let renderTimer = null;
+        let saveTimer = null;
         container.querySelectorAll(".pc-slider[data-field]").forEach(slider => {
             slider.addEventListener("input", () => {
                 const value = Number(slider.value);
@@ -164,10 +165,15 @@
 
                 if (window.imageProcessor) {
                     window.imageProcessor.updateFilmSetting(slider.dataset.field, value);
+
+                    // Rendu du pipeline débouncé (lourd/synchrone) pour ne pas
+                    // bloquer le curseur pendant le glissement — cf. masksPanel.js.
+                    if (renderTimer) clearTimeout(renderTimer);
+                    renderTimer = setTimeout(() => window.imageProcessor.render(), 30);
                 }
 
-                if (renderTimer) clearTimeout(renderTimer);
-                renderTimer = setTimeout(_saveFilmState, 200);
+                if (saveTimer) clearTimeout(saveTimer);
+                saveTimer = setTimeout(_saveFilmState, 200);
             });
         });
 

@@ -866,17 +866,19 @@ async function loadSavedStudioFolders() {
     MODULE PROFILE MANAGER (NP3 / NCP)
 ========================================================= */
 
-// 🔹 Construit (si besoin) profileImageProcessor avec les retouches et masques
-// locaux du Studio désactivés : RetouchManager/MasksManager sont des états
-// GLOBAUX (comme MonochromeManager, voir DEFAULT_PICTURE_CONTROL plus haut),
-// partagés par toutes les instances ImageProcessor — sans ce verrou, une
-// retouche ou un masque peint sur la photo du Studio s'appliquerait aussi ici,
-// alors que ce module doit rester strictement indépendant du Studio.
+// 🔹 Construit (si besoin) profileImageProcessor avec les retouches, masques
+// et module Monochrome locaux du Studio désactivés : RetouchManager/
+// MasksManager/MonochromeManager sont des états GLOBAUX (voir
+// DEFAULT_PICTURE_CONTROL plus haut), partagés par toutes les instances
+// ImageProcessor — sans ce verrou, une retouche, un masque peint ou le module
+// Monochrome activé sur la photo du Studio s'appliquerait aussi ici, alors
+// que ce module doit rester strictement indépendant du Studio.
 function ensureProfileImageProcessor() {
     if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
         profileImageProcessor = new ImageProcessor("profilePreviewCanvas");
         profileImageProcessor.enableMasks = false;
         profileImageProcessor.enableRetouches = false;
+        profileImageProcessor.enableMonochrome = false;
     }
     return profileImageProcessor;
 }
