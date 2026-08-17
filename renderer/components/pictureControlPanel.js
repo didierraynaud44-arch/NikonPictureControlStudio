@@ -280,6 +280,25 @@ function buildPanelHtml(pc, compact, extendedNP3) {
 
         ${compact ? "" : `
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
+        <h3 style="margin-bottom: 10px; font-size: 13px;">${window.lucideIconHtml("palette", { size: 13 })} Mélangeur de couleur</h3>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer; margin-bottom:10px;">
+            <input type="checkbox" class="pc-checkbox" data-field="monoMixerEnabled" ${pc.monoMixerEnabled ? "checked" : ""}>
+            Activer le mélangeur
+        </label>
+        <div data-block="colorMixer" style="display: ${pc.monoMixerEnabled ? "block" : "none"};">
+            ${createSlider("Rouge", "monoMixerRed", pc.monoMixerRed ?? 40, -100, 200, 1)}
+            ${createSlider("Orange", "monoMixerOrange", pc.monoMixerOrange ?? 0, -100, 200, 1)}
+            ${createSlider("Jaune", "monoMixerYellow", pc.monoMixerYellow ?? 60, -100, 200, 1)}
+            ${createSlider("Vert", "monoMixerGreen", pc.monoMixerGreen ?? 40, -100, 200, 1)}
+            ${createSlider("Cyan", "monoMixerCyan", pc.monoMixerCyan ?? 60, -100, 200, 1)}
+            ${createSlider("Bleu", "monoMixerBlue", pc.monoMixerBlue ?? 20, -100, 200, 1)}
+            ${createSlider("Violet", "monoMixerViolet", pc.monoMixerViolet ?? 0, -100, 200, 1)}
+            ${createSlider("Magenta", "monoMixerMagenta", pc.monoMixerMagenta ?? 80, -100, 200, 1)}
+        </div>
+        `}
+
+        ${compact ? "" : `
+        <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
         <h3 style="margin-bottom: 10px; font-size: 13px;">Point noir &amp; Point blanc</h3>
         ${createSlider("Point noir", "blackPoint", pc.blackPoint ?? 0, 0, 250, 1)}
         ${createSlider("Point blanc", "whitePoint", pc.whitePoint ?? 255, 5, 255, 1)}
@@ -417,6 +436,20 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             brightness: getVal("brightness"),
             saturation: isMonoNow ? -100 : getVal("saturation"),
             hue: getVal("hue"),
+
+            // 🔹 Mélangeur N&B 8 canaux : absent en mode compact (Gestionnaire de
+            // Profils, jamais affiché là — voir buildPanelHtml()), simple
+            // passe-plat depuis currentPC dans ce cas, même principe que
+            // exposure/blackPoint/... juste en dessous.
+            monoMixerEnabled: compact ? !!currentPC.monoMixerEnabled : getBool("monoMixerEnabled"),
+            monoMixerRed: compact ? (currentPC.monoMixerRed ?? 40) : getVal("monoMixerRed"),
+            monoMixerOrange: compact ? (currentPC.monoMixerOrange ?? 0) : getVal("monoMixerOrange"),
+            monoMixerYellow: compact ? (currentPC.monoMixerYellow ?? 60) : getVal("monoMixerYellow"),
+            monoMixerGreen: compact ? (currentPC.monoMixerGreen ?? 40) : getVal("monoMixerGreen"),
+            monoMixerCyan: compact ? (currentPC.monoMixerCyan ?? 60) : getVal("monoMixerCyan"),
+            monoMixerBlue: compact ? (currentPC.monoMixerBlue ?? 20) : getVal("monoMixerBlue"),
+            monoMixerViolet: compact ? (currentPC.monoMixerViolet ?? 0) : getVal("monoMixerViolet"),
+            monoMixerMagenta: compact ? (currentPC.monoMixerMagenta ?? 80) : getVal("monoMixerMagenta"),
 
             filterEffect: getStr("filterEffect", "OFF"),
             toningEffect: getStr("toningEffect", "B&W"),
@@ -686,6 +719,19 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
             if (toneCurveWidget) toneCurveWidget.reset();
 
             trigger();
+        });
+    }
+
+    // 🔹 Affichage/masquage des 8 curseurs du mélangeur : mise à jour directe du
+    // style (comme monoBlock/satRow2/hueRow2 ci-dessus pour le profil Monochrome
+    // Nikon), PAS de reconstruction du panneau — la case "Activer le mélangeur"
+    // passe déjà par le binding générique ".pc-checkbox" -> trigger() (voir plus
+    // bas) pour committer l'état ; ce listener-ci ne gère QUE le visuel.
+    const mixerToggle = container.querySelector('[data-field="monoMixerEnabled"]');
+    if (mixerToggle) {
+        mixerToggle.addEventListener("change", () => {
+            const mixerBlock = container.querySelector('[data-block="colorMixer"]');
+            if (mixerBlock) mixerBlock.style.display = mixerToggle.checked ? "block" : "none";
         });
     }
 

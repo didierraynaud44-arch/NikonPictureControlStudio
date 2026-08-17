@@ -19,9 +19,9 @@ class RenderPipeline {
 
     /**
      * Exécute seulement les filtres [startIndex, endIndex) — utilisé par
-     * ImageProcessor pour insérer la Gomme du module Monochrome juste après
-     * le trio Mixeur N&B/Lumière tamisée/Dodge & Burn, sans dupliquer la
-     * logique d'itération/gestion d'erreurs de process().
+     * ImageProcessor.showClippingPreview() pour arrêter le pipeline juste après
+     * BlackWhitePointFilter (aperçu d'écrêtage léger, sans les filtres suivants),
+     * sans dupliquer la logique d'itération/gestion d'erreurs de process().
      */
     processRange(imageData, settings, startIndex, endIndex) {
         if (!imageData || !imageData.data) return imageData;

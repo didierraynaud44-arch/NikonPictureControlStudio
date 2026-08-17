@@ -43,7 +43,7 @@ function _saveCropState() {
 /**
  * Bascule le mode édition du recadrage — un seul outil d'édition locale actif
  * à la fois, même principe que le Tampon de duplication (retouchPanel.js) :
- * annule masques/retouche/gomme monochrome à l'activation.
+ * annule masques/retouche à l'activation.
  */
 function _toggleCropEditing() {
     const ip = window.imageProcessor;
@@ -59,8 +59,6 @@ function _toggleCropEditing() {
         if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
         if (window.retouchCanvasController) window.retouchCanvasController.cancelMode();
         if (typeof window.renderRetouchPanel === "function") window.renderRetouchPanel();
-        if (window.monochromeMaskController) window.monochromeMaskController.cancelMode();
-        if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
 
         ip.cropPanelActive = true;
         window.cropCanvasController._ensureCropSettings();

@@ -1,15 +1,13 @@
 /*=========================================================
-    Pixel RAW - Module Monochrome : Mixeur N&B 8 canaux
-    Même architecture de pondération par distance de teinte (cosinus,
-    bande ±45°) que ColorBlenderFilter.js.
+    Pixel RAW - Mélangeur N&B 8 canaux
+    Réglage Picture Control général (monoMixerEnabled + 8 canaux, voir
+    pictureControlPanel.js) — même architecture de pondération par distance
+    de teinte (cosinus, bande ±45°) que ColorBlenderFilter.js.
 =========================================================*/
 
 class MonochromeMixerFilter {
     constructor() {
-        // 8 canaux, centrés tous les 45°, associés à leur clé de réglage ET à
-        // leur clé de cible pour la Gomme locale (settings.channelLocalMultipliers,
-        // voir ImageProcessor._injectMonoLocalMultipliers — mêmes clés que
-        // MonochromeManager.ERASE_TARGETS).
+        // 8 canaux, centrés tous les 45°, associés à leur clé de réglage.
         this.channels = [
             { settingKey: "monoMixerRed",     colorKey: "red",     center: 0 },
             { settingKey: "monoMixerOrange",  colorKey: "orange",  center: 45 },
@@ -70,18 +68,12 @@ class MonochromeMixerFilter {
         // contribue) ; le réduire évite qu'il ne crame en blanc/noir pur.
         const SCALE = 0.7;
 
-        const sliders = this.channels.map(({ settingKey, colorKey, center }) => ({
+        const sliders = this.channels.map(({ settingKey, center }) => ({
             center,
-            colorKey,
             value: settings[settingKey] ?? 0
         }));
 
-        // 🔹 Gomme locale : carte de multiplicateur par canal (1 = effet plein,
-        // 0 = effet supprimé à ce pixel pour ce canal précis). Absente si rien
-        // n'est peint sur aucun canal — voir ImageProcessor._injectMonoLocalMultipliers.
-        const channelLocalMultipliers = settings.channelLocalMultipliers;
-
-        for (let i = 0, p = 0; i < len; i += 4, p++) {
+        for (let i = 0; i < len; i += 4) {
             const r = data[i], g = data[i + 1], b = data[i + 2];
 
             const [h, s] = this.rgbToHueSat(r, g, b);
@@ -89,14 +81,11 @@ class MonochromeMixerFilter {
 
             let weightedSum = 0;
             let totalWeight = 0;
-            for (const { center, colorKey, value } of sliders) {
+            for (const { center, value } of sliders) {
                 const dist = this.hueDistance(h, center);
                 if (dist >= BAND_WIDTH) continue;
                 const weight = Math.cos((dist / BAND_WIDTH) * (Math.PI / 2));
-                const localMult = channelLocalMultipliers && channelLocalMultipliers[colorKey]
-                    ? channelLocalMultipliers[colorKey][p]
-                    : 1;
-                weightedSum += value * weight * localMult;
+                weightedSum += value * weight;
                 totalWeight += weight;
             }
             // Ramène la somme à une MOYENNE pondérée (même principe que
@@ -118,11 +107,6 @@ class MonochromeMixerFilter {
         return imageData;
     }
 }
-
-// 🔹 Clés des 8 canaux, dans le même ordre/nommage que MonochromeManager.
-// ERASE_TARGETS — référencées par ImageProcessor._injectMonoLocalMultipliers
-// pour savoir quelles cibles de la Gomme locale concernent ce filtre.
-MonochromeMixerFilter.CHANNEL_KEYS = ["red", "orange", "yellow", "green", "cyan", "blue", "violet", "magenta"];
 
 if (typeof window !== "undefined") {
     window.MonochromeMixerFilter = MonochromeMixerFilter;

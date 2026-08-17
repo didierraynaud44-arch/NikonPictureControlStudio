@@ -44,8 +44,6 @@ function _togglePerspectiveEditing() {
         if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
         if (window.retouchCanvasController) window.retouchCanvasController.cancelMode();
         if (typeof window.renderRetouchPanel === "function") window.renderRetouchPanel();
-        if (window.monochromeMaskController) window.monochromeMaskController.cancelMode();
-        if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
         if (window.imageProcessor.cropPanelActive) {
             window.imageProcessor.cropPanelActive = false;
             if (typeof window.renderCropPanel === "function") window.renderCropPanel();

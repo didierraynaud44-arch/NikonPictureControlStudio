@@ -213,7 +213,6 @@
             <div id="pictureControlStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
             <div id="neuralDenoisePanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
             <div id="masksPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
-            <div id="monochromePanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
             <div id="filmPanelStatus" class="card-panel" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #5865f2;"></div>
         </aside>
 
@@ -710,16 +709,12 @@
     <script src="filters/ColorGradingFilter.js"></script>
     <script src="filters/MonochromeFilter.js"></script>
     <script src="filters/MonochromeMixerFilter.js"></script>
-    <script src="filters/SoftLightPunchFilter.js"></script>
-    <script src="filters/DodgeBurnFilter.js"></script>
     <script src="filters/DehazeFilter.js"></script>
     <script src="filters/VibranceFilter.js"></script>
     <script src="filters/SCurveFilter.js"></script>
     <script src="filters/VignetteFilter.js"></script>
     <script src="filters/DenoiseFilter.js"></script>
     <script src="filters/HaldClutFilter.js"></script>
-    <script src="filters/HalationFilter.js"></script>
-    <script src="filters/FilmGrainFilter.js"></script>
 
     <!-- UI & Moteur -->
     <script src="components/ToneCurveWidget.js"></script>
@@ -750,15 +745,10 @@
     <script src="components/retouchPanel.js"></script>
     <script src="components/neuralDenoisePanel.js"></script>
 
-    <!-- Simulation Pellicule (grain, halation, Hald-CLUT) -->
+    <!-- Simulation Pellicule (Hald-CLUT) -->
     <script src="components/filmPanel.js"></script>
 
-    <!-- Module Monochrome dédié (mixeur N&B, Lumière tamisée, Dodge & Burn, Gomme couleur) -->
-    <script src="core/MonochromeManager.js"></script>
-    <script src="components/MonochromeMaskCanvasController.js"></script>
-    <script src="components/monochromePanel.js"></script>
-
-    <!-- Préréglages complets (Picture Control + Monochrome + Simulation Pellicule) -->
+    <!-- Préréglages complets (Picture Control + Simulation Pellicule) -->
     <script src="components/presetsPanel.js"></script>
 
 	<script src="components/PrintManager.js"></script>

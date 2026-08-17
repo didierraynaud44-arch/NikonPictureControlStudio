@@ -2,22 +2,17 @@
     Nikon Picture Control Studio - Image Processor (Fix Overlay)
 =========================================================*/
 
-// 🔹 Source unique des valeurs par défaut Simulation Pellicule — utilisée par
-// le constructeur, setFilmSettings() (rechargement d'une photo) ET
-// applyPreset() (système de préréglages, voir presetsPanel.js), pour ne
-// jamais avoir trois copies de ce même objet à maintenir en parallèle.
 // 🔹 Seuil de détection "vrai glissement" (voir ImageProcessor.notifySliderInput()) :
 // deux événements "input" séparés de moins de ce délai trahissent un glissement
 // continu de souris. Un simple clic ne produit qu'un seul "input" et ne peut
 // donc jamais atteindre ce seuil.
 const SLIDER_DRAG_DETECT_MS = 60;
 
+// 🔹 Source unique des valeurs par défaut Simulation Pellicule — utilisée par
+// le constructeur, setFilmSettings() (rechargement d'une photo) ET
+// applyPreset() (système de préréglages, voir presetsPanel.js), pour ne
+// jamais avoir trois copies de ce même objet à maintenir en parallèle.
 const DEFAULT_FILM_SETTINGS = Object.freeze({
-    grainIntensity: 0,
-    grainSize: 1,
-    halationIntensity: 0,
-    halationThreshold: 200,
-    halationRadius: 8,
     haldClutPath: null,
     haldClutIntensity: 100
 });
@@ -54,14 +49,13 @@ class ImageProcessor {
         this.currentFilePath = null;
         this.useFullResForDisplay = false;
 
-        // 🔹 Glissement de curseur en cours (Picture Control/Monochrome/Simulation
-        // Pellicule, voir startSliderDrag()/endSliderDrag() ci-dessous) : force
-        // temporairement render() à utiliser this.previewBuffer même si zoomé
-        // au-delà du seuil pleine résolution — un pipeline complet (Monochrome +
-        // Hald-CLUT + grain/halation) sur un buffer 24 Mpx peut prendre jusqu'à
-        // ~17s (mesuré), gelant l'interface à chaque tick de glissement. Ne
-        // modifie JAMAIS useFullResForDisplay lui-même : simple court-circuit de
-        // la source utilisée pour CE rendu précis, voir render().
+        // 🔹 Glissement de curseur en cours (Picture Control/Simulation Pellicule,
+        // voir startSliderDrag()/endSliderDrag() ci-dessous) : force temporairement
+        // render() à utiliser this.previewBuffer même si zoomé au-delà du seuil
+        // pleine résolution — un pipeline complet (mélangeur N&B + Hald-CLUT) sur
+        // un buffer 24 Mpx peut être coûteux, gelant l'interface à chaque tick de
+        // glissement. Ne modifie JAMAIS useFullResForDisplay lui-même : simple
+        // court-circuit de la source utilisée pour CE rendu précis, voir render().
         //
         // isDraggingSlider ne passe PAS à true dès le mousedown : un simple clic
         // ponctuel (un seul "input", sans glissement) NE DOIT PAS basculer vers
@@ -76,7 +70,17 @@ class ImageProcessor {
         this.display.onRequestFullRes = async () => {
             if (!this.currentFilePath) return;
             await this.ensureFullResolutionLoaded(this.currentFilePath);
-            this.render();
+            // 🔹 render() protège maintenant LUI-MÊME (indicateur "Traitement en
+            // cours..." + repaint forcé avant le calcul lourd) TOUT rendu qui
+            // basculerait sur la pleine résolution avec Monochrome/Simulation
+            // Pellicule actifs — pas seulement celui-ci — voir render() ci-dessous.
+            // "await" indispensable ici : sans lui, la Promise retournée par
+            // render() (jamais "réglé" tant que le calcul lourd éventuel ne s'est
+            // pas terminé) ne serait pas attendue par le .finally() de
+            // _maybeRequestFullRes() dans DisplayCanvas.js, qui masquerait alors
+            // son propre indicateur ("Chargement pleine résolution...") AVANT que
+            // le calcul lourd n'ait même commencé.
+            await this.render();
         };
 
         this.overlayCanvas = document.getElementById("maskOverlayCanvas");
@@ -124,19 +128,6 @@ class ImageProcessor {
         // CropCanvasController.js), même rôle que maskController/retouchController.
         this.cropController = null;
 
-        // 🔹 Gomme du module Monochrome : contrôleur dédié (voir
-        // MonochromeMaskCanvasController.js), même rôle que maskController/
-        // retouchController pour l'aperçu du cercle de pinceau en survol.
-        this.monochromeMaskController = null;
-
-        // 🔹 Module Monochrome dédié : MonochromeManager est un état GLOBAL
-        // (comme MasksManager/RetouchManager, voir enableMasks/enableRetouches
-        // ci-dessus) partagé par toutes les instances ImageProcessor. Sans ce
-        // verrou, profileImageProcessor (Gestionnaire de Profils, app.js)
-        // hériterait du module Monochrome activé sur la photo du Studio —
-        // voir ensureProfileImageProcessor() qui le met à false.
-        this.enableMonochrome = true;
-
         // 🔹 Retouche (tampon de duplication) : appliquée une fois, en amont du
         // pipeline. Cache par clé de résolution ("preview"/"fullRes"), invalidé
         // automatiquement si le buffer source change (nouvelle photo) ou si la
@@ -161,8 +152,8 @@ class ImageProcessor {
         this.histogramMode = "luminance"; // "luminance" | "rgb"
         this._lastImageDataForHistogram = null;
 
-        // 🔹 Simulation Pellicule (grain, halation, Hald-CLUT) : réglages séparés
-        // de this.pictureControl (et non fusionnés dedans), car readState() du
+        // 🔹 Simulation Pellicule (Hald-CLUT) : réglages séparés de
+        // this.pictureControl (et non fusionnés dedans), car readState() du
         // panneau Picture Control reconstruit un objet ne contenant QUE les champs
         // Picture Control connus à chaque changement de curseur — les stocker dans
         // pictureControl les ferait donc écraser au premier réglage PC modifié.
@@ -195,15 +186,10 @@ class ImageProcessor {
         if (typeof ColorGradingFilter !== "undefined") this.pipeline.add(new ColorGradingFilter());
         if (typeof MonochromeFilter !== "undefined") this.pipeline.add(new MonochromeFilter());
 
-        // 🔹 Module Monochrome dédié du Studio (mixeur N&B -> Lumière tamisée ->
-        // Dodge & Burn), indépendant du profil Nikon Monochrome ci-dessus. La
-        // Gomme locale (voir _buildRenderSettings) réduit l'effet de CHAQUE
-        // réglage indépendamment via des cartes de multiplicateur transmises
-        // en settings — ces 3 filtres restent donc de simples filtres du
-        // pipeline, exécutés en une seule passe comme tous les autres.
+        // 🔹 Mélangeur N&B 8 canaux : réglage général comme les autres filtres
+        // ci-dessus, lu directement sur this.pictureControl (monoMixerEnabled +
+        // les 8 canaux, voir pictureControlPanel.js) — plus un module à part.
         if (typeof MonochromeMixerFilter !== "undefined") this.pipeline.add(new MonochromeMixerFilter());
-        if (typeof SoftLightPunchFilter !== "undefined") this.pipeline.add(new SoftLightPunchFilter());
-        if (typeof DodgeBurnFilter !== "undefined") this.pipeline.add(new DodgeBurnFilter());
 
         if (typeof DehazeFilter !== "undefined") this.pipeline.add(new DehazeFilter());
         if (typeof VibranceFilter !== "undefined") this.pipeline.add(new VibranceFilter());
@@ -212,54 +198,21 @@ class ImageProcessor {
         if (typeof DenoiseFilter !== "undefined") this.pipeline.add(new DenoiseFilter());
 
         // 🔹 Simulation Pellicule : toute fin du pipeline, après Picture Control/
-        // Monochrome/masques. Ordre développement -> halation optique -> grain du
-        // support, cohérent avec un vrai process argentique.
+        // masques.
         if (typeof HaldClutFilter !== "undefined") this.pipeline.add(new HaldClutFilter());
-        if (typeof HalationFilter !== "undefined") this.pipeline.add(new HalationFilter());
-        if (typeof FilmGrainFilter !== "undefined") this.pipeline.add(new FilmGrainFilter());
     }
 
     /**
      * Fusionne pictureControl et filmSettings en un seul objet de réglages pour
      * le pipeline, en y injectant les pixels du Hald-CLUT actuellement chargé en
      * mémoire (jamais persistés, voir le commentaire du constructeur).
-     * @param {number} [width] - Dimensions de l'image à traiter, nécessaires pour
-     *        calculer les cartes de multiplicateur local de la Gomme locale
-     *        (voir _injectMonoLocalMultipliers). Omises : pas de gomme locale
-     *        (ex. aperçus sans dimensions connues à l'avance).
-     * @param {number} [height]
      * @private
      */
-    _buildRenderSettings(width, height) {
+    _buildRenderSettings() {
         const settings = { ...(this.pictureControl || {}), ...(this.filmSettings || {}) };
         if (this.haldClutState) {
             settings.haldClutData = this.haldClutState.imageData;
             settings.haldClutSide = this.haldClutState.side;
-        }
-
-        // 🔹 Module Monochrome dédié : réglages lus directement depuis
-        // MonochromeManager (état global, comme MasksManager.getMasks()), pas
-        // stockés sur l'instance. Module INDÉPENDANT du profil Nikon de base
-        // (Standard/Vivid/Monochrome...) — applicable à n'importe quelle photo,
-        // voir monochromePanel.js — donc gaté uniquement par monoMixerEnabled,
-        // jamais par settings.isMonochrome (qui décrit le profil Picture
-        // Control, une notion distincte).
-        // MonochromeManager restant un état GLOBAL partagé par TOUTES les
-        // instances ImageProcessor, this.enableMonochrome (voir constructeur)
-        // isole le Gestionnaire de Profils (profileImageProcessor.enableMonochrome
-        // = false) pour qu'il n'hérite jamais du module activé sur la photo du
-        // Studio — même principe que enableMasks/enableRetouches. Le
-        // rechargement par photo (loadImageInStudio -> MonochromeManager.
-        // loadSettings()) évite lui l'autre fuite possible, entre deux photos
-        // du Studio.
-        if (this.enableMonochrome && typeof MonochromeManager !== "undefined") {
-            const monoSettings = MonochromeManager.getSettings();
-            if (monoSettings && monoSettings.monoMixerEnabled) {
-                Object.assign(settings, monoSettings);
-                if (width && height) {
-                    this._injectMonoLocalMultipliers(settings, monoSettings, width, height);
-                }
-            }
         }
 
         // 🔹 Correction d'objectif : injecte le profil déjà résolu (ou null tant
@@ -308,61 +261,6 @@ class ImageProcessor {
     }
 
     /**
-     * Gomme locale du module Monochrome : calcule, pour chacune des 10 cibles
-     * (8 canaux du mixeur + Dodge & Burn + Punch) ayant au moins un trait
-     * peint, une carte Float32Array où chaque pixel vaut :
-     *     1 - (MaskEngine.computeBrushAlpha(...) × (intensité / 100))
-     * soit 1.0 = effet plein, 0 = effet totalement supprimé à ce pixel, pour
-     * cette cible précise. Transmises aux filtres via settings.
-     * channelLocalMultipliers/dodgeBurnLocalMultiplier/punchLocalMultiplier —
-     * l'image reste N&B partout, seule L'INTENSITÉ du réglage ciblé varie
-     * localement (contrairement à l'ancienne "Gomme couleur" qui révélait la
-     * couleur d'origine, entièrement retirée).
-     * @private
-     */
-    _injectMonoLocalMultipliers(settings, monoSettings, width, height) {
-        if (typeof MaskEngine === "undefined") return;
-        const masks = monoSettings.monoEraseMasks;
-        if (!masks) return;
-
-        const channelKeys = typeof MonochromeMixerFilter !== "undefined" ? MonochromeMixerFilter.CHANNEL_KEYS : [];
-        const channelMultipliers = {};
-        let hasChannelMultiplier = false;
-        for (const key of channelKeys) {
-            const mult = this._computeLocalMultiplier(masks[key], width, height);
-            if (mult) {
-                channelMultipliers[key] = mult;
-                hasChannelMultiplier = true;
-            }
-        }
-        if (hasChannelMultiplier) settings.channelLocalMultipliers = channelMultipliers;
-
-        const dodgeBurnMult = this._computeLocalMultiplier(masks.dodgeBurn, width, height);
-        if (dodgeBurnMult) settings.dodgeBurnLocalMultiplier = dodgeBurnMult;
-
-        const punchMult = this._computeLocalMultiplier(masks.punch, width, height);
-        if (punchMult) settings.punchLocalMultiplier = punchMult;
-    }
-
-    /**
-     * @param {{geometry:{strokes:Array}, intensity:number}} entry - une entrée de monoEraseMasks
-     * @returns {Float32Array|null} null si rien de peint (ou intensité nulle) pour cette cible
-     * @private
-     */
-    _computeLocalMultiplier(entry, width, height) {
-        if (!entry || !entry.geometry || !Array.isArray(entry.geometry.strokes) || !entry.geometry.strokes.length) {
-            return null;
-        }
-        const intensity = Math.max(0, Math.min(100, entry.intensity ?? 100)) / 100;
-        if (intensity <= 0) return null;
-
-        const alpha = MaskEngine.computeBrushAlpha(width, height, entry.geometry);
-        const mult = new Float32Array(alpha.length);
-        for (let i = 0; i < alpha.length; i++) mult[i] = 1 - alpha[i] * intensity;
-        return mult;
-    }
-
-    /**
      * Réglages Simulation Pellicule actuellement actifs.
      */
     getFilmSettings() {
@@ -394,9 +292,9 @@ class ImageProcessor {
 
     /**
      * Modifie un seul réglage Simulation Pellicule (curseur en direct dans filmPanel.js).
-     * Ne déclenche PAS de rendu ici : le pipeline (Hald-CLUT/Halation/Grain) est
-     * lourd et synchrone, donc filmPanel.js débounce l'appel à render() séparément
-     * pour ne pas bloquer le thread principal pendant le glissement du curseur.
+     * Ne déclenche PAS de rendu ici : le pipeline peut être lourd et synchrone
+     * (Hald-CLUT), donc filmPanel.js débounce l'appel à render() séparément pour
+     * ne pas bloquer le thread principal pendant le glissement du curseur.
      */
     updateFilmSetting(field, value) {
         if (!this.filmSettings) this.filmSettings = {};
@@ -456,28 +354,14 @@ class ImageProcessor {
      *
      * @param {object} presetData - Forme exacte produite par "Enregistrer le
      *   préréglage actuel..." (voir presetsPanel.js) : { name, category,
-     *   pictureControl, monochrome, film }.
+     *   pictureControl, film }. Le mélangeur N&B (monoMixerEnabled + 8 canaux)
+     *   est un réglage Picture Control normal, déjà inclus dans pictureControl.
      */
     async applyPreset(presetData) {
         if (!presetData) return;
 
         if (presetData.pictureControl) {
             this.pictureControl = this.cleanPictureControl(presetData.pictureControl);
-        }
-
-        if (typeof window !== "undefined" && window.MonochromeManager && presetData.monochrome) {
-            // 🔹 Le préréglage ne contient JAMAIS monoEraseMasks (Gomme locale —
-            // exclue du format, voir presetsPanel.js) : il faut donc explicitement
-            // reporter les masques de LA PHOTO ACTUELLE dans l'objet fusionné avant
-            // loadSettings(). Sans ça, la clé serait absente du préréglage ET
-            // absente du merge -> loadSettings() retomberait sur
-            // DEFAULT_SETTINGS.monoEraseMasks (vide), effaçant silencieusement les
-            // masques peints existants sur cette photo précise.
-            const currentMasks = window.MonochromeManager.getSettings().monoEraseMasks;
-            window.MonochromeManager.loadSettings({
-                ...presetData.monochrome,
-                monoEraseMasks: currentMasks
-            });
         }
 
         if (presetData.film) {
@@ -656,7 +540,7 @@ class ImageProcessor {
 
     /**
      * 🔹 Début d'un GESTE de curseur (mousedown, voir pictureControlPanel.js/
-     * monochromePanel.js/filmPanel.js) : arme seulement la détection de
+     * filmPanel.js) : arme seulement la détection de
      * glissement (voir notifySliderInput()) — ne bascule PAS isDraggingSlider
      * ici. Un simple clic (mousedown + un seul "input" + mouseup) doit rester
      * en pleine résolution, sans flash ; seul un vrai glissement (2e "input"
@@ -693,6 +577,55 @@ class ImageProcessor {
         if (!this.isDraggingSlider) return;
         this.isDraggingSlider = false;
         if (this.originalRawBuffer) this.render();
+    }
+
+    /**
+     * 🔹 Le CALCUL à l'intérieur de render()/_renderSync() reste synchrone et
+     * peut, sur un très gros fichier (Hald-CLUT actif, voir
+     * _isHeavyRenderExpected()), prendre assez de temps pour bloquer le thread
+     * principal un instant perceptible — pendant ce temps, AUCUN clic (case à
+     * cocher, bouton) ne peut être traité avant qu'il ne se libère. Plusieurs
+     * clics lancés "à l'aveugle" pendant ce blocage (l'utilisateur croit l'app
+     * plantée et re-clique) s'empilent alors en file d'attente native du
+     * navigateur et se déclenchent un par un dès la fin du rendu précédent —
+     * chacun relançant SON PROPRE calcul à la suite, cumulant les gels au lieu
+     * d'un seul (render() affiche "Traitement en cours..." avant CHACUN de ces
+     * calculs, voir render() ci-dessous — mais ça n'empêche pas la cascade).
+     *
+     * scheduleRender() casse cette cascade : au lieu d'appeler render()
+     * directement depuis un gestionnaire de case à cocher/bouton, on planifie un
+     * appel différé, ANNULANT tout appel encore en attente — seul le DERNIER état
+     * réglé avant l'expiration du délai déclenche un render() (voir
+     * pictureControlPanel.js, case "Activer le mélangeur"). N clics stackés
+     * pendant qu'un rendu tourne encore se traiteront bien un par un une fois
+     * celui-ci terminé (le thread ne peut pas faire autrement), mais si leurs
+     * gestionnaires respectifs ne font QUE mettre à jour l'état + replanifier
+     * (rapide), seul le tout dernier survit au délai et déclenche un unique
+     * render() final — pas une cascade.
+     */
+    scheduleRender(delayMs = 150) {
+        if (this._scheduledRenderTimer) clearTimeout(this._scheduledRenderTimer);
+        this._scheduledRenderTimer = setTimeout(() => {
+            this._scheduledRenderTimer = null;
+            this.render();
+        }, delayMs);
+    }
+
+    /**
+     * 🔹 Vrai si le PROCHAIN render() est susceptible d'être coûteux : Hald-CLUT
+     * de la Simulation Pellicule actif — seul filtre restant avec un coût par
+     * pixel notable sur un gros fichier (interpolation trilinéaire dans le cube
+     * couleur), depuis le retrait du module Monochrome dédié (Dodge & Burn,
+     * Lumière tamisée), du Grain et de la Halation (voir simplification du
+     * pipeline). Le mélangeur N&B lui-même n'est PAS considéré lourd : filtre
+     * par pixel simple, comparable à Saturation/Vibrance. Sert à décider
+     * d'afficher "Traitement en cours..." (voir render() ci-dessus) — pas un
+     * calcul exact du coût réel, une heuristique suffisante pour ce signal
+     * purement visuel.
+     */
+    _isHeavyRenderExpected() {
+        const film = this.filmSettings || {};
+        return !!film.haldClutPath && (film.haldClutIntensity ?? 0) > 0;
     }
 
     updateFilter(filterType, value) {
@@ -853,31 +786,55 @@ class ImageProcessor {
         this.neuralDenoisePending = !!flag;
     }
 
-    render() {
-        // 🔹 Zoom pleine résolution (Studio) : une fois ensureFullResolutionLoaded()
-        // résolu pour LA PHOTO ACTUELLEMENT AFFICHÉE, l'affichage bascule sur
-        // this.originalRawBuffer (pleine résolution) plutôt que this.previewBuffer.
-        // La vérification fullResLoadedPath === currentFilePath évite d'utiliser
-        // par erreur un buffer pleine résolution d'une AUTRE photo déjà en cache.
-        // !!this.currentFilePath est INDISPENSABLE ici, pas redondant : au tout
-        // premier render() d'une photo (appelé depuis load(), AVANT que app.js
-        // n'affecte currentFilePath après coup), currentFilePath ET
-        // fullResLoadedPath valent tous deux null — sans ce garde, "null === null"
-        // rendrait fullResAvailable/preserveView incorrectement vrai pour CE
-        // premier rendu, ce qui fait sauter le "resolution swap" (voir
-        // DisplayCanvas.draw()/isResolutionSwap) et empêche _refWidth de
-        // s'initialiser pour la nouvelle photo (bug constaté : zoom "Ajuster"
-        // figé à 100%/scale par défaut, jamais recalculé).
-        // fullResAvailable (indépendant de isDraggingSlider) sert aussi à
-        // display.draw({preserveView}) plus bas : la pleine résolution reste
-        // "disponible pour cette photo" même le temps d'un rendu où on choisit
-        // de ne pas s'en servir (glissement de curseur en cours), donc le
-        // cadrage/zoom actuel ne doit pas être réinitialisé pour autant.
+    /**
+     * 🔹 Point d'entrée UNIQUE (async, mais tous les appelants existants
+     * l'appellent sans "await" — voir plus bas pourquoi c'est sans risque pour
+     * eux). Détecte AVANT de lancer le pipeline si ce rendu précis va être lourd
+     * ET tourner sur la pleine résolution (Monochrome/Simulation Pellicule
+     * actifs + déjà zoomé au-delà du seuil, voir _isHeavyRenderExpected()) —
+     * mesuré en conditions réelles jusqu'à plus d'une minute sur 24 Mpx (Dodge &
+     * Burn + Monochrome). Protège TOUS les chemins qui peuvent déclencher ce
+     * rendu précis (endSliderDrag() au relâchement, debounce 30ms de n'importe
+     * quel curseur, cases à cocher...), pas seulement le zoom qui bascule vers
+     * la pleine résolution — un seul garde-fou central au lieu d'en dupliquer un
+     * dans chaque panneau.
+     *
+     * Rétrocompatible à 100% avec les ~25 appels existants "imageProcessor.
+     * render()" (sans await) : tant que ce garde-fou ne se déclenche PAS (cas de
+     * loin le plus fréquent — pas de Monochrome/Simulation Pellicule actifs, ou
+     * pas encore zoomé en pleine résolution), aucun "await" n'est jamais
+     * atteint, donc _renderSync() s'exécute de façon parfaitement synchrone
+     * comme avant, dans le MÊME tick — le Promise retourné (ignoré par ces
+     * appelants) est déjà résolu au moment où il est créé.
+     */
+    async render() {
         const fullResAvailable = !!this.currentFilePath
             && this.fullResLoadedPath === this.currentFilePath
             && !!this.originalRawBuffer;
         const usingFullRes = !this.isDraggingSlider && this.useFullResForDisplay && fullResAvailable;
 
+        let indicatorShown = false;
+        if (usingFullRes && this.display && this._isHeavyRenderExpected()) {
+            indicatorShown = true;
+            this.display.showProcessingIndicator("Traitement en cours...");
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
+
+        try {
+            this._renderSync(usingFullRes, fullResAvailable);
+        } finally {
+            if (indicatorShown) this.display.hideProcessingIndicator();
+        }
+    }
+
+    /**
+     * 🔹 Corps synchrone du pipeline de rendu — inchangé depuis avant l'ajout du
+     * garde-fou ci-dessus, juste extrait de render() pour recevoir usingFullRes/
+     * fullResAvailable déjà calculés (pas question de les recalculer après le
+     * "await" éventuel : ce sont des snapshots de l'intention au moment de
+     * l'appel à render(), comme avant le découpage en deux méthodes).
+     */
+    _renderSync(usingFullRes, fullResAvailable) {
         const rawSourceBuffer = usingFullRes ? this.originalRawBuffer : (this.previewBuffer || this.originalRawBuffer);
         if (!rawSourceBuffer || !this.display) return;
 
@@ -892,7 +849,7 @@ class ImageProcessor {
 
         if (this.pipeline) {
             try {
-                const result = this.pipeline.process(currentImageData, this._buildRenderSettings(currentImageData.width, currentImageData.height));
+                const result = this.pipeline.process(currentImageData, this._buildRenderSettings());
                 if (result && result.data) currentImageData = result;
             } catch (err) {
                 console.error("❌ Erreur pipeline :", err);
@@ -1059,7 +1016,7 @@ class ImageProcessor {
 
         if (this.pipeline) {
             try {
-                const result = this.pipeline.process(currentImageData, this._buildRenderSettings(currentImageData.width, currentImageData.height));
+                const result = this.pipeline.process(currentImageData, this._buildRenderSettings());
                 if (result && result.data) currentImageData = result;
             } catch (err) {
                 console.error("❌ Erreur pipeline export :", err);
@@ -1219,7 +1176,7 @@ class ImageProcessor {
         // Appliquer le pipeline de traitement (Picture Control, etc.)
         if (this.pipeline) {
             try {
-                const result = this.pipeline.process(currentImageData, this._buildRenderSettings(currentImageData.width, currentImageData.height));
+                const result = this.pipeline.process(currentImageData, this._buildRenderSettings());
                 if (result && result.data) currentImageData = result;
             } catch (err) {
                 console.error("❌ Erreur pipeline export full res :", err);
@@ -1305,7 +1262,7 @@ class ImageProcessor {
 
         if (this.pipeline) {
             try {
-                const result = this.pipeline.process(currentImageData, this._buildRenderSettings(currentImageData.width, currentImageData.height));
+                const result = this.pipeline.process(currentImageData, this._buildRenderSettings());
                 if (result && result.data) currentImageData = result;
             } catch (err) {
                 console.error("❌ Erreur pipeline export TIFF :", err);
@@ -1506,12 +1463,7 @@ class ImageProcessor {
             (retouchController.mode === "heal" && retouchController.hoverPos)
         ));
 
-        // Gomme couleur du module Monochrome : même logique de survol que le
-        // Tampon de duplication (simple cercle, pas d'aplat semi-transparent).
-        const monochromeMaskController = this.monochromeMaskController;
-        const showErasePreview = !!(monochromeMaskController && monochromeMaskController.mode === "erase" && monochromeMaskController.hoverPos);
-
-        if (masksToDraw.length === 0 && !showBrushPreview && !showRetouchPreview && !showErasePreview) return;
+        if (masksToDraw.length === 0 && !showBrushPreview && !showRetouchPreview) return;
 
         ctx.save();
 
@@ -1541,10 +1493,6 @@ class ImageProcessor {
             this._drawRetouchPreview(ctx, imgW, imgH, retouchController, scale);
         }
 
-        if (showErasePreview) {
-            this._drawBrushPreview(ctx, imgW, imgH, { brushPreviewPos: monochromeMaskController.hoverPos, brushSize: monochromeMaskController.brushSize }, scale);
-        }
-
         ctx.restore();
     }
 
@@ -1560,11 +1508,11 @@ class ImageProcessor {
      *
      * Volontairement PLUS LÉGER qu'un render() complet pendant le glissement :
      * exécute le pipeline seulement JUSQU'AU filtre BlackWhitePointFilter (pas
-     * les filtres suivants — Tone Curve, Contraste, Monochrome, Simulation
-     * Pellicule, etc.), via RenderPipeline.processRange() (déjà utilisé pour la
-     * Gomme locale du module Monochrome). "value" est la valeur EN DIRECT du
-     * curseur, pas encore committée dans this.pictureControl (ça n'arrive
-     * qu'au prochain render() normal, déclenché par hideClippingPreview()).
+     * les filtres suivants — Tone Curve, Contraste, Mélangeur N&B, Simulation
+     * Pellicule, etc.), via RenderPipeline.processRange(). "value" est la
+     * valeur EN DIRECT du curseur, pas encore committée dans
+     * this.pictureControl (ça n'arrive qu'au prochain render() normal,
+     * déclenché par hideClippingPreview()).
      *
      * @param {"blackPoint"|"whitePoint"} field
      * @param {number} value
@@ -1599,7 +1547,7 @@ class ImageProcessor {
         if (this.pipeline) {
             const bwpIndex = this.pipeline.filters.findIndex(f => f instanceof BlackWhitePointFilter);
             if (bwpIndex > 0) {
-                const settings = this._buildRenderSettings(preImageData.width, preImageData.height);
+                const settings = this._buildRenderSettings();
                 settings[field] = value;
                 try {
                     preBwpData = this.pipeline.processRange(preImageData, settings, 0, bwpIndex);

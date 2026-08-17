@@ -1,6 +1,6 @@
 /*=========================================================
     Pixel RAW - Panneau Préréglages complets (Studio)
-    Picture Control + module Monochrome + Simulation Pellicule capturés en
+    Picture Control (mélangeur N&B inclus) + Simulation Pellicule capturés en
     une seule "recette" nommée, applicable en un clic sur n'importe quelle
     photo. Distinct des Hald-CLUT (réponse colorimétrique seule, voir
     filmPanel.js) et des profils NP3/NPC Nikon (spécifiques au format
@@ -120,11 +120,11 @@
 
     /**
      * Applique un préréglage à la photo actuellement affichée dans le Studio :
-     * charge son JSON, délègue à ImageProcessor.applyPreset() (Picture Control +
-     * Monochrome + Simulation Pellicule, un seul rendu final), puis rafraîchit
-     * les panneaux dépendants pour que leurs curseurs reflètent le nouvel état,
-     * et sauvegarde le résultat pour cette photo comme n'importe quel autre
-     * changement de réglage.
+     * charge son JSON, délègue à ImageProcessor.applyPreset() (Picture Control,
+     * mélangeur N&B inclus, + Simulation Pellicule, un seul rendu final), puis
+     * rafraîchit les panneaux dépendants pour que leurs curseurs reflètent le
+     * nouvel état, et sauvegarde le résultat pour cette photo comme n'importe
+     * quel autre changement de réglage.
      */
     async function _applyPresetFromPath(presetPath) {
         if (!presetPath || !window.imageProcessor || !window.electronAPI) return;
@@ -142,7 +142,6 @@
             if (typeof window.updatePictureControl === "function") {
                 window.updatePictureControl({ pictureControl: window.imageProcessor.pictureControl }, false);
             }
-            if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
             if (typeof window.renderFilmPanel === "function") window.renderFilmPanel();
 
             if (typeof window.saveCurrentPhotoSettingsToCatalog === "function") {
@@ -180,25 +179,20 @@
     }
 
     /**
-     * Capture l'état ACTUEL de pictureControl/MonochromeManager/filmSettings
-     * sur la photo affichée — même format que ce qu'applyPreset() consomme,
-     * pour que "Enregistrer" et "Appliquer" restent l'inverse exact l'un de
-     * l'autre. monoEraseMasks (Gomme locale, propre à CETTE photo) est
-     * explicitement exclu — voir le format documenté en tête de fichier.
+     * Capture l'état ACTUEL de pictureControl/filmSettings sur la photo
+     * affichée — même format que ce qu'applyPreset() consomme, pour que
+     * "Enregistrer" et "Appliquer" restent l'inverse exact l'un de l'autre. Le
+     * mélangeur N&B (monoMixerEnabled + 8 canaux) est un réglage Picture
+     * Control normal, déjà inclus dans pc — rien à capturer séparément.
      */
     function _captureCurrentPreset(name, category) {
         const pc = (window.imageProcessor && window.imageProcessor.pictureControl) || {};
-
-        const monoSettings = (window.MonochromeManager && window.MonochromeManager.getSettings()) || {};
-        const { monoEraseMasks, ...monochromeForPreset } = monoSettings;
-
         const film = (window.imageProcessor && window.imageProcessor.getFilmSettings && window.imageProcessor.getFilmSettings()) || {};
 
         return {
             name,
             category: category === "color" ? "color" : "bw",
             pictureControl: { ...pc },
-            monochrome: { ...monochromeForPreset },
             film: { ...film }
         };
     }
@@ -270,8 +264,8 @@
 
         inputName.value = "";
         // Pré-sélectionne la catégorie la plus probable d'après l'état actuel
-        // du module Monochrome — simple suggestion, modifiable avant d'enregistrer.
-        const monoEnabled = !!(window.MonochromeManager && window.MonochromeManager.getSettings().monoMixerEnabled);
+        // du mélangeur N&B — simple suggestion, modifiable avant d'enregistrer.
+        const monoEnabled = !!(window.imageProcessor && window.imageProcessor.pictureControl && window.imageProcessor.pictureControl.monoMixerEnabled);
         selectCategory.value = monoEnabled ? "bw" : "color";
         if (errorEl) errorEl.style.display = "none";
 

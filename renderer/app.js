@@ -10,12 +10,9 @@ let activeProfilePC = null; // Picture Control actif dans le Gestionnaire
 // 🔹 Profil Standard neutre COMPLET (mêmes valeurs que getDefaultPictureControl()
 // côté main.js) : source unique pour "Réinitialiser" et pour la remise à zéro
 // systématique du Gestionnaire de Profils (import d'une nouvelle photo de test).
-// Les champs du module Monochrome (mixeur 8 canaux, Lumière tamisée, Dodge &
-// Burn, gomme locale) ne figurent PAS ici : ils vivent dans MonochromeManager
-// (état global indépendant du Picture Control, voir ImageProcessor._buildRenderSettings)
-// et ne sont plus jamais fusionnés dans un rendu tant que isMonochrome n'est pas
-// vrai — c'est CE gate, pas une liste de valeurs neutres dupliquée ici, qui
-// garantit qu'un profil par défaut ne peut plus en hériter.
+// Le mélangeur N&B (monoMixerRed..Magenta) est un réglage Picture Control
+// normal comme les autres — monoMixerEnabled:false garantit qu'un profil par
+// défaut n'a jamais l'effet actif, même si les 8 canaux gardent une valeur.
 const DEFAULT_PICTURE_CONTROL = Object.freeze({
     name: "Standard",
     pictureControlName: "Standard",
@@ -31,6 +28,15 @@ const DEFAULT_PICTURE_CONTROL = Object.freeze({
     brightness: 0,
     saturation: 0,
     hue: 0,
+    monoMixerEnabled: false,
+    monoMixerRed: 40,
+    monoMixerOrange: 0,
+    monoMixerYellow: 60,
+    monoMixerGreen: 40,
+    monoMixerCyan: 60,
+    monoMixerBlue: 20,
+    monoMixerViolet: 0,
+    monoMixerMagenta: 80,
     filterEffect: "OFF",
     toningEffect: "B&W",
     toningAmount: 1,
@@ -243,9 +249,6 @@ async function saveCurrentPictureControlSettings(filePath) {
         if (window.imageProcessor && typeof window.imageProcessor.getFilmSettings === "function") {
             settings.filmSettings = window.imageProcessor.getFilmSettings();
         }
-        if (typeof window.MonochromeManager !== "undefined") {
-            settings.monochromeStudio = window.MonochromeManager.getSettings();
-        }
         if (window.imageProcessor) {
             settings.neuralDenoiseApplied = !!window.imageProcessor.neuralDenoiseApplied;
             settings.crop = window.imageProcessor.cropSettings || null;
@@ -286,9 +289,6 @@ async function saveCurrentPhotoSettingsToCatalog() {
     }
     if (window.imageProcessor && typeof window.imageProcessor.getFilmSettings === "function") {
         settingsToSave.filmSettings = window.imageProcessor.getFilmSettings();
-    }
-    if (typeof window.MonochromeManager !== "undefined") {
-        settingsToSave.monochromeStudio = window.MonochromeManager.getSettings();
     }
     if (window.imageProcessor) {
         settingsToSave.neuralDenoiseApplied = !!window.imageProcessor.neuralDenoiseApplied;
@@ -916,19 +916,19 @@ async function loadSavedStudioFolders() {
     MODULE PROFILE MANAGER (NP3 / NCP)
 ========================================================= */
 
-// 🔹 Construit (si besoin) profileImageProcessor avec les retouches, masques
-// et module Monochrome locaux du Studio désactivés : RetouchManager/
-// MasksManager/MonochromeManager sont des états GLOBAUX (voir
-// DEFAULT_PICTURE_CONTROL plus haut), partagés par toutes les instances
-// ImageProcessor — sans ce verrou, une retouche, un masque peint ou le module
-// Monochrome activé sur la photo du Studio s'appliquerait aussi ici, alors
-// que ce module doit rester strictement indépendant du Studio.
+// 🔹 Construit (si besoin) profileImageProcessor avec les retouches et masques
+// locaux du Studio désactivés : RetouchManager/MasksManager sont des états
+// GLOBAUX, partagés par toutes les instances ImageProcessor — sans ce verrou,
+// une retouche ou un masque peint sur la photo du Studio s'appliquerait aussi
+// ici, alors que ce module doit rester strictement indépendant du Studio. Le
+// mélangeur N&B n'a pas besoin de ce genre de verrou : c'est un réglage
+// Picture Control normal, déjà isolé par instance (profileImageProcessor a
+// son propre pictureControl, jamais partagé avec celui du Studio).
 function ensureProfileImageProcessor() {
     if (!profileImageProcessor && typeof ImageProcessor !== "undefined") {
         profileImageProcessor = new ImageProcessor("profilePreviewCanvas");
         profileImageProcessor.enableMasks = false;
         profileImageProcessor.enableRetouches = false;
-        profileImageProcessor.enableMonochrome = false;
     }
     return profileImageProcessor;
 }
@@ -1100,16 +1100,11 @@ async function loadImageInStudio(filePath) {
             if (typeof window.renderFilmPanel === "function") window.renderFilmPanel();
         }
 
-        // 🔹 Module Monochrome dédié : même principe, champ dédié retiré de
-        // savedSettings pour ne pas polluer l'objet Picture Control. Repart
-        // toujours de zéro (pas d'historique conservé d'une photo à l'autre),
-        // comme RetouchManager.loadRetouches().
-        if (typeof window.MonochromeManager !== "undefined") {
-            const savedMonochromeStudio = (savedSettings && savedSettings.monochromeStudio) || {};
-            if (savedSettings && "monochromeStudio" in savedSettings) delete savedSettings.monochromeStudio;
-            window.MonochromeManager.loadSettings(savedMonochromeStudio);
-            if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
-        }
+        // 🔹 Mélangeur N&B 8 canaux : plus un module à part — un réglage Picture
+        // Control normal (monoMixerEnabled + 8 canaux), déjà présent dans
+        // savedSettings/pcData ci-dessous, rien à charger séparément ici. Un
+        // ancien fichier avec un champ "monochromeStudio" (ex-module dédié)
+        // est simplement ignoré : plus aucun code ne le lit.
 
         // 🔹 Préréglages : la liste elle-même ne dépend pas de la photo, mais le
         // panneau se désactive (voir presetsPanel.js) tant qu'aucune photo n'est
@@ -2183,17 +2178,6 @@ function initButtons() {
         window.initPerspectiveController(window.imageProcessor);
     }
 
-    // 🔹 Gomme couleur (module Monochrome) : try/catch explicite — un contrôleur
-    // qui échoue à s'initialiser ici (script manquant, classe indisponible...)
-    // ne doit pas interrompre le reste de initButtons().
-    if (window.imageProcessor && typeof window.initMonochromeMaskController === "function") {
-        try {
-            window.initMonochromeMaskController(window.imageProcessor);
-        } catch (err) {
-            console.error("❌ Erreur initialisation du contrôleur Gomme couleur (Monochrome) :", err);
-        }
-    }
-
     if (btnStudioOpenFolder) {
         btnStudioOpenFolder.onclick = openStudioFolder;
     }
@@ -2545,10 +2529,6 @@ function initButtons() {
 
     if (typeof window.renderFilmPanel === "function") {
         window.renderFilmPanel();
-    }
-
-    if (typeof window.renderMonochromePanel === "function") {
-        window.renderMonochromePanel();
     }
 
     if (typeof window.renderPresetsPanel === "function") {

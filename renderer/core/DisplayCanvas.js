@@ -14,8 +14,13 @@ class DisplayCanvas {
         this.offscreenCtx = this.offscreenCanvas.getContext("2d");
 
         this.scale = 1;
+        // 🔹 minScale n'est qu'un REPLI (avant qu'une photo soit chargée/ses
+        // dimensions connues) — la vraie borne basse est TOUJOURS "Ajuster au
+        // canevas" (voir _getFitScale()), recalculée dynamiquement puisqu'elle
+        // dépend de la taille de la fenêtre ET de la photo. Zoomer arrière en
+        // dessous de "toute la photo visible" n'a pas d'usage réel.
         this.minScale = 0.05;
-        this.maxScale = 5; // 500% : cohérent avec le max du slider, pleinement exploitable net grâce au zoom pleine résolution
+        this.maxScale = 3; // 300% : plafond simplifié (voir _getFitScale()/setZoomScale())
         this.panX = 0;
         this.panY = 0;
 
@@ -28,6 +33,7 @@ class DisplayCanvas {
         this.onRequestFullRes = null;
         this._fullResRequested = false;
         this._fullResIndicator = null;
+        this._fullResDebounceTimer = null;
 
         // 🔹 Référence FIXE (largeur/hauteur de l'aperçu au moment où la photo est
         // chargée), établie une seule fois par photo dans draw() et JAMAIS modifiée
@@ -120,7 +126,7 @@ class DisplayCanvas {
 
             zoomBar.innerHTML = `
                 <span style="color:#aaa; font-size:12px; font-weight:bold;">Zoom :</span>
-                <input type="range" class="canvas-zoom-range" min="5" max="500" value="100" step="1" 
+                <input type="range" class="canvas-zoom-range" min="5" max="300" value="100" step="1"
                        style="flex: 1; max-width: 250px; cursor: pointer;">
                 <span class="canvas-zoom-text" style="color:#fff; font-size:11px; min-width: 45px; text-align: right;">100%</span>
                 <button class="canvas-zoom-reset btn-tool" style="padding: 2px 8px; font-size: 11px;">Ajuster</button>
@@ -190,19 +196,17 @@ class DisplayCanvas {
     setZoomScale(targetScale, focalX = null, focalY = null) {
         if (!this.offscreenCanvas.width || !this.canvas.width) return;
 
-        // 🔹 minScale/maxScale (0.05-5, soit 5%-500%) bornent le POURCENTAGE RÉEL
-        // affiché, PAS this.scale brut directement — sinon, pour une photo dont
-        // _refWidth (aperçu réduit) est beaucoup plus petit que trueImageWidth
-        // (résolution native, ex: ratio ~1/9.5 pour un aperçu 424px d'une photo
-        // 4032px), maxScale=5 plafonnerait le pourcentage réel atteignable bien
-        // en dessous de 500% (ex: ~53%), empêchant même d'atteindre le seuil
-        // pleine résolution de 150% en tournant la molette/glissant le curseur.
-        // Repli sur l'ancien comportement (borne directe sur this.scale) tant que
-        // la résolution réelle n'est pas connue, via _getDisplayPercent()/
-        // _displayPercentToScale() (voir plus bas, identité quand trueImageWidth
-        // est absent).
+        // 🔹 Bornes sur le POURCENTAGE RÉEL affiché, PAS this.scale brut
+        // directement — sinon, pour une photo dont _refWidth (aperçu réduit) est
+        // beaucoup plus petit que trueImageWidth (résolution native), maxScale
+        // plafonnerait le pourcentage réel atteignable bien en dessous de sa
+        // vraie valeur. Borne basse = "Ajuster au canevas" (_getFitScale(),
+        // dynamique — dépend de la taille de fenêtre ET de la photo) : pas
+        // d'usage réel à dézoomer sous "toute la photo visible". Borne haute =
+        // this.maxScale (300%) fixe.
         const targetPercent = this._getDisplayPercent(targetScale);
-        const safePercent = Math.min(Math.max(this.minScale * 100, targetPercent), this.maxScale * 100);
+        const fitPercent = this._getDisplayPercent(this._getFitScale());
+        const safePercent = Math.min(Math.max(fitPercent, targetPercent), this.maxScale * 100);
         const safeScale = this._displayPercentToScale(safePercent);
 
         if (focalX !== null && focalY !== null) {
@@ -256,6 +260,16 @@ class DisplayCanvas {
      * un aspect différent (fidélité au pourcentage annoncé vs netteté visuelle
      * pendant le zoom), donc on ne remplace pas l'un par l'autre, on prend le
      * plus tôt des deux.
+     *
+     * 🔹 DÉBOUNCE (ZOOM_SETTLE_MS) : le déclenchement réel n'a lieu qu'une fois
+     * la molette IMMOBILE depuis ce délai, pas au tick qui franchit le seuil —
+     * même principe que isDraggingSlider pour les curseurs (voir ImageProcessor).
+     * onRequestFullRes() enchaîne décodage pleine résolution PUIS le pipeline de
+     * rendu complet, qui peut être coûteux avec Hald-CLUT actif (voir
+     * ImageProcessor.render()/_isHeavyRenderExpected()) — sans ce délai, un
+     * simple passage rapide au-delà de 150% en route vers un zoom bien plus
+     * élevé interromprait le geste en plein milieu avec un gel, au lieu de le
+     * laisser se terminer normalement et ne déclencher le calcul qu'à l'arrêt.
      */
     _maybeRequestFullRes() {
         const displayPercent = this._getDisplayPercent();
@@ -263,16 +277,31 @@ class DisplayCanvas {
         const crossedReal = displayPercent > realThresholdPercent;
         const crossedBuffer = this.scale > this.ZOOM_FULLRES_THRESHOLD;
 
-        if (!crossedReal && !crossedBuffer) return;
+        if (!crossedReal && !crossedBuffer) {
+            // 🔹 Redescendu sous le seuil avant la fin du débounce (l'utilisateur
+            // a fait demi-tour) : annule la demande en attente, inutile de charger/
+            // calculer la pleine résolution pour un zoom qu'on ne montre plus.
+            if (this._fullResDebounceTimer) {
+                clearTimeout(this._fullResDebounceTimer);
+                this._fullResDebounceTimer = null;
+            }
+            return;
+        }
         if (this._fullResRequested) return;
         if (typeof this.onRequestFullRes !== "function") return;
 
-        this._fullResRequested = true;
-        this._setFullResLoading(true);
+        if (this._fullResDebounceTimer) clearTimeout(this._fullResDebounceTimer);
+        this._fullResDebounceTimer = setTimeout(() => {
+            this._fullResDebounceTimer = null;
+            if (this._fullResRequested) return;
 
-        Promise.resolve(this.onRequestFullRes())
-            .catch((err) => console.error("❌ Erreur chargement pleine résolution (zoom) :", err))
-            .finally(() => this._setFullResLoading(false));
+            this._fullResRequested = true;
+            this._setFullResLoading(true);
+
+            Promise.resolve(this.onRequestFullRes())
+                .catch((err) => console.error("❌ Erreur chargement pleine résolution (zoom) :", err))
+                .finally(() => this._setFullResLoading(false));
+        }, DisplayCanvas.ZOOM_SETTLE_MS);
     }
 
     _ensureFullResIndicator() {
@@ -305,12 +334,50 @@ class DisplayCanvas {
 
     _setFullResLoading(isLoading) {
         const el = this._ensureFullResIndicator();
-        if (el) el.style.display = isLoading ? "block" : "none";
+        if (!el) return;
+        // 🔹 Remis au texte par défaut à chaque NOUVEAU cycle (isLoading=true) :
+        // sans ça, un texte laissé par showProcessingIndicator() (voir
+        // ImageProcessor.render()) traînerait comme intitulé initial du cycle
+        // suivant, avant même que le décodage n'ait commencé.
+        if (isLoading) el.textContent = "Chargement pleine résolution...";
+        el.style.display = isLoading ? "block" : "none";
+    }
+
+    /**
+     * 🔹 Affiche l'indicateur avec un texte donné, sans passer par le cycle
+     * décodage/_setFullResLoading() ci-dessus — utilisé par ImageProcessor.
+     * render() pour SIGNALER un calcul coûteux (Hald-CLUT) qui ne provient pas
+     * forcément d'un chargement pleine résolution (ex: un simple
+     * relâchement de curseur pendant que le zoom pleine résolution est déjà
+     * actif — voir _isHeavyRenderExpected()).
+     */
+    showProcessingIndicator(text) {
+        const el = this._ensureFullResIndicator();
+        if (!el) return;
+        el.textContent = text;
+        el.style.display = "block";
+    }
+
+    /**
+     * 🔹 Contrepartie de showProcessingIndicator() — masque SANS condition
+     * (idempotent, appelable même si l'indicateur était déjà masqué ou n'a
+     * jamais été affiché).
+     */
+    hideProcessingIndicator() {
+        if (this._fullResIndicator) this._fullResIndicator.style.display = "none";
     }
 
     updateZoomUI() {
         const percent = Math.round(this._getDisplayPercent());
-        if (this.zoomSlider) this.zoomSlider.value = percent;
+        if (this.zoomSlider) {
+            // 🔹 min dynamique : la borne basse ("Ajuster au canevas") dépend de
+            // la taille de fenêtre ET de la photo, donc jamais une constante HTML
+            // fixe — recalculée à chaque mise à jour (peu coûteux, voir
+            // _getFitScale()). max reste fixe (this.maxScale, 300%).
+            this.zoomSlider.min = Math.round(this._getDisplayPercent(this._getFitScale()));
+            this.zoomSlider.max = Math.round(this.maxScale * 100);
+            this.zoomSlider.value = percent;
+        }
         if (this.zoomText) this.zoomText.textContent = `${percent}%`;
     }
 
@@ -446,6 +513,14 @@ class DisplayCanvas {
             this.requestRender();
         } else if (isNewImage || !this.scale) {
             this._fullResRequested = false;
+            // 🔹 Nouvelle photo : une éventuelle demande pleine résolution en
+            // attente de débounce (voir _maybeRequestFullRes()) concernait
+            // l'ancienne photo — sans ça, elle se déclencherait plus tard pour
+            // CETTE nouvelle photo à la place, de façon surprenante.
+            if (this._fullResDebounceTimer) {
+                clearTimeout(this._fullResDebounceTimer);
+                this._fullResDebounceTimer = null;
+            }
             // 🔹 Référence figée UNE SEULE FOIS par photo, à la résolution du buffer
             // initialement affiché (l'aperçu réduit) — jamais mise à jour ensuite (voir
             // _getRenderScale). C'est ce qui rend le pourcentage affiché stable dans le
@@ -506,19 +581,28 @@ class DisplayCanvas {
         this.ctx.restore();
     }
 
+    /**
+     * 🔹 Échelle "Ajuster au canevas" (toute la photo visible dans la fenêtre) —
+     * calculée par rapport à this._refWidth/_refHeight (voir _getRenderScale),
+     * PAS à offscreenCanvas.width/height courant : sinon, un swap vers la
+     * pleine résolution recalculerait le fit dans le mauvais référentiel et
+     * casserait la cohérence du pourcentage affiché. C'est aussi la borne basse
+     * du zoom (voir setZoomScale()) : dézoomer sous "toute la photo visible"
+     * n'a pas d'usage réel. Repli sur this.minScale si les dimensions ne sont
+     * pas encore connues (avant tout chargement de photo).
+     */
+    _getFitScale() {
+        if (!this.canvas.width || !this.canvas.height) return this.minScale;
+        const refW = this._refWidth || this.offscreenCanvas.width;
+        const refH = this._refHeight || this.offscreenCanvas.height;
+        if (!refW || !refH) return this.minScale;
+        return Math.min(this.canvas.width / refW, this.canvas.height / refH) * 0.95;
+    }
+
     resetZoom() {
         if (!this.offscreenCanvas.width || !this.canvas.width) return;
 
-        const containerW = this.canvas.width;
-        const containerH = this.canvas.height;
-        // 🔹 Le "fit" se calcule TOUJOURS par rapport à this._refWidth/_refHeight (voir
-        // _getRenderScale), pas par rapport à offscreenCanvas.width/height courant :
-        // sinon, cliquer "Ajuster" après un swap pleine résolution recalculerait le
-        // fit dans le mauvais référentiel et casserait la cohérence du pourcentage.
-        const refW = this._refWidth || this.offscreenCanvas.width;
-        const refH = this._refHeight || this.offscreenCanvas.height;
-
-        this._setScale(Math.min(containerW / refW, containerH / refH) * 0.95);
+        this._setScale(this._getFitScale());
         this.panX = 0;
         this.panY = 0;
 
@@ -531,5 +615,9 @@ class DisplayCanvas {
         }
     }
 }
+
+// 🔹 Délai d'immobilité de la molette/du curseur de zoom avant de déclencher le
+// chargement + calcul pleine résolution (voir _maybeRequestFullRes()).
+DisplayCanvas.ZOOM_SETTLE_MS = 350;
 
 window.DisplayCanvas = DisplayCanvas;

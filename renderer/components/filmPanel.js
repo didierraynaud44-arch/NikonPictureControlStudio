@@ -1,6 +1,6 @@
 /*=========================================================
     Pixel RAW - Panneau Simulation Pellicule (Studio)
-    Grain, halation, Hald-CLUT (réponse colorimétrique pellicule)
+    Hald-CLUT (réponse colorimétrique pellicule)
 =========================================================*/
 
 (function () {
@@ -82,35 +82,29 @@
         return null;
     }
 
-    // Synchronise l'état du module Monochrome sur la catégorie d'un Hald-CLUT
-    // qui vient d'être chargé — un geste PONCTUEL déclenché uniquement au
+    // Synchronise l'état du mélangeur N&B sur la catégorie d'un Hald-CLUT qui
+    // vient d'être chargé — un geste PONCTUEL déclenché uniquement au
     // chargement d'un nouveau LUT reconnu (bw/color), jamais un lien permanent :
-    // un changement manuel ultérieur du module Monochrome (même LUT toujours
-    // chargé) n'est jamais écrasé par un rendu suivant. category=null (LUT hors
-    // de assets/hald-clut/, ou déjà dans l'état voulu) : ne fait rien.
+    // un changement manuel ultérieur du mélangeur (même LUT toujours chargé)
+    // n'est jamais écrasé par un rendu suivant. category=null (LUT hors de
+    // assets/hald-clut/, ou déjà dans l'état voulu) : ne fait rien.
     function _syncMonochromeWithHaldCategory(category) {
-        if (!category || typeof window.MonochromeManager === "undefined") return;
+        if (!category || !window.imageProcessor || !window.imageProcessor.pictureControl) return;
 
-        const s = window.MonochromeManager.getSettings();
+        const pc = window.imageProcessor.pictureControl;
         const shouldEnable = category === "bw";
-        if (!!s.monoMixerEnabled === shouldEnable) return;
+        if (!!pc.monoMixerEnabled === shouldEnable) return;
 
-        window.MonochromeManager.beginAction();
-        window.MonochromeManager.updateSettings({ monoMixerEnabled: shouldEnable });
+        pc.monoMixerEnabled = shouldEnable;
 
-        // Le module désactivé masque la section Gomme locale : coupe aussi le
-        // pinceau s'il était actif, comme le fait la case à cocher "Activer le
-        // module Monochrome" dans monochromePanel.js.
-        if (!shouldEnable && window.monochromeMaskController) {
-            window.monochromeMaskController.cancelMode();
-        }
-
-        // loadHaldClutFile() a déjà rendu l'image avec l'ancien état Monochrome
+        // loadHaldClutFile() a déjà rendu l'image avec l'ancien état du mélangeur
         // (avant ce changement) : re-rendu pour que le résultat reflète bien le
-        // nouvel état monoMixerEnabled.
-        if (window.imageProcessor) window.imageProcessor.render();
-
-        if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
+        // nouvel état monoMixerEnabled, et rafraîchit le panneau Picture Control
+        // pour que la case à cocher reflète elle aussi ce nouvel état.
+        window.imageProcessor.render();
+        if (typeof window.updatePictureControl === "function") {
+            window.updatePictureControl({ pictureControl: pc }, false);
+        }
     }
 
     function baseName(filePath) {
@@ -147,10 +141,10 @@
         container.innerHTML = `
         <h3>Simulation Pellicule</h3>
         <p style="font-size:11px; color:#949ba4; margin-bottom:8px;">
-            Grain, halation et réponse colorimétrique — appliqués en toute fin de traitement.
+            Réponse colorimétrique — appliquée en toute fin de traitement.
         </p>
 
-        <div class="film-section" style="margin-bottom:14px;">
+        <div class="film-section">
             <h4 style="font-size:12px; color:#dbdee1; margin:0 0 6px;">Hald-CLUT (réponse pellicule)</h4>
             <label style="font-size:11px; color:#aaa; display:block; margin-bottom:4px;">Préréglage pellicule :</label>
             ${presetSelectHtml}
@@ -166,19 +160,6 @@
             ` : `
             <p style="font-size:11px; color:#666; font-style:italic; margin:0;">Aucun Hald-CLUT chargé.</p>
             `}
-        </div>
-
-        <div class="film-section" style="margin-bottom:14px; border-top:1px solid #333; padding-top:10px;">
-            <h4 style="font-size:12px; color:#dbdee1; margin:0 0 6px;">Halation</h4>
-            ${fieldRow("Intensité", "halationIntensity", fs.halationIntensity ?? 0, 0, 100, 1)}
-            ${fieldRow("Seuil", "halationThreshold", fs.halationThreshold ?? 200, 100, 255, 1)}
-            ${fieldRow("Rayon du flou", "halationRadius", fs.halationRadius ?? 8, 1, 40, 1)}
-        </div>
-
-        <div class="film-section" style="border-top:1px solid #333; padding-top:10px;">
-            <h4 style="font-size:12px; color:#dbdee1; margin:0 0 6px;">Grain</h4>
-            ${fieldRow("Intensité", "grainIntensity", fs.grainIntensity ?? 0, 0, 100, 1)}
-            ${fieldRow("Taille du grain", "grainSize", fs.grainSize ?? 1, 1, 4, 0.25)}
         </div>
         `;
 
@@ -221,9 +202,9 @@
             });
 
             // 🔹 Glissement en cours : previewBuffer même zoomé au-delà du seuil
-            // pleine résolution — un pipeline complet (grain/halation/Hald-CLUT)
-            // peut atteindre ~17s sur 24 Mpx (mesuré). Fin du geste : voir le
-            // mouseup GLOBAL (app.js) -> ImageProcessor.endSliderDrag().
+            // pleine résolution — évite de relancer Hald-CLUT en pleine résolution
+            // à chaque tick. Fin du geste : voir le mouseup GLOBAL (app.js) ->
+            // ImageProcessor.endSliderDrag().
             slider.addEventListener("mousedown", () => {
                 if (window.imageProcessor) window.imageProcessor.startSliderDrag();
             });

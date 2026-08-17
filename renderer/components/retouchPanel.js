@@ -100,13 +100,10 @@ function _bindRetouchPanelEvents(container) {
                     window.retouchCanvasController.startTool();
 
                     // Un seul outil d'édition locale actif à la fois : désélectionne le
-                    // masque actif et coupe la Gomme couleur pour ne pas les laisser
-                    // intercepter les clics du tampon.
+                    // masque actif pour ne pas le laisser intercepter les clics du tampon.
                     if (window.MasksManager) window.MasksManager.setActiveMask(null);
                     if (window.maskCanvasController) window.maskCanvasController.cancelMode();
                     if (typeof window.renderMasksPanel === "function") window.renderMasksPanel();
-                    if (window.monochromeMaskController) window.monochromeMaskController.cancelMode();
-                    if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
                 }
             }
             renderRetouchPanel();
