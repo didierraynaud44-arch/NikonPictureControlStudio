@@ -189,12 +189,20 @@
         let saveTimer = null;
 
         container.querySelectorAll(".mono-body .pc-slider[data-field]").forEach(slider => {
-            slider.addEventListener("mousedown", () => window.MonochromeManager.beginAction());
+            slider.addEventListener("mousedown", () => {
+                window.MonochromeManager.beginAction();
+                // 🔹 Glissement en cours : previewBuffer même zoomé au-delà du seuil
+                // pleine résolution — un pipeline complet (Monochrome actif) peut
+                // atteindre ~17s sur 24 Mpx (mesuré). Fin du geste : voir le mouseup
+                // GLOBAL (app.js) -> ImageProcessor.endSliderDrag().
+                if (window.imageProcessor) window.imageProcessor.startSliderDrag();
+            });
 
             slider.addEventListener("input", () => {
                 const value = Number(slider.value);
                 const label = container.querySelector(`[data-value-for="${slider.dataset.field}"]`);
                 if (label) label.textContent = value;
+                if (window.imageProcessor) window.imageProcessor.notifySliderInput();
 
                 window.MonochromeManager.updateSettings({ [slider.dataset.field]: value });
 
@@ -267,10 +275,14 @@
 
         const eraseIntensitySlider = container.querySelector('[data-mono-erase-field="intensity"]');
         if (eraseIntensitySlider) {
-            eraseIntensitySlider.addEventListener("mousedown", () => window.MonochromeManager.beginAction());
+            eraseIntensitySlider.addEventListener("mousedown", () => {
+                window.MonochromeManager.beginAction();
+                if (window.imageProcessor) window.imageProcessor.startSliderDrag();
+            });
 
             eraseIntensitySlider.addEventListener("input", () => {
                 const value = Number(eraseIntensitySlider.value);
+                if (window.imageProcessor) window.imageProcessor.notifySliderInput();
                 const target = (window.monochromeMaskController && window.monochromeMaskController.currentTarget) || "red";
                 window.MonochromeManager.setEraseIntensity(target, value);
 

@@ -56,10 +56,19 @@ class MonochromeMixerFilter {
         const len = data.length;
         const BAND_WIDTH = 45;
 
-        // Facteur d'échelle à calibrer empiriquement : convertit la somme
+        // Facteur d'échelle à calibrer empiriquement : convertit la moyenne
         // pondérée des curseurs (-100..200 chacun) en delta de luminance
-        // (niveaux 0-255) d'amplitude raisonnable.
-        const SCALE = 1.4;
+        // (niveaux 0-255) d'amplitude raisonnable. Recalibré à la baisse (1.4
+        // -> 0.7) lors de l'ajout de la normalisation par totalWeight
+        // ci-dessous : sans normalisation, la plupart des teintes (à cheval
+        // entre deux canaux à 45° d'écart, soit presque partout puisque
+        // BAND_WIDTH == l'écart entre canaux) recevaient la somme non
+        // pondérée de DEUX canaux, gonflant l'effet ~2x par rapport à une
+        // teinte pile au centre d'un seul canal. Un push max sur un seul
+        // curseur pile au centre restait déjà marqué avec SCALE=1.4 (identique
+        // avant/après la normalisation dans ce cas précis, un seul canal
+        // contribue) ; le réduire évite qu'il ne crame en blanc/noir pur.
+        const SCALE = 0.7;
 
         const sliders = this.channels.map(({ settingKey, colorKey, center }) => ({
             center,
@@ -79,6 +88,7 @@ class MonochromeMixerFilter {
             const baseLum = 0.2126 * r + 0.7152 * g + 0.0722 * b; // Rec.709
 
             let weightedSum = 0;
+            let totalWeight = 0;
             for (const { center, colorKey, value } of sliders) {
                 const dist = this.hueDistance(h, center);
                 if (dist >= BAND_WIDTH) continue;
@@ -87,11 +97,19 @@ class MonochromeMixerFilter {
                     ? channelLocalMultipliers[colorKey][p]
                     : 1;
                 weightedSum += value * weight * localMult;
+                totalWeight += weight;
             }
+            // Ramène la somme à une MOYENNE pondérée (même principe que
+            // ColorBlenderFilter.js) : sans ça, une teinte à cheval entre deux
+            // canaux adjacents (ex: Rouge/Orange) additionne les deux curseurs
+            // au lieu de les moyenner, doublant l'effet par rapport à une
+            // teinte pile au centre d'un seul canal. totalWeight === 0 (aucun
+            // canal dans la bande de ce pixel) : aucune contribution, comme avant.
+            const normalizedSum = totalWeight > 0 ? weightedSum / totalWeight : 0;
 
             // La contribution du mixeur est proportionnelle à la saturation du
             // pixel : un pixel déjà gris (s=0) n'est affecté par aucun canal.
-            const finalLum = baseLum + weightedSum * s * SCALE;
+            const finalLum = baseLum + normalizedSum * s * SCALE;
             const clamped = Math.max(0, Math.min(255, finalLum));
 
             data[i] = data[i + 1] = data[i + 2] = clamped;

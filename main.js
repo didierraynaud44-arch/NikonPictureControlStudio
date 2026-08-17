@@ -3,6 +3,18 @@
 =========================================================*/
 
 const { app, BrowserWindow, ipcMain, dialog, Menu, screen, shell } = require("electron");
+
+// 🔹 Verrou d'instance unique : une seconde tentative de lancement (double-clic
+// sur l'icône, second "npm start", etc.) ne doit PAS ouvrir une nouvelle
+// fenêtre — elle doit ramener la fenêtre existante au premier plan puis se
+// fermer. Appelé le plus tôt possible (avant toute initialisation lourde :
+// base de données, fenêtre) — voir le listener "second-instance" après la
+// déclaration de mainWindow, et le garde sur app.whenReady() plus bas.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    app.quit();
+}
+
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
@@ -47,6 +59,20 @@ let mainWindow = null;
 let windowStateStore = null; // instance electron-store, initialisée dans app.whenReady() (module ESM)
 let studioPreferencesStore = null; // instance electron-store séparée, pour les préférences Studio (qualité d'aperçu, etc.)
 const settingsCache = new Map();
+
+// 🔹 Seconde tentative de lancement détectée (voir requestSingleInstanceLock()
+// tout en haut du fichier) : ramène la fenêtre existante au premier plan au
+// lieu d'en créer une autre. Inutile si gotTheLock est déjà false — cette
+// instance-ci va quitter immédiatement (app.quit() déjà appelé plus haut),
+// jamais assez longtemps pour recevoir cet évènement.
+if (gotTheLock) {
+    app.on("second-instance", () => {
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.focus();
+        }
+    });
+}
 
 // 🔹 Qualité d'aperçu Studio : largeur max (px) du redimensionnement appliqué par
 // read-file-direct. N'affecte QUE l'aperçu du Studio (voir read-file-direct plus
@@ -316,6 +342,12 @@ async function setPhotoFlagValue(filePath, flag) {
 }
 
 app.whenReady().then(async () => {
+    // 🔹 Verrou d'instance unique déjà perdu (voir tout en haut du fichier,
+    // app.quit() déjà appelé) : ne PAS initialiser base de données/fenêtre
+    // pour cette instance perdante, même si whenReady() se résout quand
+    // même avant que le quit() ne prenne effet.
+    if (!gotTheLock) return;
+
     try {
         console.log("🚀 Démarrage de l'application...");
 
@@ -529,7 +561,13 @@ ipcMain.handle("read-file-direct", async (event, filePath, maxWidth = 1200) => {
                 const sharp = require('sharp');
                 const metadata = await sharp(filePath).metadata();
                 console.log(`📷 Image source: ${metadata.width}x${metadata.height}px`);
-                
+                // 🔹 Résolution NATIVE réelle du fichier (indépendante de l'aperçu
+                // redimensionné généré juste en dessous) — voir DisplayCanvas.
+                // setTrueImageResolution(), utilisée pour le pourcentage de zoom
+                // affiché, PAS pour le rendu.
+                result.trueWidth = metadata.width;
+                result.trueHeight = metadata.height;
+
                 const effectiveMaxWidth = (typeof maxWidth === "number" && maxWidth > 0) ? maxWidth : 1200;
                 const previewWidth = Math.min(metadata.width, effectiveMaxWidth);
                 const previewHeight = Math.round(previewWidth * (metadata.height / metadata.width));
@@ -664,6 +702,45 @@ ipcMain.handle("read-file-direct", async (event, filePath, maxWidth = 1200) => {
             } catch (lensErr) {
                 console.warn("⚠️ Erreur extraction objectif (repli exiftool):", lensErr.message);
             }
+        }
+
+        // 🔹 Résolution native réelle (RAW uniquement — déjà renseignée pour les
+        // images standards via sharp plus haut) : sert au pourcentage de zoom
+        // affiché (DisplayCanvas.setTrueImageResolution()), jamais au rendu.
+        // exifr ne peut PAS être utilisé ici — vérifié sur un vrai NEF (D750) :
+        // son "ImageWidth"/"ImageHeight" IFD0 pointe vers la MINIATURE intégrée
+        // (160x120, pas le capteur), et "ExifImageWidth"/"ExifImageHeight" sont
+        // absents des NEF. exiftool résout ça correctement via ses tags composites
+        // ImageWidth/ImageHeight (confirmé : 6032x4032, la vraie résolution
+        // capteur) — repli ciblé (2 tags), même pattern que Orientation/Lens
+        // ci-dessus, pas un exiftool.read() complet.
+        if (!result.trueWidth && result.isRaw) {
+            try {
+                const dimTags = await exiftool.read(filePath, ["ImageWidth", "ImageHeight"]);
+                if (dimTags && typeof dimTags.ImageWidth === "number" && typeof dimTags.ImageHeight === "number") {
+                    result.trueWidth = dimTags.ImageWidth;
+                    result.trueHeight = dimTags.ImageHeight;
+                }
+            } catch (dimErr) {
+                console.warn("⚠️ Erreur lecture résolution réelle (exiftool):", dimErr.message);
+            }
+        }
+
+        // 🔹 trueWidth/trueHeight ci-dessus (sharp ou exiftool) décrivent le
+        // fichier TEL QU'ENCODÉ, AVANT rotation EXIF — mais previewBuffer/
+        // originalRawBuffer (voir ImageProcessor.load() -> createRotatedCanvas)
+        // appliquent TOUJOURS la rotation EXIF. Pour une orientation 90°/270°
+        // (codes 5-8 : la quasi-totalité des photos portrait, capteur encodé en
+        // paysage), largeur/hauteur doivent donc être permutées ici pour rester
+        // comparables à _refWidth une fois le buffer tourné — sinon le
+        // pourcentage de zoom affiché se baserait sur le mauvais axe pour toute
+        // photo portrait (confirmé sur un vrai NEF portrait : sans ce correctif,
+        // trueWidth=6032 comparé à un _refWidth post-rotation de 424 au lieu du
+        // trueHeight=4032 attendu, donnant un pourcentage ~2x trop petit).
+        if (result.trueWidth && result.trueHeight && [5, 6, 7, 8].includes(result.orientation)) {
+            const swappedWidth = result.trueHeight;
+            result.trueHeight = result.trueWidth;
+            result.trueWidth = swappedWidth;
         }
 
         // 🔥 Le ShutterCount (exiftool.read complet) a été retiré d'ici : c'était l'appel
@@ -1939,6 +2016,143 @@ ipcMain.handle("get-full-resolution-image", async (event, filePath) => {
             bw: listCategory("bw"),
             color: listCategory("color")
         };
+    });
+
+    // ============================================================
+    // 🎨 PRÉRÉGLAGES COMPLETS (Studio) — Picture Control + Monochrome +
+    // Simulation Pellicule en une seule "recette" nommée. Deux emplacements :
+    // assets/presets/ (intégrés, livrés avec l'appli, lecture seule) et
+    // userData/presets-custom/ (créés par l'utilisateur, survivent aux
+    // mises à jour — même principe que userData/lens-profiles/ ci-dessous).
+    // ============================================================
+
+    const PRESETS_BUILTIN_DIR = path.join(__dirname, "assets", "presets");
+    const PRESETS_CUSTOM_DIR = path.join(app.getPath("userData"), "presets-custom");
+
+    function listPresetsInDir(dir) {
+        const results = [];
+        if (!fs.existsSync(dir)) return results;
+
+        let files;
+        try {
+            files = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith(".json"));
+        } catch (err) {
+            console.error(`❌ Erreur lecture dossier de préréglages ${dir} :`, err);
+            return results;
+        }
+
+        for (const file of files) {
+            const filePath = path.join(dir, file);
+            try {
+                const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+                results.push({
+                    name: data.name || path.basename(file, ".json"),
+                    category: data.category === "color" ? "color" : "bw",
+                    path: filePath
+                });
+            } catch (err) {
+                console.error(`❌ Erreur lecture préréglage ${filePath} :`, err);
+            }
+        }
+
+        results.sort((a, b) => a.name.localeCompare(b.name));
+        return results;
+    }
+
+    // 🔹 Convention de nommage identique à generateExternalTiffPath (voir plus
+    // bas) : <slug>.json, puis <slug>-1.json, <slug>-2.json... en cas de
+    // collision avec un préréglage déjà enregistré sous ce nom.
+    function slugifyPresetName(name) {
+        const diacriticRange = String.fromCharCode(0x0300) + "-" + String.fromCharCode(0x036f);
+        const diacriticStripper = new RegExp("[" + diacriticRange + "]", "g");
+        const slug = (name || "preset")
+            .toString()
+            .normalize("NFD").replace(diacriticStripper, "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+        return slug || "preset";
+    }
+
+    function generatePresetFilePath(name) {
+        const slug = slugifyPresetName(name);
+        const firstCandidate = path.join(PRESETS_CUSTOM_DIR, `${slug}.json`);
+        if (!fs.existsSync(firstCandidate)) return firstCandidate;
+
+        let n = 1;
+        let candidate;
+        do {
+            candidate = path.join(PRESETS_CUSTOM_DIR, `${slug}-${n}.json`);
+            n++;
+        } while (fs.existsSync(candidate));
+
+        return candidate;
+    }
+
+    ipcMain.handle("list-presets", async () => {
+        return {
+            builtin: listPresetsInDir(PRESETS_BUILTIN_DIR),
+            custom: listPresetsInDir(PRESETS_CUSTOM_DIR)
+        };
+    });
+
+    ipcMain.handle("save-preset", async (event, presetData) => {
+        if (!presetData || typeof presetData !== "object" || !presetData.name) {
+            return { success: false, error: "Préréglage invalide (nom manquant)." };
+        }
+
+        try {
+            if (!fs.existsSync(PRESETS_CUSTOM_DIR)) fs.mkdirSync(PRESETS_CUSTOM_DIR, { recursive: true });
+
+            const destPath = generatePresetFilePath(presetData.name);
+            const toWrite = {
+                name: presetData.name,
+                category: presetData.category === "color" ? "color" : "bw",
+                pictureControl: presetData.pictureControl || {},
+                monochrome: presetData.monochrome || {},
+                film: presetData.film || {}
+            };
+            fs.writeFileSync(destPath, JSON.stringify(toWrite, null, 2), "utf-8");
+
+            return { success: true, path: destPath };
+        } catch (err) {
+            console.error("❌ Erreur sauvegarde préréglage :", err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle("load-preset", async (event, presetPath) => {
+        try {
+            return JSON.parse(fs.readFileSync(presetPath, "utf-8"));
+        } catch (err) {
+            console.error("❌ Erreur lecture préréglage :", err);
+            return null;
+        }
+    });
+
+    ipcMain.handle("delete-preset", async (event, presetPath) => {
+        if (!presetPath) return { success: false };
+
+        // 🔹 Suppression autorisée UNIQUEMENT dans le dossier custom, jamais dans
+        // assets/presets/ (préréglages intégrés) — vérifié via un chemin relatif
+        // résolu, pas une simple comparaison de préfixe de chaîne (qui accepterait
+        // à tort un dossier voisin du type "presets-custom-evil").
+        const resolved = path.resolve(presetPath);
+        const rel = path.relative(path.resolve(PRESETS_CUSTOM_DIR), resolved);
+        const isInsideCustomDir = rel === "" ? false : !rel.startsWith("..") && !path.isAbsolute(rel);
+        if (!isInsideCustomDir) {
+            console.warn("⚠️ Suppression de préréglage refusée (hors du dossier personnalisé) :", presetPath);
+            return { success: false };
+        }
+
+        try {
+            if (!fs.existsSync(resolved)) return { success: false };
+            fs.unlinkSync(resolved);
+            return { success: true };
+        } catch (err) {
+            console.error("❌ Erreur suppression préréglage :", err);
+            return { success: false, error: err.message };
+        }
     });
 
     // ============================================================

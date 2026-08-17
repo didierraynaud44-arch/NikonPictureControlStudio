@@ -40,6 +40,18 @@ class DisplayCanvas {
         this._refWidth = null;
         this._refHeight = null;
 
+        // 🔹 Résolution NATIVE réelle de la photo (capteur/fichier), INDÉPENDANTE
+        // du buffer actuellement chargé — renseignée dès que connue (EXIF, voir
+        // setTrueImageResolution()/ImageProcessor.load()), jamais dérivée d'un
+        // buffer décodé. this.scale/_refWidth ci-dessus servent au RENDU (position/
+        // échelle réelles sur le canevas, inchangé) ; trueImageWidth/Height servent
+        // UNIQUEMENT au POURCENTAGE AFFICHÉ (voir _getDisplayPercent()) — sans ça,
+        // le pourcentage affiché à l'utilisateur reflète la taille de l'aperçu
+        // réduit (ex: 1600px) au lieu de la vraie résolution du capteur (ex:
+        // 6032px), donnant des valeurs incohérentes façon "124%" au lieu de "~26%".
+        this.trueImageWidth = null;
+        this.trueImageHeight = null;
+
         this.transform = { rotation: 0, flipH: false, flipV: false };
 
         this.isDragging = false;
@@ -131,7 +143,11 @@ class DisplayCanvas {
             this.zoomSlider.oninput = (e) => {
                 const percent = parseFloat(e.target.value);
                 if (!isNaN(percent)) {
-                    this.setZoomScale(percent / 100);
+                    // 🔹 Le curseur affiche/saisit un pourcentage RÉEL (voir
+                    // _getDisplayPercent()) — passe par l'inverse pour obtenir le
+                    // this.scale correspondant, sinon le curseur "rebondit" au
+                    // glissement (voir _displayPercentToScale()).
+                    this.setZoomScale(this._displayPercentToScale(percent));
                 }
             };
         }
@@ -174,7 +190,20 @@ class DisplayCanvas {
     setZoomScale(targetScale, focalX = null, focalY = null) {
         if (!this.offscreenCanvas.width || !this.canvas.width) return;
 
-        const safeScale = Math.min(Math.max(this.minScale, targetScale), this.maxScale);
+        // 🔹 minScale/maxScale (0.05-5, soit 5%-500%) bornent le POURCENTAGE RÉEL
+        // affiché, PAS this.scale brut directement — sinon, pour une photo dont
+        // _refWidth (aperçu réduit) est beaucoup plus petit que trueImageWidth
+        // (résolution native, ex: ratio ~1/9.5 pour un aperçu 424px d'une photo
+        // 4032px), maxScale=5 plafonnerait le pourcentage réel atteignable bien
+        // en dessous de 500% (ex: ~53%), empêchant même d'atteindre le seuil
+        // pleine résolution de 150% en tournant la molette/glissant le curseur.
+        // Repli sur l'ancien comportement (borne directe sur this.scale) tant que
+        // la résolution réelle n'est pas connue, via _getDisplayPercent()/
+        // _displayPercentToScale() (voir plus bas, identité quand trueImageWidth
+        // est absent).
+        const targetPercent = this._getDisplayPercent(targetScale);
+        const safePercent = Math.min(Math.max(this.minScale * 100, targetPercent), this.maxScale * 100);
+        const safeScale = this._displayPercentToScale(safePercent);
 
         if (focalX !== null && focalY !== null) {
             const w = this.canvas.width;
@@ -207,12 +236,34 @@ class DisplayCanvas {
 
     /**
      * 🔹 Déclenche this.onRequestFullRes() une seule fois par photo lorsque le
-     * zoom dépasse ZOOM_FULLRES_THRESHOLD (flag this._fullResRequested, remis à
-     * zéro uniquement pour une NOUVELLE photo, voir draw()) — pas de rechargement
-     * en boucle pendant qu'on tourne la molette au-dessus du seuil.
+     * zoom dépasse UN DES DEUX seuils suivants (flag this._fullResRequested,
+     * remis à zéro uniquement pour une NOUVELLE photo, voir draw()) — pas de
+     * rechargement en boucle pendant qu'on tourne la molette au-dessus du seuil :
+     *
+     * 1. Pourcentage RÉEL (_getDisplayPercent(), relatif à la vraie résolution
+     *    native) >= 150% — garantit qu'on bascule au plus tard à ce niveau de
+     *    zoom "objectif", cohérent avec le pourcentage affiché à l'utilisateur.
+     * 2. this.scale BRUT (relatif à _refWidth, le buffer aperçu réduit CHARGÉ
+     *    EN PREMIER pour cette photo — voir le constructeur) >= 1.5 — évite
+     *    d'étirer visiblement l'aperçu réduit bien au-delà de sa propre
+     *    résolution native avant de basculer, même quand le ratio aperçu/photo
+     *    réelle est grand (ex: aperçu 640px pour une photo 6032px, ratio ~9,4×)
+     *    et que le seuil 1 seul ne serait franchi qu'à un étirement ~16× de
+     *    l'aperçu — flou visible pendant tout ce trajet de zoom (constaté en
+     *    conditions réelles, voir logs de diagnostic).
+     *
+     * Le premier des deux seuils atteint déclenche la bascule — chacun protège
+     * un aspect différent (fidélité au pourcentage annoncé vs netteté visuelle
+     * pendant le zoom), donc on ne remplace pas l'un par l'autre, on prend le
+     * plus tôt des deux.
      */
     _maybeRequestFullRes() {
-        if (this.scale <= this.ZOOM_FULLRES_THRESHOLD) return;
+        const displayPercent = this._getDisplayPercent();
+        const realThresholdPercent = this.ZOOM_FULLRES_THRESHOLD * 100;
+        const crossedReal = displayPercent > realThresholdPercent;
+        const crossedBuffer = this.scale > this.ZOOM_FULLRES_THRESHOLD;
+
+        if (!crossedReal && !crossedBuffer) return;
         if (this._fullResRequested) return;
         if (typeof this.onRequestFullRes !== "function") return;
 
@@ -258,9 +309,57 @@ class DisplayCanvas {
     }
 
     updateZoomUI() {
-        const percent = Math.round((this.scale || 1) * 100);
+        const percent = Math.round(this._getDisplayPercent());
         if (this.zoomSlider) this.zoomSlider.value = percent;
         if (this.zoomText) this.zoomText.textContent = `${percent}%`;
+    }
+
+    /**
+     * 🔹 Résolution native réelle de la photo (capteur/fichier), connue via EXIF
+     * — voir ImageProcessor.load(). Appelable AVANT ou APRÈS le premier draw()
+     * (rafraîchit l'affichage immédiatement si déjà dessiné) : dans le flux normal
+     * elle est connue avant (EXIF lu avant load()), donc aucun "flash" du mauvais
+     * pourcentage au premier affichage. TOUJOURS réassigné, même à null/undefined
+     * (EXIF absent pour CETTE photo) — sans ça, la résolution réelle de la photo
+     * PRÉCÉDENTE resterait appliquée par erreur à la nouvelle (repli silencieux
+     * sur l'ancien comportement dans ce cas, voir _getDisplayPercent()).
+     */
+    setTrueImageResolution(width, height) {
+        this.trueImageWidth = width || null;
+        this.trueImageHeight = height || null;
+        this.updateZoomUI();
+    }
+
+    /**
+     * 🔹 Convertit this.scale (pourcentage STABLE relatif à _refWidth — le buffer
+     * chargé EN PREMIER pour cette photo, gelé pour toute sa durée de vie, voir le
+     * commentaire du constructeur) en pourcentage RÉEL par rapport à la vraie
+     * résolution native. Utilise _refWidth, PAS offscreenCanvas.width (le buffer
+     * COURANT, qui lui change lors d'un swap aperçu -> pleine résolution) : c'est
+     * ce qui garantit qu'aucun saut de valeur affichée ne se produit à ce moment
+     * précis, puisque this.scale et _refWidth restent inchangés par ce swap (seul
+     * offscreenCanvas.width change — voir _getRenderScale() qui absorbe déjà ce
+     * changement côté rendu, indépendamment de ce calcul-ci côté affichage).
+     * Repli sur l'ancien comportement (pourcentage relatif à _refWidth directement)
+     * si la résolution réelle n'est pas encore connue (EXIF absent/en échec).
+     */
+    _getDisplayPercent(scaleOverride = null) {
+        const scale = scaleOverride !== null ? scaleOverride : (this.scale || 1);
+        if (!this.trueImageWidth || !this._refWidth) return scale * 100;
+        return scale * (this._refWidth / this.trueImageWidth) * 100;
+    }
+
+    /**
+     * 🔹 Inverse de _getDisplayPercent() : convertit un pourcentage RÉEL saisi par
+     * l'utilisateur (curseur de zoom) en this.scale (relatif à _refWidth). Sans
+     * cet inverse, glisser le curseur à "50" appellerait setZoomScale(0.5) —
+     * interprété comme 50% de _refWidth au lieu de 50% de la résolution réelle —
+     * et updateZoomUI() re-synchroniserait aussitôt le curseur sur une tout autre
+     * valeur affichée, donnant un curseur qui "rebondit" au glissement.
+     */
+    _displayPercentToScale(percent) {
+        if (!this.trueImageWidth || !this._refWidth) return percent / 100;
+        return (percent / 100) * (this.trueImageWidth / this._refWidth);
     }
 
     initEvents() {

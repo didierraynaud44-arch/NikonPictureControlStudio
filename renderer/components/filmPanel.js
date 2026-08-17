@@ -70,6 +70,49 @@
         return window.createSlider ? window.createSlider(label, field, value, min, max, step) : "";
     }
 
+    // Catégorie ("bw"/"color") d'un chemin de Hald-CLUT situé dans
+    // assets/hald-clut/bw/ ou assets/hald-clut/color/ (comparaison via
+    // normalizePath : insensible à la casse et aux séparateurs \ /). null si
+    // le fichier est ailleurs sur le disque (LUT personnel) — dans ce cas
+    // aucune catégorie n'est connue.
+    function _haldClutCategoryFromPath(filePath) {
+        const normalized = normalizePath(filePath);
+        if (normalized.includes("/hald-clut/bw/")) return "bw";
+        if (normalized.includes("/hald-clut/color/")) return "color";
+        return null;
+    }
+
+    // Synchronise l'état du module Monochrome sur la catégorie d'un Hald-CLUT
+    // qui vient d'être chargé — un geste PONCTUEL déclenché uniquement au
+    // chargement d'un nouveau LUT reconnu (bw/color), jamais un lien permanent :
+    // un changement manuel ultérieur du module Monochrome (même LUT toujours
+    // chargé) n'est jamais écrasé par un rendu suivant. category=null (LUT hors
+    // de assets/hald-clut/, ou déjà dans l'état voulu) : ne fait rien.
+    function _syncMonochromeWithHaldCategory(category) {
+        if (!category || typeof window.MonochromeManager === "undefined") return;
+
+        const s = window.MonochromeManager.getSettings();
+        const shouldEnable = category === "bw";
+        if (!!s.monoMixerEnabled === shouldEnable) return;
+
+        window.MonochromeManager.beginAction();
+        window.MonochromeManager.updateSettings({ monoMixerEnabled: shouldEnable });
+
+        // Le module désactivé masque la section Gomme locale : coupe aussi le
+        // pinceau s'il était actif, comme le fait la case à cocher "Activer le
+        // module Monochrome" dans monochromePanel.js.
+        if (!shouldEnable && window.monochromeMaskController) {
+            window.monochromeMaskController.cancelMode();
+        }
+
+        // loadHaldClutFile() a déjà rendu l'image avec l'ancien état Monochrome
+        // (avant ce changement) : re-rendu pour que le résultat reflète bien le
+        // nouvel état monoMixerEnabled.
+        if (window.imageProcessor) window.imageProcessor.render();
+
+        if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
+    }
+
     function baseName(filePath) {
         if (!filePath) return "";
         return filePath.toString().replace(/\\/g, "/").split("/").pop();
@@ -164,6 +207,7 @@
                 if (label) label.textContent = value;
 
                 if (window.imageProcessor) {
+                    window.imageProcessor.notifySliderInput();
                     window.imageProcessor.updateFilmSetting(slider.dataset.field, value);
 
                     // Rendu du pipeline débouncé (lourd/synchrone) pour ne pas
@@ -175,6 +219,14 @@
                 if (saveTimer) clearTimeout(saveTimer);
                 saveTimer = setTimeout(_saveFilmState, 200);
             });
+
+            // 🔹 Glissement en cours : previewBuffer même zoomé au-delà du seuil
+            // pleine résolution — un pipeline complet (grain/halation/Hald-CLUT)
+            // peut atteindre ~17s sur 24 Mpx (mesuré). Fin du geste : voir le
+            // mouseup GLOBAL (app.js) -> ImageProcessor.endSliderDrag().
+            slider.addEventListener("mousedown", () => {
+                if (window.imageProcessor) window.imageProcessor.startSliderDrag();
+            });
         });
 
         const presetSelect = container.querySelector('[data-film-field="haldPreset"]');
@@ -185,9 +237,18 @@
                 // chargé — utilise le bouton "Retirer" pour ça explicitement).
                 if (!filePath || !window.imageProcessor) return;
 
+                // La catégorie du préréglage est déjà connue via la liste dont il
+                // provient (presets.bw / presets.color — même info que celle utilisée
+                // pour regrouper les <optgroup> dans buildPresetOptions()).
+                const presets = presetsCache || { bw: [], color: [] };
+                const category = presets.bw.some(p => p.path === filePath) ? "bw"
+                    : presets.color.some(p => p.path === filePath) ? "color"
+                    : null;
+
                 presetSelect.disabled = true;
                 try {
                     await window.imageProcessor.loadHaldClutFile(filePath);
+                    _syncMonochromeWithHaldCategory(category);
                     _saveFilmState();
                 } catch (err) {
                     console.error("❌ Erreur chargement préréglage Hald-CLUT :", err);
@@ -205,9 +266,12 @@
                 const filePath = await window.electronAPI.browseHaldClut();
                 if (!filePath) return;
 
+                const category = _haldClutCategoryFromPath(filePath);
+
                 loadBtn.disabled = true;
                 try {
                     await window.imageProcessor.loadHaldClutFile(filePath);
+                    _syncMonochromeWithHaldCategory(category);
                     _saveFilmState();
                 } catch (err) {
                     console.error("❌ Erreur chargement Hald-CLUT :", err);

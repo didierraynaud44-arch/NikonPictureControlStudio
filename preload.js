@@ -230,6 +230,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.invoke("list-hald-clut-presets"),
 
     // ============================================================
+    // PRÉRÉGLAGES COMPLETS (Picture Control + Monochrome + Simulation
+    // Pellicule, voir components/presetsPanel.js)
+    // ============================================================
+
+    listPresets: () =>
+        ipcRenderer.invoke("list-presets"),
+
+    savePreset: (presetData) =>
+        ipcRenderer.invoke("save-preset", presetData),
+
+    loadPreset: (presetPath) =>
+        ipcRenderer.invoke("load-preset", presetPath),
+
+    deletePreset: (presetPath) =>
+        ipcRenderer.invoke("delete-preset", presetPath),
+
+    // ============================================================
     // CORRECTION D'OBJECTIF (base Lensfun + profils importés)
     // ============================================================
 

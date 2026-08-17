@@ -2,6 +2,26 @@
     Nikon Picture Control Studio - Image Processor (Fix Overlay)
 =========================================================*/
 
+// 🔹 Source unique des valeurs par défaut Simulation Pellicule — utilisée par
+// le constructeur, setFilmSettings() (rechargement d'une photo) ET
+// applyPreset() (système de préréglages, voir presetsPanel.js), pour ne
+// jamais avoir trois copies de ce même objet à maintenir en parallèle.
+// 🔹 Seuil de détection "vrai glissement" (voir ImageProcessor.notifySliderInput()) :
+// deux événements "input" séparés de moins de ce délai trahissent un glissement
+// continu de souris. Un simple clic ne produit qu'un seul "input" et ne peut
+// donc jamais atteindre ce seuil.
+const SLIDER_DRAG_DETECT_MS = 60;
+
+const DEFAULT_FILM_SETTINGS = Object.freeze({
+    grainIntensity: 0,
+    grainSize: 1,
+    halationIntensity: 0,
+    halationThreshold: 200,
+    halationRadius: 8,
+    haldClutPath: null,
+    haldClutIntensity: 100
+});
+
 class ImageProcessor {
 
     constructor(canvasId) {
@@ -34,6 +54,24 @@ class ImageProcessor {
         this.currentFilePath = null;
         this.useFullResForDisplay = false;
 
+        // 🔹 Glissement de curseur en cours (Picture Control/Monochrome/Simulation
+        // Pellicule, voir startSliderDrag()/endSliderDrag() ci-dessous) : force
+        // temporairement render() à utiliser this.previewBuffer même si zoomé
+        // au-delà du seuil pleine résolution — un pipeline complet (Monochrome +
+        // Hald-CLUT + grain/halation) sur un buffer 24 Mpx peut prendre jusqu'à
+        // ~17s (mesuré), gelant l'interface à chaque tick de glissement. Ne
+        // modifie JAMAIS useFullResForDisplay lui-même : simple court-circuit de
+        // la source utilisée pour CE rendu précis, voir render().
+        //
+        // isDraggingSlider ne passe PAS à true dès le mousedown : un simple clic
+        // ponctuel (un seul "input", sans glissement) NE DOIT PAS basculer vers
+        // l'aperçu réduit — ça produirait un flash dégradation-puis-netteté
+        // visible à chaque clic. Seul un 2e "input" rapproché (voir
+        // notifySliderInput()/SLIDER_DRAG_DETECT_MS) prouve un vrai glissement
+        // et déclenche le court-circuit.
+        this.isDraggingSlider = false;
+        this._lastSliderInputTime = null;
+
         this.display = new DisplayCanvas(canvasId);
         this.display.onRequestFullRes = async () => {
             if (!this.currentFilePath) return;
@@ -43,6 +81,15 @@ class ImageProcessor {
 
         this.overlayCanvas = document.getElementById("maskOverlayCanvas");
         this.overlayCtx = this.overlayCanvas ? this.overlayCanvas.getContext("2d") : null;
+
+        // 🔹 Aperçu d'écrêtage façon Lightroom (Alt+glisser sur Point noir/Point
+        // blanc, voir pictureControlPanel.js) : "blackPoint"/"whitePoint" pendant
+        // qu'un aperçu est affiché sur overlayCanvas (voir showClippingPreview),
+        // sinon null. Sert à savoir, dans hideClippingPreview(), s'il y a
+        // effectivement quelque chose à effacer + un render() de rattrapage à
+        // déclencher (sinon no-op silencieux, appelable sans condition).
+        this._clippingPreviewField = null;
+        this._clippingPreviewCanvas = null; // canvas hors-écran réutilisé (bitmap natif avant mise à l'échelle)
 
         this.transform = { rotation: 0, flipH: false, flipV: false };
 
@@ -123,15 +170,7 @@ class ImageProcessor {
         // Hald-CLUT chargé (haldClutState) ne sont eux jamais persistés : seul le
         // chemin (filmSettings.haldClutPath) l'est, et le LUT est rechargé depuis
         // le disque via setFilmSettings() à la réouverture de la photo.
-        this.filmSettings = {
-            grainIntensity: 0,
-            grainSize: 1,
-            halationIntensity: 0,
-            halationThreshold: 200,
-            halationRadius: 8,
-            haldClutPath: null,
-            haldClutIntensity: 100
-        };
+        this.filmSettings = { ...DEFAULT_FILM_SETTINGS };
         this.haldClutState = null; // { path, imageData, side }
 
         // 🔹 Correction d'objectif (distorsion/TCA/vignettage) : TOUJOURS en
@@ -336,16 +375,7 @@ class ImageProcessor {
      * du LUT actuellement en mémoire (fire-and-forget : re-rendu une fois chargé).
      */
     setFilmSettings(settings) {
-        this.filmSettings = {
-            grainIntensity: 0,
-            grainSize: 1,
-            halationIntensity: 0,
-            halationThreshold: 200,
-            halationRadius: 8,
-            haldClutPath: null,
-            haldClutIntensity: 100,
-            ...(settings || {})
-        };
+        this.filmSettings = { ...DEFAULT_FILM_SETTINGS, ...(settings || {}) };
 
         const newPath = this.filmSettings.haldClutPath || null;
         const currentPath = this.haldClutState ? this.haldClutState.path : null;
@@ -378,8 +408,13 @@ class ImageProcessor {
      * via un canvas temporaire (même approche que le reste de l'app pour charger
      * une image locale). Seul le CHEMIN est conservé dans filmSettings pour la
      * persistance par photo — les pixels restent en mémoire (this.haldClutState).
+     * @param {string} filePath
+     * @param {{skipRender?: boolean}} [options] - skipRender: true pour un appelant
+     *        qui va lui-même déclencher UN SEUL render() après plusieurs changements
+     *        d'état (ex. applyPreset() ci-dessous), pour éviter un rendu intermédiaire
+     *        avec un état encore incomplet.
      */
-    async loadHaldClutFile(filePath) {
+    async loadHaldClutFile(filePath, { skipRender = false } = {}) {
         if (!filePath) return null;
 
         const imageData = await new Promise((resolve, reject) => {
@@ -407,8 +442,61 @@ class ImageProcessor {
         this.filmSettings.haldClutPath = filePath;
         if (this.filmSettings.haldClutIntensity === undefined) this.filmSettings.haldClutIntensity = 100;
 
-        if (this.originalRawBuffer) this.render();
+        if (!skipRender && this.originalRawBuffer) this.render();
         return this.haldClutState;
+    }
+
+    /**
+     * Applique un préréglage complet (système "Presets", voir presetsPanel.js) :
+     * Picture Control + module Monochrome + Simulation Pellicule en une seule
+     * "recette", sur la photo actuellement affichée dans le Studio. Studio
+     * uniquement — le Gestionnaire de Profils utilise sa propre instance
+     * ImageProcessor (profileImageProcessor), jamais touchée ici puisque
+     * cette méthode n'agit que sur l'instance sur laquelle elle est appelée.
+     *
+     * @param {object} presetData - Forme exacte produite par "Enregistrer le
+     *   préréglage actuel..." (voir presetsPanel.js) : { name, category,
+     *   pictureControl, monochrome, film }.
+     */
+    async applyPreset(presetData) {
+        if (!presetData) return;
+
+        if (presetData.pictureControl) {
+            this.pictureControl = this.cleanPictureControl(presetData.pictureControl);
+        }
+
+        if (typeof window !== "undefined" && window.MonochromeManager && presetData.monochrome) {
+            // 🔹 Le préréglage ne contient JAMAIS monoEraseMasks (Gomme locale —
+            // exclue du format, voir presetsPanel.js) : il faut donc explicitement
+            // reporter les masques de LA PHOTO ACTUELLE dans l'objet fusionné avant
+            // loadSettings(). Sans ça, la clé serait absente du préréglage ET
+            // absente du merge -> loadSettings() retomberait sur
+            // DEFAULT_SETTINGS.monoEraseMasks (vide), effaçant silencieusement les
+            // masques peints existants sur cette photo précise.
+            const currentMasks = window.MonochromeManager.getSettings().monoEraseMasks;
+            window.MonochromeManager.loadSettings({
+                ...presetData.monochrome,
+                monoEraseMasks: currentMasks
+            });
+        }
+
+        if (presetData.film) {
+            this.filmSettings = { ...DEFAULT_FILM_SETTINGS, ...presetData.film };
+            const haldPath = this.filmSettings.haldClutPath || null;
+            if (haldPath) {
+                try {
+                    await this.loadHaldClutFile(haldPath, { skipRender: true });
+                } catch (err) {
+                    console.warn("⚠️ Impossible de charger le Hald-CLUT du préréglage :", haldPath, err);
+                    this.haldClutState = null;
+                    this.filmSettings.haldClutPath = null;
+                }
+            } else {
+                this.haldClutState = null;
+            }
+        }
+
+        if (this.originalRawBuffer) this.render();
     }
 
     /**
@@ -506,6 +594,16 @@ class ImageProcessor {
                     this.overlayCanvas.height = previewCanvas.height;
                 }
 
+                // 🔹 Résolution native réelle (EXIF, voir main.js "read-file-direct" /
+                // app.js) — AVANT render() pour que le premier draw() de cette photo
+                // (donc le premier calcul du pourcentage de zoom affiché) l'utilise
+                // déjà, sans "flash" de la mauvaise valeur. Toujours réassigné (même
+                // si absent pour CETTE photo) pour ne pas laisser traîner la valeur
+                // de la photo PRÉCÉDENTE — voir DisplayCanvas.setTrueImageResolution().
+                if (this.display && typeof this.display.setTrueImageResolution === "function") {
+                    this.display.setTrueImageResolution(metadata.trueWidth, metadata.trueHeight);
+                }
+
                 this.render();
                 resolve(this.originalRawBuffer);
             };
@@ -553,6 +651,47 @@ class ImageProcessor {
 
     setPictureControl(pcData) {
         this.pictureControl = this.cleanPictureControl(pcData);
+        if (this.originalRawBuffer) this.render();
+    }
+
+    /**
+     * 🔹 Début d'un GESTE de curseur (mousedown, voir pictureControlPanel.js/
+     * monochromePanel.js/filmPanel.js) : arme seulement la détection de
+     * glissement (voir notifySliderInput()) — ne bascule PAS isDraggingSlider
+     * ici. Un simple clic (mousedown + un seul "input" + mouseup) doit rester
+     * en pleine résolution, sans flash ; seul un vrai glissement (2e "input"
+     * rapproché) le fera basculer.
+     */
+    startSliderDrag() {
+        this._lastSliderInputTime = null;
+    }
+
+    /**
+     * 🔹 À appeler depuis CHAQUE écouteur "input" d'un curseur concerné (voir
+     * startSliderDrag() ci-dessus). Ne bascule isDraggingSlider que si CE
+     * "input" arrive moins de SLIDER_DRAG_DETECT_MS après le précédent de ce
+     * même geste — signe d'un glissement continu, jamais atteignable par un
+     * simple clic ponctuel (un seul "input").
+     */
+    notifySliderInput() {
+        const now = performance.now();
+        if (this._lastSliderInputTime !== null && (now - this._lastSliderInputTime) < SLIDER_DRAG_DETECT_MS) {
+            this.isDraggingSlider = true;
+        }
+        this._lastSliderInputTime = now;
+    }
+
+    /**
+     * 🔹 Fin d'un glissement de curseur (mouseup GLOBAL sur window — capte un
+     * relâchement même si la souris a glissé hors du curseur, voir app.js) :
+     * un seul rendu final en pleine résolution affiche le résultat net.
+     * Idempotent/sans condition : no-op silencieux si aucun glissement n'était
+     * en cours (appelable sans savoir si un curseur était réellement tenu).
+     */
+    endSliderDrag() {
+        this._lastSliderInputTime = null;
+        if (!this.isDraggingSlider) return;
+        this.isDraggingSlider = false;
         if (this.originalRawBuffer) this.render();
     }
 
@@ -720,9 +859,24 @@ class ImageProcessor {
         // this.originalRawBuffer (pleine résolution) plutôt que this.previewBuffer.
         // La vérification fullResLoadedPath === currentFilePath évite d'utiliser
         // par erreur un buffer pleine résolution d'une AUTRE photo déjà en cache.
-        const usingFullRes = this.useFullResForDisplay
+        // !!this.currentFilePath est INDISPENSABLE ici, pas redondant : au tout
+        // premier render() d'une photo (appelé depuis load(), AVANT que app.js
+        // n'affecte currentFilePath après coup), currentFilePath ET
+        // fullResLoadedPath valent tous deux null — sans ce garde, "null === null"
+        // rendrait fullResAvailable/preserveView incorrectement vrai pour CE
+        // premier rendu, ce qui fait sauter le "resolution swap" (voir
+        // DisplayCanvas.draw()/isResolutionSwap) et empêche _refWidth de
+        // s'initialiser pour la nouvelle photo (bug constaté : zoom "Ajuster"
+        // figé à 100%/scale par défaut, jamais recalculé).
+        // fullResAvailable (indépendant de isDraggingSlider) sert aussi à
+        // display.draw({preserveView}) plus bas : la pleine résolution reste
+        // "disponible pour cette photo" même le temps d'un rendu où on choisit
+        // de ne pas s'en servir (glissement de curseur en cours), donc le
+        // cadrage/zoom actuel ne doit pas être réinitialisé pour autant.
+        const fullResAvailable = !!this.currentFilePath
             && this.fullResLoadedPath === this.currentFilePath
             && !!this.originalRawBuffer;
+        const usingFullRes = !this.isDraggingSlider && this.useFullResForDisplay && fullResAvailable;
 
         const rawSourceBuffer = usingFullRes ? this.originalRawBuffer : (this.previewBuffer || this.originalRawBuffer);
         if (!rawSourceBuffer || !this.display) return;
@@ -788,7 +942,13 @@ class ImageProcessor {
             this.display.setTransform(displayTransform);
         }
 
-        this.display.draw(currentImageData, { preserveView: usingFullRes });
+        // 🔹 preserveView basé sur fullResAvailable (PAS usingFullRes) : pendant un
+        // glissement de curseur, ce rendu utilise previewBuffer (usingFullRes
+        // false) alors que le zoom pleine résolution reste actif pour cette photo
+        // — sans ça, DisplayCanvas.draw() traiterait ce changement de dimensions
+        // de buffer comme une "nouvelle photo" et réinitialiserait le zoom/cadrage
+        // en cours (voir DisplayCanvas.draw()/resetZoom()).
+        this.display.draw(currentImageData, { preserveView: fullResAvailable });
         if (this.enableMasks) this.renderMaskOverlay();
 
         // 🔹 NOUVEAU : Histogramme mis à jour à chaque rendu (donc en temps réel
@@ -1386,6 +1546,149 @@ class ImageProcessor {
         }
 
         ctx.restore();
+    }
+
+    /**
+     * Aperçu d'écrêtage façon Lightroom (Alt+glisser sur Point noir/Point
+     * blanc, voir pictureControlPanel.js) : remplace TEMPORAIREMENT l'affichage
+     * normal par un aplat noir (Point noir) ou blanc (Point blanc) avec les
+     * pixels qui écrêtent mis en évidence, dessiné sur overlayCanvas (même
+     * mécanisme déjà utilisé pour les masques/le tampon — voir
+     * renderMaskOverlay() ci-dessus) : comme cet overlay est opaque et
+     * z-index:100 au-dessus de previewCanvas, il masque entièrement l'image
+     * normale sans avoir besoin d'y toucher.
+     *
+     * Volontairement PLUS LÉGER qu'un render() complet pendant le glissement :
+     * exécute le pipeline seulement JUSQU'AU filtre BlackWhitePointFilter (pas
+     * les filtres suivants — Tone Curve, Contraste, Monochrome, Simulation
+     * Pellicule, etc.), via RenderPipeline.processRange() (déjà utilisé pour la
+     * Gomme locale du module Monochrome). "value" est la valeur EN DIRECT du
+     * curseur, pas encore committée dans this.pictureControl (ça n'arrive
+     * qu'au prochain render() normal, déclenché par hideClippingPreview()).
+     *
+     * @param {"blackPoint"|"whitePoint"} field
+     * @param {number} value
+     */
+    showClippingPreview(field, value) {
+        if (field !== "blackPoint" && field !== "whitePoint") return;
+        if (!this.overlayCanvas || !this.display) return;
+
+        // 🔹 Même court-circuit que render() pendant un glissement de curseur
+        // (voir this.isDraggingSlider au constructeur) : l'aperçu d'écrêtage lui-
+        // même reste allégé (processRange jusqu'à BlackWhitePointFilter seulement),
+        // mais sur un buffer 24 Mpx ce reste de travail peut encore peser pendant
+        // le glissement — utilise previewBuffer, comme render(), le temps du geste.
+        const usingFullRes = !this.isDraggingSlider
+            && this.useFullResForDisplay
+            && !!this.currentFilePath
+            && this.fullResLoadedPath === this.currentFilePath
+            && !!this.originalRawBuffer;
+        const rawSourceBuffer = usingFullRes ? this.originalRawBuffer : (this.previewBuffer || this.originalRawBuffer);
+        if (!rawSourceBuffer) return;
+
+        const sourceBuffer = this._applyRetouches(rawSourceBuffer, usingFullRes ? "fullRes" : "preview");
+        const workingBuffer = this._resolveNeuralDenoiseBuffer(sourceBuffer);
+
+        const preImageData = new ImageData(
+            new Uint8ClampedArray(workingBuffer.data),
+            workingBuffer.width,
+            workingBuffer.height
+        );
+
+        let preBwpData = preImageData;
+        if (this.pipeline) {
+            const bwpIndex = this.pipeline.filters.findIndex(f => f instanceof BlackWhitePointFilter);
+            if (bwpIndex > 0) {
+                const settings = this._buildRenderSettings(preImageData.width, preImageData.height);
+                settings[field] = value;
+                try {
+                    preBwpData = this.pipeline.processRange(preImageData, settings, 0, bwpIndex);
+                } catch (err) {
+                    console.error("❌ Erreur aperçu d'écrêtage :", err);
+                    return;
+                }
+            }
+        }
+
+        this._drawClippingOverlay(preBwpData, field, value);
+        this._clippingPreviewField = field;
+    }
+
+    /**
+     * Efface l'aperçu d'écrêtage et restaure l'affichage normal — appelable
+     * SANS CONDITION (mouseup du curseur, relâchement de Alt, perte de focus
+     * de la fenêtre, voir app.js) : no-op silencieux si aucun aperçu n'est
+     * actuellement affiché. Le render() normal ici commet la valeur finale du
+     * curseur (déjà dans this.pictureControl via le trigger() debouncé
+     * habituel de pictureControlPanel.js) et redessine renderMaskOverlay() par
+     * dessus, effaçant naturellement le bitmap de l'aperçu.
+     */
+    hideClippingPreview() {
+        if (!this._clippingPreviewField) return;
+        this._clippingPreviewField = null;
+        this.render();
+    }
+
+    /**
+     * Construit le bitmap d'écrêtage (aplat noir/blanc + pixels en alerte) à la
+     * résolution NATIVE de imageData (pas celle, potentiellement différente,
+     * de l'affichage écran), dessiné dans un canvas hors-écran réutilisé, puis
+     * mis à l'échelle en une seule passe via drawImage — bien moins coûteux
+     * qu'un scan pixel par pixel à la résolution d'affichage. Même repère
+     * translate/scale (pan/zoom) que renderMaskOverlay() pour rester aligné.
+     * @private
+     */
+    _drawClippingOverlay(imageData, field) {
+        const canvas = this.overlayCanvas;
+        const ctx = this.overlayCtx || canvas.getContext("2d");
+        if (!ctx) return;
+
+        canvas.width = this.display.canvas.width;
+        canvas.height = this.display.canvas.height;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const w = imageData.width;
+        const h = imageData.height;
+        if (!w || !h) return;
+
+        const isBlackPoint = field === "blackPoint";
+        const src = imageData.data;
+
+        const bitmap = new ImageData(w, h);
+        const dst = bitmap.data;
+
+        // Fond noir uniforme (Point noir) ou blanc uniforme (Point blanc), avec
+        // en alerte (bleu vif) les pixels dont au moins un canal RVB écrête —
+        // à 0 pour le Point noir, à 255 pour le Point blanc.
+        for (let i = 0; i < src.length; i += 4) {
+            const clipped = isBlackPoint
+                ? (src[i] <= 0 || src[i + 1] <= 0 || src[i + 2] <= 0)
+                : (src[i] >= 255 || src[i + 1] >= 255 || src[i + 2] >= 255);
+
+            if (clipped) {
+                dst[i] = 40; dst[i + 1] = 140; dst[i + 2] = 255; dst[i + 3] = 255;
+            } else {
+                const bg = isBlackPoint ? 0 : 255;
+                dst[i] = bg; dst[i + 1] = bg; dst[i + 2] = bg; dst[i + 3] = 255;
+            }
+        }
+
+        if (!this._clippingPreviewCanvas) this._clippingPreviewCanvas = document.createElement("canvas");
+        const off = this._clippingPreviewCanvas;
+        off.width = w;
+        off.height = h;
+        off.getContext("2d").putImageData(bitmap, 0, 0);
+
+        // 🔹 Repère identique à renderMaskOverlay() (drawX/drawY/scale), pour que
+        // l'aperçu reste aligné avec la photo quel que soit le pan/zoom actuel.
+        const scale = this.display.scale || 1;
+        const panX = this.display.panX || 0;
+        const panY = this.display.panY || 0;
+        const drawX = (canvas.width - w * scale) / 2 + panX;
+        const drawY = (canvas.height - h * scale) / 2 + panY;
+
+        ctx.imageSmoothingEnabled = false; // lecture exacte des pixels écrêtés, pas de flou d'interpolation
+        ctx.drawImage(off, drawX, drawY, w * scale, h * scale);
     }
 
     /**

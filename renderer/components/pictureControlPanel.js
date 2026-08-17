@@ -7,6 +7,20 @@
 const originalPictureControlByContainer = {};
 const toneCurveWidgetsByContainer = {};
 
+// 🔹 Aperçu d'écrêtage Point noir/Point blanc (Alt+glisser, façon Lightroom) :
+// référence vers le gestionnaire "Alt relâché" du rendu LE PLUS RÉCENT du
+// panneau complet (compact:false — seul contexte où ces curseurs existent,
+// voir plus bas). Un SEUL listener "pixelraw:alt-released" (évènement générique
+// émis par app.js) est enregistré ICI, une fois pour toute la session, plutôt
+// que d'en ajouter un nouveau à chaque appel de renderPictureControlPanel
+// (fonction rappelée à chaque photo/à chaque debounce de curseur) — ça
+// éviterait sinon d'accumuler des listeners "window" au fil de la session.
+let _activeClippingPreviewExit = null;
+
+window.addEventListener("pixelraw:alt-released", () => {
+    if (_activeClippingPreviewExit) _activeClippingPreviewExit();
+});
+
 /* ---------------------------------------------------------
    Champs exclusifs au format NP3 (Flexible Color, EXPEED 7)
    Source : types officiels de nikon-flexible-color-picture-control
@@ -459,14 +473,120 @@ function renderPictureControlPanel(containerId, pc, options = {}) {
         if (typeof onChange === "function") onChange(state);
     }
 
+    const CLIPPING_PREVIEW_FIELDS = ["blackPoint", "whitePoint"];
+
+    // 🔹 TOUS les curseurs SAUF Point noir/Point blanc : comportement exact
+    // d'avant l'ajout de l'aperçu d'écrêtage (voir plus bas) — un seul
+    // renderTimer partagé entre eux (comme avant), aucune référence à
+    // clippingPreviewActive/showClippingPreview ni aucun test supplémentaire
+    // sur leur chemin "input". Isolé du timer/état de Point noir/Point blanc
+    // ci-dessous pour qu'un glissement Alt sur l'un ne puisse JAMAIS
+    // interférer avec le débounce d'un autre curseur.
     let renderTimer = null;
     container.querySelectorAll(".pc-slider").forEach(slider => {
+        if (CLIPPING_PREVIEW_FIELDS.includes(slider.dataset.field)) return;
+
         slider.addEventListener("input", () => {
             const value = Number(slider.value);
             const label = container.querySelector(`[data-value-for="${slider.dataset.field}"]`);
             if (label) label.textContent = value;
+            if (!compact && window.imageProcessor) window.imageProcessor.notifySliderInput();
             if (renderTimer) clearTimeout(renderTimer);
             renderTimer = setTimeout(trigger, 30);
+        });
+
+        // 🔹 Glissement en cours : bascule sur previewBuffer (voir
+        // ImageProcessor.startSliderDrag()/notifySliderInput()/render()) même
+        // zoomé au-delà du seuil pleine résolution — un pipeline complet peut
+        // atteindre ~17s sur 24 Mpx (mesuré), gelant l'interface à chaque tick
+        // sinon. Studio uniquement (compact = Gestionnaire de Profils, jamais
+        // zoomé en pleine résolution) —
+        // window.imageProcessor est donc le bon ciblage ici, jamais
+        // profileImageProcessor. Fin du geste : voir le mouseup GLOBAL (app.js).
+        if (!compact) {
+            slider.addEventListener("mousedown", () => {
+                if (window.imageProcessor) window.imageProcessor.startSliderDrag();
+            });
+        }
+    });
+
+    // 🔹 Point noir/Point blanc UNIQUEMENT : timer et état PROPRES, jamais
+    // partagés avec renderTimer ci-dessus — aperçu d'écrêtage façon Lightroom
+    // (Alt+glisser, voir showClippingPreview()/hideClippingPreview() dans
+    // ImageProcessor.js). window.isAltKeyPressed est tenu à jour globalement
+    // (voir app.js).
+    let clippingRenderTimer = null;
+    let clippingPreviewActive = false;
+
+    function exitClippingPreview() {
+        if (!clippingPreviewActive) return;
+        clippingPreviewActive = false;
+        if (window.imageProcessor && typeof window.imageProcessor.hideClippingPreview === "function") {
+            window.imageProcessor.hideClippingPreview();
+        }
+    }
+
+    // 🔹 Point noir/Point blanc n'existent que dans le panneau complet
+    // (compact:false, voir plus bas) : ne réassigne le gestionnaire "Alt
+    // relâché" GLOBAL (voir tête de fichier) QUE dans ce cas — sinon un rendu
+    // ultérieur du panneau compact (Gestionnaire de Profils, sans ces curseurs)
+    // écraserait la référence avec un trigger() qui n'a plus lieu d'être,
+    // cassant le commit du panneau Studio en cours d'édition.
+    if (!compact) {
+        _activeClippingPreviewExit = () => {
+            if (!clippingPreviewActive) return;
+            exitClippingPreview();
+            trigger();
+        };
+    }
+
+    CLIPPING_PREVIEW_FIELDS.forEach(field => {
+        const slider = container.querySelector(`[data-field="${field}"]`);
+        if (!slider) return; // absent en panneau compact (Gestionnaire de Profils)
+
+        slider.addEventListener("input", () => {
+            const value = Number(slider.value);
+            const label = container.querySelector(`[data-value-for="${field}"]`);
+            if (label) label.textContent = value;
+            if (window.imageProcessor) window.imageProcessor.notifySliderInput();
+
+            const showPreview = window.isAltKeyPressed
+                && window.imageProcessor
+                && typeof window.imageProcessor.showClippingPreview === "function";
+
+            if (clippingRenderTimer) clearTimeout(clippingRenderTimer);
+
+            if (showPreview) {
+                clippingPreviewActive = true;
+                // Remplace le rendu normal (débouncé, lourd) par l'aperçu
+                // d'écrêtage — bien plus léger, voir ImageProcessor.js. Même
+                // délai que le rendu normal pour rester fluide au glissement.
+                clippingRenderTimer = setTimeout(() => {
+                    window.imageProcessor.showClippingPreview(field, value);
+                }, 30);
+            } else {
+                // Alt relâché en cours de glissement : retour immédiat à
+                // l'affichage normal si un aperçu était actif.
+                exitClippingPreview();
+                clippingRenderTimer = setTimeout(trigger, 30);
+            }
+        });
+
+        // Glissement terminé pendant un aperçu d'écrêtage : retour immédiat à
+        // l'affichage normal, avec la valeur FINALE du curseur committée (aucun
+        // trigger() n'a tourné pendant l'aperçu, contrairement au cas normal).
+        slider.addEventListener("mouseup", () => {
+            if (!clippingPreviewActive) return;
+            exitClippingPreview();
+            if (clippingRenderTimer) clearTimeout(clippingRenderTimer);
+            trigger();
+        });
+
+        // 🔹 Glissement en cours (Alt tenu ou non) : previewBuffer, même principe
+        // que les autres curseurs ci-dessus — voir ImageProcessor.showClippingPreview()
+        // qui applique désormais le même court-circuit.
+        slider.addEventListener("mousedown", () => {
+            if (window.imageProcessor) window.imageProcessor.startSliderDrag();
         });
     });
 

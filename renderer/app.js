@@ -597,6 +597,56 @@ document.addEventListener("keydown", (e) => {
     }
 });
 
+// 🔹 État global de la touche Alt (gauche) : utilisé par pictureControlPanel.js
+// pour l'aperçu d'écrêtage façon Lightroom sur les curseurs Point noir/Point
+// blanc (Alt+glisser, voir ImageProcessor.showClippingPreview). Aucun autre
+// raccourci de l'appli n'utilise Alt (vérifié) — RetouchCanvasController.js lit
+// e.altKey directement sur son propre mousedown (Tampon), indépendant de ceci.
+//
+// Sur relâchement (keyup OU perte de focus), on se contente de mettre à jour
+// le flag et de notifier via un évènement générique — PAS d'appel direct à
+// imageProcessor.hideClippingPreview() ici : celui-ci se contente de redessiner
+// avec la valeur ENCORE COMMISE du curseur (celle d'avant le glissement), pas
+// la valeur affichée à l'écran au moment du relâchement (jamais committée
+// pendant l'aperçu — voir pictureControlPanel.js). Seul le panneau sait
+// comment committer correctement la valeur ACTUELLE de son curseur (trigger()),
+// donc c'est lui qui écoute cet évènement pour agir.
+window.isAltKeyPressed = false;
+
+window.addEventListener("keydown", (e) => {
+    if (e.key === "Alt") window.isAltKeyPressed = true;
+});
+
+window.addEventListener("keyup", (e) => {
+    if (e.key !== "Alt") return;
+    window.isAltKeyPressed = false;
+    window.dispatchEvent(new CustomEvent("pixelraw:alt-released"));
+});
+
+// 🔹 Filet de sécurité : si la fenêtre perd le focus (Alt+Tab, clic hors de
+// l'appli) pendant que Alt est maintenu, aucun keyup n'est jamais reçu — sans
+// ça, isAltKeyPressed resterait bloqué à true et l'aperçu d'écrêtage figé à
+// l'écran indéfiniment.
+window.addEventListener("blur", () => {
+    if (!window.isAltKeyPressed) return;
+    window.isAltKeyPressed = false;
+    window.dispatchEvent(new CustomEvent("pixelraw:alt-released"));
+});
+
+// 🔹 Fin d'un glissement de curseur (Picture Control/Monochrome/Simulation
+// Pellicule, voir ImageProcessor.startSliderDrag()/endSliderDrag()) : un SEUL
+// listener "mouseup" ici, sur window plutôt que sur chaque curseur pris
+// individuellement, pour capter le relâchement même si la souris a glissé hors
+// de l'élément pendant le geste — partagé par les 3 panneaux plutôt que d'en
+// enregistrer un par panneau (qui se re-rendent chacun plusieurs fois par
+// session, ce qui accumulerait des listeners window en double). endSliderDrag()
+// est un no-op silencieux si aucun glissement n'était en cours.
+window.addEventListener("mouseup", () => {
+    if (window.imageProcessor && typeof window.imageProcessor.endSliderDrag === "function") {
+        window.imageProcessor.endSliderDrag();
+    }
+});
+
 function ensureStudioNavigationArrows() {
     const container = document.getElementById("singleImageContainer");
     if (!container) return;
@@ -1061,6 +1111,11 @@ async function loadImageInStudio(filePath) {
             if (typeof window.renderMonochromePanel === "function") window.renderMonochromePanel();
         }
 
+        // 🔹 Préréglages : la liste elle-même ne dépend pas de la photo, mais le
+        // panneau se désactive (voir presetsPanel.js) tant qu'aucune photo n'est
+        // chargée — un nouveau rendu ici le réactive une fois cette photo prête.
+        if (typeof window.renderPresetsPanel === "function") window.renderPresetsPanel();
+
         // 🔹 Débruitage neuronal : booléen dédié, jamais le buffer (voir
         // ImageProcessor.applyNeuralDenoise). Reset systématique à chaque photo
         // (removeNeuralDenoise) AVANT de positionner le flag "pending" de la
@@ -1194,7 +1249,12 @@ if (fileInfo && (fileInfo.make || fileInfo.model || fileInfo.iso)) {
                     // Samsung/Sony/Nikon ont chacun un "18-55mm f/3.5-5.6"). Sans
                     // filtrer par fabricant d'abord, la recherche peut se tromper de
                     // marque — voir LensDatabaseParser.findLensProfile.
-                    make: fileInfo.make
+                    make: fileInfo.make,
+                    // 🔹 Résolution native réelle (EXIF, voir main.js "read-file-direct")
+                    // — utilisée UNIQUEMENT pour le pourcentage de zoom affiché
+                    // (DisplayCanvas.setTrueImageResolution()), jamais pour le rendu.
+                    trueWidth: fileInfo.trueWidth,
+                    trueHeight: fileInfo.trueHeight
                 }
             );
 
@@ -2489,6 +2549,10 @@ function initButtons() {
 
     if (typeof window.renderMonochromePanel === "function") {
         window.renderMonochromePanel();
+    }
+
+    if (typeof window.renderPresetsPanel === "function") {
+        window.renderPresetsPanel();
     }
 
     ensureStudioNavigationArrows();

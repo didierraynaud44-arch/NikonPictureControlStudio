@@ -163,8 +163,13 @@
 
         <!-- Colonne Droite : Réglages Picture Control + Masques + Rotation -->
         <aside class="sidebar-panel">
+            <!-- Panneau Préréglages complets (Picture Control + Monochrome + Simulation
+                 Pellicule en une seule "recette", voir components/presetsPanel.js) —
+                 tout en haut, avant même Orientation & Rotation. -->
+            <div id="presetsPanelStatus" class="card-panel" style="padding-top: 15px;"></div>
+
             <!-- Panneau Outils de Rotation & Miroir -->
-            <div class="panel-section card-panel" id="panel-rotation" style="padding-top: 15px;">
+            <div class="panel-section card-panel" id="panel-rotation" style="padding-top: 15px; margin-top: 20px; border-top: 2px solid #5865f2;">
                 <h3 style="font-size: 13px; color: #ccc; margin-bottom: 10px;">Orientation & Rotation</h3>
 
                 <!-- Boutons d'action rapide -->
@@ -501,6 +506,30 @@
         </div>
     </div>
 
+    <!-- MODALE ENREGISTRER UN PRÉRÉGLAGE (panneau Préréglages, voir components/presetsPanel.js) -->
+    <div id="savePresetModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center;">
+        <div style="position:relative; background:#202124; border:1px solid #3c4043; border-radius:8px; padding:20px; width:340px; color:#e8eaed;">
+            <button id="btnCloseSavePresetModal" style="position:absolute; top:12px; right:12px; background:transparent; border:none; color:#aaa; font-size:16px; cursor:pointer;" title="Fermer" data-icon="x"></button>
+            <h3 style="margin-top:0; color:#5865f2; font-size:16px;">Enregistrer le préréglage actuel</h3>
+            <div style="margin-bottom:10px;">
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">Nom :</label>
+                <input type="text" id="savePresetName" placeholder="Ex. Reportage N&amp;B" style="width:100%; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px; box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:8px;">
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">Catégorie :</label>
+                <select id="savePresetCategory" style="width:100%; background:#171717; border:1px solid #444; color:#fff; padding:6px; border-radius:4px; font-size:12px;">
+                    <option value="bw">Noir &amp; Blanc</option>
+                    <option value="color">Couleur</option>
+                </select>
+            </div>
+            <p id="savePresetError" style="display:none; color:#f28b82; font-size:11px; margin:6px 0 0;"></p>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                <button id="btnCancelSavePreset" style="background:transparent; border:1px solid #555; color:#fff; padding:6px 14px; border-radius:4px; cursor:pointer;">Annuler</button>
+                <button id="btnConfirmSavePreset" style="background:#5865f2; border:none; color:#fff; padding:6px 16px; border-radius:4px; cursor:pointer; font-weight:bold;">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+
     <!-- MODALE AIDE (menu "Aide" de la barre du haut, voir main.js "menu-open-help" /
          renderer/app.js initHelpModal). Deux onglets, même style de tab que la
          modale Paramètres (voir plus bas), classes .help-tab-btn/.help-tab-panel
@@ -728,6 +757,9 @@
     <script src="core/MonochromeManager.js"></script>
     <script src="components/MonochromeMaskCanvasController.js"></script>
     <script src="components/monochromePanel.js"></script>
+
+    <!-- Préréglages complets (Picture Control + Monochrome + Simulation Pellicule) -->
+    <script src="components/presetsPanel.js"></script>
 
 	<script src="components/PrintManager.js"></script>
     <script src="app.js"></script>
